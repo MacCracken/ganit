@@ -55,7 +55,7 @@ pub use transforms::{Transform2D, Transform3D};
 pub use glam::{Mat3, Mat4, Quat, Vec2, Vec3, Vec4};
 
 #[cfg(feature = "geo")]
-pub use geo::{Aabb, Plane, Ray, Sphere};
+pub use geo::{Aabb, Frustum, Line, Plane, Ray, Segment, Sphere, Triangle};
 
 #[cfg(feature = "ai")]
 pub use ai::DaimonClient;
@@ -82,6 +82,10 @@ mod assert_traits {
             _assert_send_sync::<super::Aabb>();
             _assert_send_sync::<super::Sphere>();
             _assert_send_sync::<super::Plane>();
+            _assert_send_sync::<super::Triangle>();
+            _assert_send_sync::<super::Line>();
+            _assert_send_sync::<super::Segment>();
+            _assert_send_sync::<super::Frustum>();
         }
     }
 }

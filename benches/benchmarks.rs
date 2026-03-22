@@ -293,6 +293,84 @@ fn bench_batch(c: &mut Criterion) {
     group.finish();
 }
 
+// ---------------------------------------------------------------------------
+// V0.2 types
+// ---------------------------------------------------------------------------
+
+fn bench_v02(c: &mut Criterion) {
+    let mut group = c.benchmark_group("v02");
+
+    group.bench_function("ray_triangle", |b| {
+        let ray = ganit::Ray::new(Vec3::new(0.0, 0.0, -10.0), Vec3::Z);
+        let tri = ganit::Triangle::new(
+            Vec3::new(-1.0, -1.0, 0.0),
+            Vec3::new(1.0, -1.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+        );
+        b.iter(|| ganit::geo::ray_triangle(black_box(&ray), black_box(&tri)))
+    });
+
+    group.bench_function("aabb_aabb_overlap", |b| {
+        let a = ganit::Aabb::new(Vec3::ZERO, Vec3::ONE);
+        let bb = ganit::Aabb::new(Vec3::splat(0.5), Vec3::splat(1.5));
+        b.iter(|| ganit::geo::aabb_aabb(black_box(&a), black_box(&bb)))
+    });
+
+    group.bench_function("sphere_sphere_overlap", |b| {
+        let a = ganit::Sphere::new(Vec3::ZERO, 1.0);
+        let bb = ganit::Sphere::new(Vec3::new(1.5, 0.0, 0.0), 1.0);
+        b.iter(|| ganit::geo::sphere_sphere(black_box(&a), black_box(&bb)))
+    });
+
+    group.bench_function("frustum_contains_point", |b| {
+        let proj = ganit::transforms::projection_perspective(
+            std::f32::consts::FRAC_PI_4, 1.0, 0.1, 100.0,
+        );
+        let frustum = ganit::Frustum::from_view_projection(proj);
+        let point = Vec3::new(0.0, 0.0, -10.0);
+        b.iter(|| frustum.contains_point(black_box(point)))
+    });
+
+    group.bench_function("frustum_contains_aabb", |b| {
+        let proj = ganit::transforms::projection_perspective(
+            std::f32::consts::FRAC_PI_4, 1.0, 0.1, 100.0,
+        );
+        let frustum = ganit::Frustum::from_view_projection(proj);
+        let bb = ganit::Aabb::new(Vec3::new(-1.0, -1.0, -5.0), Vec3::new(1.0, 1.0, -3.0));
+        b.iter(|| frustum.contains_aabb(black_box(&bb)))
+    });
+
+    group.bench_function("slerp", |b| {
+        let a = Quat::IDENTITY;
+        let bb = Quat::from_rotation_y(std::f32::consts::FRAC_PI_2);
+        b.iter(|| ganit::transforms::slerp(black_box(a), black_box(bb), black_box(0.5)))
+    });
+
+    group.bench_function("transform3d_lerp", |b| {
+        let a = Transform3D::new(Vec3::ZERO, Quat::IDENTITY, Vec3::ONE);
+        let bb = Transform3D::new(
+            Vec3::new(10.0, 0.0, 0.0),
+            Quat::from_rotation_y(1.0),
+            Vec3::splat(2.0),
+        );
+        b.iter(|| ganit::transforms::transform3d_lerp(black_box(&a), black_box(&bb), black_box(0.5)))
+    });
+
+    group.bench_function("closest_on_aabb", |b| {
+        let bb = ganit::Aabb::new(Vec3::ZERO, Vec3::ONE);
+        let point = Vec3::new(5.0, 0.5, -3.0);
+        b.iter(|| ganit::geo::closest_point_on_aabb(black_box(&bb), black_box(point)))
+    });
+
+    group.bench_function("segment_closest_point", |b| {
+        let seg = ganit::Segment::new(Vec3::ZERO, Vec3::new(10.0, 0.0, 0.0));
+        let point = Vec3::new(5.0, 3.0, 0.0);
+        b.iter(|| seg.closest_point(black_box(point)))
+    });
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_transforms,
@@ -300,5 +378,6 @@ criterion_group!(
     bench_calc,
     bench_num,
     bench_batch,
+    bench_v02,
 );
 criterion_main!(benches);

@@ -1,8 +1,10 @@
 //! Integration tests exercising cross-module usage.
 
-use ganit::geo::{ray_aabb, ray_plane, ray_sphere};
-use ganit::transforms::{lerp_vec3, Transform3D};
-use ganit::{Aabb, GanitError, Plane, Quat, Ray, Sphere, Vec3};
+use ganit::geo::{
+    aabb_aabb, closest_point_on_aabb, ray_aabb, ray_plane, ray_sphere, ray_triangle, sphere_sphere,
+};
+use ganit::transforms::{lerp_vec3, transform3d_lerp, Transform3D};
+use ganit::{Aabb, Frustum, GanitError, Plane, Quat, Ray, Segment, Sphere, Triangle, Vec3};
 
 const EPSILON: f32 = 1e-4;
 
@@ -78,4 +80,74 @@ fn error_types_unified() {
         GanitError::InvalidInput(msg) => assert!(msg.contains("opposite signs")),
         other => panic!("unexpected error: {other}"),
     }
+}
+
+// --- V0.2 integration tests ---
+
+#[test]
+fn ray_triangle_through_transformed_mesh() {
+    // Place a triangle via transform, then ray-test it
+    let t = Transform3D::new(Vec3::new(0.0, 0.0, 10.0), Quat::IDENTITY, Vec3::ONE);
+    let tri = Triangle::new(
+        t.apply_to_point(Vec3::new(-1.0, -1.0, 0.0)),
+        t.apply_to_point(Vec3::new(1.0, -1.0, 0.0)),
+        t.apply_to_point(Vec3::new(0.0, 1.0, 0.0)),
+    );
+    let ray = Ray::new(Vec3::ZERO, Vec3::Z);
+    let hit = ray_triangle(&ray, &tri).unwrap();
+    assert!(approx_eq(hit, 10.0));
+}
+
+#[test]
+fn frustum_culling_with_aabb() {
+    // Build a frustum and test AABBs at various positions
+    let proj = ganit::transforms::projection_perspective(
+        std::f32::consts::FRAC_PI_4, 1.0, 0.1, 100.0,
+    );
+    let frustum = Frustum::from_view_projection(proj);
+
+    // AABB in front of camera — should be visible
+    let visible = Aabb::new(Vec3::new(-0.5, -0.5, -5.0), Vec3::new(0.5, 0.5, -3.0));
+    assert!(frustum.contains_aabb(&visible));
+
+    // AABB behind camera — should be culled
+    let behind = Aabb::new(Vec3::new(-0.5, -0.5, 1.0), Vec3::new(0.5, 0.5, 3.0));
+    assert!(!frustum.contains_aabb(&behind));
+}
+
+#[test]
+fn broadphase_then_narrowphase() {
+    // Use AABB overlap as broadphase, then sphere-sphere as narrowphase
+    let a_aabb = Aabb::new(Vec3::ZERO, Vec3::splat(2.0));
+    let b_aabb = Aabb::new(Vec3::splat(1.0), Vec3::splat(3.0));
+    assert!(aabb_aabb(&a_aabb, &b_aabb)); // Broadphase pass
+
+    let a_sphere = Sphere::new(Vec3::ONE, 1.0);
+    let b_sphere = Sphere::new(Vec3::splat(2.0), 1.0);
+    assert!(sphere_sphere(&a_sphere, &b_sphere)); // Narrowphase pass
+}
+
+#[test]
+fn interpolated_transform_ray_test() {
+    // Interpolate between two transforms, cast ray at interpolated sphere
+    let a = Transform3D::new(Vec3::new(0.0, 0.0, -5.0), Quat::IDENTITY, Vec3::ONE);
+    let b = Transform3D::new(Vec3::new(0.0, 0.0, -15.0), Quat::IDENTITY, Vec3::ONE);
+    let mid = transform3d_lerp(&a, &b, 0.5);
+
+    let sphere = Sphere::new(mid.position, 1.0);
+    let ray = Ray::new(Vec3::ZERO, Vec3::new(0.0, 0.0, -1.0));
+    let hit = ray_sphere(&ray, &sphere).unwrap();
+    assert!(approx_eq(hit, 9.0)); // z=-10 center, radius 1 -> hit at z=-9 -> t=9
+}
+
+#[test]
+fn segment_closest_to_aabb_corner() {
+    let seg = Segment::new(Vec3::new(-5.0, 0.0, 0.0), Vec3::new(5.0, 0.0, 0.0));
+    let bb = Aabb::new(Vec3::new(3.0, 3.0, 0.0), Vec3::new(4.0, 4.0, 1.0));
+    // Closest point on segment to AABB corner (3,3,0)
+    let seg_pt = seg.closest_point(Vec3::new(3.0, 3.0, 0.0));
+    let aabb_pt = closest_point_on_aabb(&bb, seg_pt);
+    // seg_pt = (3,0,0), aabb_pt = (3,3,0), distance = 3
+    assert!(approx_eq(seg_pt.x, 3.0));
+    assert!(approx_eq((aabb_pt - seg_pt).length(), 3.0));
 }

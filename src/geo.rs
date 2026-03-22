@@ -199,6 +199,300 @@ pub fn ray_aabb(ray: &Ray, aabb: &Aabb) -> Option<f32> {
     }
 }
 
+// ---------------------------------------------------------------------------
+// V0.2 types
+// ---------------------------------------------------------------------------
+
+/// A triangle defined by three vertices.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Triangle {
+    pub vertices: [Vec3; 3],
+}
+
+impl Triangle {
+    pub fn new(a: Vec3, b: Vec3, c: Vec3) -> Self {
+        Self { vertices: [a, b, c] }
+    }
+
+    /// Face normal (not normalized). Returns the cross product of two edges.
+    #[inline]
+    pub fn normal(&self) -> Vec3 {
+        let edge1 = self.vertices[1] - self.vertices[0];
+        let edge2 = self.vertices[2] - self.vertices[0];
+        edge1.cross(edge2)
+    }
+
+    /// Area of the triangle.
+    #[inline]
+    pub fn area(&self) -> f32 {
+        self.normal().length() * 0.5
+    }
+
+    /// Centroid (average of the three vertices).
+    #[inline]
+    pub fn centroid(&self) -> Vec3 {
+        (self.vertices[0] + self.vertices[1] + self.vertices[2]) / 3.0
+    }
+}
+
+/// An infinite line defined by a point and a direction.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Line {
+    pub origin: Vec3,
+    /// Normalized direction.
+    pub direction: Vec3,
+}
+
+impl Line {
+    /// Create a new line. Direction is normalized automatically.
+    pub fn new(origin: Vec3, direction: Vec3) -> Self {
+        Self {
+            origin,
+            direction: direction.normalize(),
+        }
+    }
+
+    /// Closest point on this infinite line to the given point.
+    #[inline]
+    pub fn closest_point(&self, point: Vec3) -> Vec3 {
+        let v = point - self.origin;
+        let t = v.dot(self.direction);
+        self.origin + self.direction * t
+    }
+
+    /// Distance from a point to this line.
+    #[inline]
+    pub fn distance_to_point(&self, point: Vec3) -> f32 {
+        (point - self.closest_point(point)).length()
+    }
+}
+
+/// A line segment defined by start and end points.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Segment {
+    pub start: Vec3,
+    pub end: Vec3,
+}
+
+impl Segment {
+    pub fn new(start: Vec3, end: Vec3) -> Self {
+        Self { start, end }
+    }
+
+    /// Length of the segment.
+    #[inline]
+    pub fn length(&self) -> f32 {
+        (self.end - self.start).length()
+    }
+
+    /// Midpoint of the segment.
+    #[inline]
+    pub fn midpoint(&self) -> Vec3 {
+        (self.start + self.end) * 0.5
+    }
+
+    /// Normalized direction from start to end.
+    #[inline]
+    pub fn direction(&self) -> Vec3 {
+        (self.end - self.start).normalize()
+    }
+
+    /// Closest point on this segment to the given point.
+    #[inline]
+    pub fn closest_point(&self, point: Vec3) -> Vec3 {
+        let ab = self.end - self.start;
+        let len_sq = ab.dot(ab);
+        if len_sq < 1e-12 {
+            return self.start; // Degenerate segment
+        }
+        let t = ((point - self.start).dot(ab) / len_sq).clamp(0.0, 1.0);
+        self.start + ab * t
+    }
+
+    /// Distance from a point to this segment.
+    #[inline]
+    pub fn distance_to_point(&self, point: Vec3) -> f32 {
+        (point - self.closest_point(point)).length()
+    }
+}
+
+/// A view frustum defined by six planes (near, far, left, right, top, bottom).
+///
+/// The planes' normals point **inward** — a point is inside the frustum if it is
+/// on the positive side of all six planes.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Frustum {
+    pub planes: [Plane; 6],
+}
+
+impl Frustum {
+    /// Extract frustum planes from a view-projection matrix.
+    ///
+    /// Uses the Gribb/Hartmann method. Planes are normalized.
+    pub fn from_view_projection(vp: glam::Mat4) -> Self {
+        let r = vp.to_cols_array_2d();
+        // Row-based extraction (transposed column-major)
+        let row = |i: usize| -> [f32; 4] {
+            [r[0][i], r[1][i], r[2][i], r[3][i]]
+        };
+        let r0 = row(0);
+        let r1 = row(1);
+        let r2 = row(2);
+        let r3 = row(3);
+
+        let make_plane = |a: f32, b: f32, c: f32, d: f32| -> Plane {
+            let len = (a * a + b * b + c * c).sqrt();
+            Plane {
+                normal: Vec3::new(a / len, b / len, c / len),
+                distance: -d / len,
+            }
+        };
+
+        let planes = [
+            // Near:   row3 + row2
+            make_plane(r3[0] + r2[0], r3[1] + r2[1], r3[2] + r2[2], r3[3] + r2[3]),
+            // Far:    row3 - row2
+            make_plane(r3[0] - r2[0], r3[1] - r2[1], r3[2] - r2[2], r3[3] - r2[3]),
+            // Left:   row3 + row0
+            make_plane(r3[0] + r0[0], r3[1] + r0[1], r3[2] + r0[2], r3[3] + r0[3]),
+            // Right:  row3 - row0
+            make_plane(r3[0] - r0[0], r3[1] - r0[1], r3[2] - r0[2], r3[3] - r0[3]),
+            // Top:    row3 - row1
+            make_plane(r3[0] - r1[0], r3[1] - r1[1], r3[2] - r1[2], r3[3] - r1[3]),
+            // Bottom: row3 + row1
+            make_plane(r3[0] + r1[0], r3[1] + r1[1], r3[2] + r1[2], r3[3] + r1[3]),
+        ];
+
+        Self { planes }
+    }
+
+    /// Check whether a point is inside the frustum.
+    #[inline]
+    pub fn contains_point(&self, point: Vec3) -> bool {
+        self.planes.iter().all(|p| p.signed_distance(point) >= 0.0)
+    }
+
+    /// Conservative check whether an AABB intersects the frustum.
+    ///
+    /// Returns `false` only if the AABB is fully outside at least one plane.
+    #[inline]
+    pub fn contains_aabb(&self, aabb: &Aabb) -> bool {
+        for plane in &self.planes {
+            // Find the corner most aligned with the plane normal (P-vertex)
+            let p = Vec3::new(
+                if plane.normal.x >= 0.0 { aabb.max.x } else { aabb.min.x },
+                if plane.normal.y >= 0.0 { aabb.max.y } else { aabb.min.y },
+                if plane.normal.z >= 0.0 { aabb.max.z } else { aabb.min.z },
+            );
+            if plane.signed_distance(p) < 0.0 {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+// ---------------------------------------------------------------------------
+// V0.2 intersection / overlap functions
+// ---------------------------------------------------------------------------
+
+/// Ray-triangle intersection using the Möller–Trumbore algorithm.
+///
+/// Returns the `t` parameter if the ray hits the triangle (only `t >= 0`).
+#[inline]
+pub fn ray_triangle(ray: &Ray, tri: &Triangle) -> Option<f32> {
+    let edge1 = tri.vertices[1] - tri.vertices[0];
+    let edge2 = tri.vertices[2] - tri.vertices[0];
+    let h = ray.direction.cross(edge2);
+    let a = edge1.dot(h);
+
+    if a.abs() < 1e-8 {
+        return None; // Ray parallel to triangle
+    }
+
+    let f = 1.0 / a;
+    let s = ray.origin - tri.vertices[0];
+    let u = f * s.dot(h);
+
+    if !(0.0..=1.0).contains(&u) {
+        return None;
+    }
+
+    let q = s.cross(edge1);
+    let v = f * ray.direction.dot(q);
+
+    if v < 0.0 || u + v > 1.0 {
+        return None;
+    }
+
+    let t = f * edge2.dot(q);
+    if t >= 0.0 { Some(t) } else { None }
+}
+
+/// Check whether two AABBs overlap.
+#[inline]
+pub fn aabb_aabb(a: &Aabb, b: &Aabb) -> bool {
+    a.min.cmple(b.max).all() && b.min.cmple(a.max).all()
+}
+
+/// Check whether two spheres overlap.
+#[inline]
+pub fn sphere_sphere(a: &Sphere, b: &Sphere) -> bool {
+    let r = a.radius + b.radius;
+    (a.center - b.center).length_squared() <= r * r
+}
+
+/// Intersection of two planes. Returns the line of intersection, or `None` if parallel.
+pub fn plane_plane(a: &Plane, b: &Plane) -> Option<Line> {
+    let dir = a.normal.cross(b.normal);
+    let len_sq = dir.dot(dir);
+    if len_sq < 1e-12 {
+        return None; // Planes are parallel
+    }
+    // Find a point on the intersection line
+    let point = (dir.cross(b.normal) * a.distance + a.normal.cross(dir) * b.distance) / len_sq;
+    Some(Line {
+        origin: point,
+        direction: dir.normalize(),
+    })
+}
+
+// ---------------------------------------------------------------------------
+// V0.2 closest-point functions
+// ---------------------------------------------------------------------------
+
+/// Closest point on a ray to a given point (clamped to `t >= 0`).
+#[inline]
+pub fn closest_point_on_ray(ray: &Ray, point: Vec3) -> Vec3 {
+    let t = (point - ray.origin).dot(ray.direction).max(0.0);
+    ray.origin + ray.direction * t
+}
+
+/// Closest point on a plane to a given point.
+#[inline]
+pub fn closest_point_on_plane(plane: &Plane, point: Vec3) -> Vec3 {
+    point - plane.normal * plane.signed_distance(point)
+}
+
+/// Closest point on a sphere's surface to a given point.
+///
+/// If the point is at the sphere's center, returns the point offset by the radius along +X.
+#[inline]
+pub fn closest_point_on_sphere(sphere: &Sphere, point: Vec3) -> Vec3 {
+    let dir = point - sphere.center;
+    let len = dir.length();
+    if len < 1e-8 {
+        return sphere.center + Vec3::new(sphere.radius, 0.0, 0.0);
+    }
+    sphere.center + dir * (sphere.radius / len)
+}
+
+/// Closest point on an AABB's surface or interior to a given point.
+#[inline]
+pub fn closest_point_on_aabb(aabb: &Aabb, point: Vec3) -> Vec3 {
+    point.clamp(aabb.min, aabb.max)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -207,6 +501,10 @@ mod tests {
 
     fn approx_eq(a: f32, b: f32) -> bool {
         (a - b).abs() < EPSILON
+    }
+
+    fn vec3_approx_eq(a: Vec3, b: Vec3) -> bool {
+        approx_eq(a.x, b.x) && approx_eq(a.y, b.y) && approx_eq(a.z, b.z)
     }
 
     #[test]
@@ -541,5 +839,330 @@ mod tests {
         assert!(p.signed_distance(Vec3::new(0.0, 10.0, 0.0)) > 0.0);
         assert!(p.signed_distance(Vec3::new(0.0, 0.0, 0.0)) < 0.0);
         assert!(approx_eq(p.signed_distance(Vec3::new(0.0, 5.0, 0.0)), 0.0));
+    }
+
+    // -----------------------------------------------------------------------
+    // V0.2 tests
+    // -----------------------------------------------------------------------
+
+    // Triangle tests
+    #[test]
+    fn triangle_normal() {
+        let tri = Triangle::new(Vec3::ZERO, Vec3::X, Vec3::Y);
+        let n = tri.normal();
+        assert!(approx_eq(n.z, 1.0)); // CCW in XY plane -> +Z
+    }
+
+    #[test]
+    fn triangle_area() {
+        let tri = Triangle::new(Vec3::ZERO, Vec3::new(2.0, 0.0, 0.0), Vec3::new(0.0, 2.0, 0.0));
+        assert!(approx_eq(tri.area(), 2.0));
+    }
+
+    #[test]
+    fn triangle_centroid() {
+        let tri = Triangle::new(Vec3::ZERO, Vec3::new(3.0, 0.0, 0.0), Vec3::new(0.0, 3.0, 0.0));
+        assert!(vec3_approx_eq(tri.centroid(), Vec3::new(1.0, 1.0, 0.0)));
+    }
+
+    #[test]
+    fn triangle_degenerate_area() {
+        // Collinear points -> zero area
+        let tri = Triangle::new(Vec3::ZERO, Vec3::X, Vec3::new(2.0, 0.0, 0.0));
+        assert!(approx_eq(tri.area(), 0.0));
+    }
+
+    // Line tests
+    #[test]
+    fn line_closest_point() {
+        let l = Line::new(Vec3::ZERO, Vec3::X);
+        let p = Vec3::new(5.0, 3.0, 0.0);
+        let cp = l.closest_point(p);
+        assert!(vec3_approx_eq(cp, Vec3::new(5.0, 0.0, 0.0)));
+    }
+
+    #[test]
+    fn line_distance_to_point() {
+        let l = Line::new(Vec3::ZERO, Vec3::X);
+        let d = l.distance_to_point(Vec3::new(5.0, 3.0, 4.0));
+        assert!(approx_eq(d, 5.0)); // sqrt(9+16) = 5
+    }
+
+    #[test]
+    fn line_closest_point_behind_origin() {
+        // Line is infinite — should work for negative t
+        let l = Line::new(Vec3::ZERO, Vec3::X);
+        let cp = l.closest_point(Vec3::new(-10.0, 1.0, 0.0));
+        assert!(vec3_approx_eq(cp, Vec3::new(-10.0, 0.0, 0.0)));
+    }
+
+    // Segment tests
+    #[test]
+    fn segment_length_and_midpoint() {
+        let s = Segment::new(Vec3::ZERO, Vec3::new(4.0, 0.0, 0.0));
+        assert!(approx_eq(s.length(), 4.0));
+        assert!(vec3_approx_eq(s.midpoint(), Vec3::new(2.0, 0.0, 0.0)));
+    }
+
+    #[test]
+    fn segment_closest_point_clamped() {
+        let s = Segment::new(Vec3::ZERO, Vec3::new(10.0, 0.0, 0.0));
+        // Point past the end
+        assert!(vec3_approx_eq(s.closest_point(Vec3::new(20.0, 0.0, 0.0)), Vec3::new(10.0, 0.0, 0.0)));
+        // Point before the start
+        assert!(vec3_approx_eq(s.closest_point(Vec3::new(-5.0, 0.0, 0.0)), Vec3::ZERO));
+        // Point alongside
+        assert!(vec3_approx_eq(s.closest_point(Vec3::new(5.0, 3.0, 0.0)), Vec3::new(5.0, 0.0, 0.0)));
+    }
+
+    #[test]
+    fn segment_distance() {
+        let s = Segment::new(Vec3::ZERO, Vec3::new(10.0, 0.0, 0.0));
+        assert!(approx_eq(s.distance_to_point(Vec3::new(5.0, 3.0, 0.0)), 3.0));
+    }
+
+    #[test]
+    fn segment_direction_normalized() {
+        let s = Segment::new(Vec3::ZERO, Vec3::new(0.0, 0.0, 10.0));
+        assert!(vec3_approx_eq(s.direction(), Vec3::Z));
+    }
+
+    // Ray-triangle tests
+    #[test]
+    fn ray_triangle_hit() {
+        let tri = Triangle::new(
+            Vec3::new(-1.0, -1.0, 5.0),
+            Vec3::new(1.0, -1.0, 5.0),
+            Vec3::new(0.0, 1.0, 5.0),
+        );
+        let r = Ray::new(Vec3::ZERO, Vec3::Z);
+        let t = ray_triangle(&r, &tri).unwrap();
+        assert!(approx_eq(t, 5.0));
+    }
+
+    #[test]
+    fn ray_triangle_miss() {
+        let tri = Triangle::new(
+            Vec3::new(-1.0, -1.0, 5.0),
+            Vec3::new(1.0, -1.0, 5.0),
+            Vec3::new(0.0, 1.0, 5.0),
+        );
+        let r = Ray::new(Vec3::new(10.0, 10.0, 0.0), Vec3::Z);
+        assert!(ray_triangle(&r, &tri).is_none());
+    }
+
+    #[test]
+    fn ray_triangle_parallel() {
+        // Ray parallel to triangle plane
+        let tri = Triangle::new(Vec3::ZERO, Vec3::X, Vec3::Y);
+        let r = Ray::new(Vec3::new(0.0, 0.0, 1.0), Vec3::X);
+        assert!(ray_triangle(&r, &tri).is_none());
+    }
+
+    #[test]
+    fn ray_triangle_behind() {
+        let tri = Triangle::new(
+            Vec3::new(-1.0, -1.0, -5.0),
+            Vec3::new(1.0, -1.0, -5.0),
+            Vec3::new(0.0, 1.0, -5.0),
+        );
+        let r = Ray::new(Vec3::ZERO, Vec3::Z); // Points away from triangle
+        assert!(ray_triangle(&r, &tri).is_none());
+    }
+
+    // AABB-AABB overlap tests
+    #[test]
+    fn aabb_aabb_overlap() {
+        let a = Aabb::new(Vec3::ZERO, Vec3::ONE);
+        let b = Aabb::new(Vec3::splat(0.5), Vec3::splat(1.5));
+        assert!(aabb_aabb(&a, &b));
+    }
+
+    #[test]
+    fn aabb_aabb_no_overlap() {
+        let a = Aabb::new(Vec3::ZERO, Vec3::ONE);
+        let b = Aabb::new(Vec3::splat(2.0), Vec3::splat(3.0));
+        assert!(!aabb_aabb(&a, &b));
+    }
+
+    #[test]
+    fn aabb_aabb_touching() {
+        let a = Aabb::new(Vec3::ZERO, Vec3::ONE);
+        let b = Aabb::new(Vec3::new(1.0, 0.0, 0.0), Vec3::new(2.0, 1.0, 1.0));
+        assert!(aabb_aabb(&a, &b)); // Touching edge = overlap
+    }
+
+    #[test]
+    fn aabb_aabb_contained() {
+        let a = Aabb::new(Vec3::ZERO, Vec3::splat(10.0));
+        let b = Aabb::new(Vec3::ONE, Vec3::splat(2.0));
+        assert!(aabb_aabb(&a, &b));
+    }
+
+    // Sphere-sphere overlap tests
+    #[test]
+    fn sphere_sphere_overlap() {
+        let a = Sphere::new(Vec3::ZERO, 1.0);
+        let b = Sphere::new(Vec3::new(1.5, 0.0, 0.0), 1.0);
+        assert!(sphere_sphere(&a, &b));
+    }
+
+    #[test]
+    fn sphere_sphere_no_overlap() {
+        let a = Sphere::new(Vec3::ZERO, 1.0);
+        let b = Sphere::new(Vec3::new(3.0, 0.0, 0.0), 1.0);
+        assert!(!sphere_sphere(&a, &b));
+    }
+
+    #[test]
+    fn sphere_sphere_touching() {
+        let a = Sphere::new(Vec3::ZERO, 1.0);
+        let b = Sphere::new(Vec3::new(2.0, 0.0, 0.0), 1.0);
+        assert!(sphere_sphere(&a, &b)); // Touching = overlap
+    }
+
+    // Plane-plane intersection tests
+    #[test]
+    fn plane_plane_intersection() {
+        let a = Plane::from_point_normal(Vec3::ZERO, Vec3::Y);
+        let b = Plane::from_point_normal(Vec3::ZERO, Vec3::X);
+        let line = plane_plane(&a, &b).unwrap();
+        // Intersection should be along Z axis
+        assert!(approx_eq(line.direction.z.abs(), 1.0));
+    }
+
+    #[test]
+    fn plane_plane_parallel() {
+        let a = Plane::from_point_normal(Vec3::ZERO, Vec3::Y);
+        let b = Plane::from_point_normal(Vec3::new(0.0, 5.0, 0.0), Vec3::Y);
+        assert!(plane_plane(&a, &b).is_none());
+    }
+
+    // Closest-point tests
+    #[test]
+    fn closest_on_ray_forward() {
+        let r = Ray::new(Vec3::ZERO, Vec3::X);
+        let cp = closest_point_on_ray(&r, Vec3::new(5.0, 3.0, 0.0));
+        assert!(vec3_approx_eq(cp, Vec3::new(5.0, 0.0, 0.0)));
+    }
+
+    #[test]
+    fn closest_on_ray_clamped() {
+        // Point behind the ray — should clamp to origin
+        let r = Ray::new(Vec3::ZERO, Vec3::X);
+        let cp = closest_point_on_ray(&r, Vec3::new(-5.0, 3.0, 0.0));
+        assert!(vec3_approx_eq(cp, Vec3::ZERO));
+    }
+
+    #[test]
+    fn closest_on_plane() {
+        let p = Plane::from_point_normal(Vec3::ZERO, Vec3::Y);
+        let cp = closest_point_on_plane(&p, Vec3::new(3.0, 7.0, -2.0));
+        assert!(vec3_approx_eq(cp, Vec3::new(3.0, 0.0, -2.0)));
+    }
+
+    #[test]
+    fn closest_on_sphere_outside() {
+        let s = Sphere::new(Vec3::ZERO, 1.0);
+        let cp = closest_point_on_sphere(&s, Vec3::new(10.0, 0.0, 0.0));
+        assert!(vec3_approx_eq(cp, Vec3::new(1.0, 0.0, 0.0)));
+    }
+
+    #[test]
+    fn closest_on_sphere_inside() {
+        let s = Sphere::new(Vec3::ZERO, 10.0);
+        let cp = closest_point_on_sphere(&s, Vec3::new(1.0, 0.0, 0.0));
+        assert!(vec3_approx_eq(cp, Vec3::new(10.0, 0.0, 0.0)));
+    }
+
+    #[test]
+    fn closest_on_sphere_at_center() {
+        let s = Sphere::new(Vec3::ZERO, 5.0);
+        let cp = closest_point_on_sphere(&s, Vec3::ZERO);
+        assert!(vec3_approx_eq(cp, Vec3::new(5.0, 0.0, 0.0)));
+    }
+
+    #[test]
+    fn closest_on_aabb_inside() {
+        let bb = Aabb::new(Vec3::ZERO, Vec3::splat(10.0));
+        let cp = closest_point_on_aabb(&bb, Vec3::new(5.0, 5.0, 5.0));
+        assert!(vec3_approx_eq(cp, Vec3::new(5.0, 5.0, 5.0)));
+    }
+
+    #[test]
+    fn closest_on_aabb_outside() {
+        let bb = Aabb::new(Vec3::ZERO, Vec3::ONE);
+        let cp = closest_point_on_aabb(&bb, Vec3::new(5.0, 0.5, -3.0));
+        assert!(vec3_approx_eq(cp, Vec3::new(1.0, 0.5, 0.0)));
+    }
+
+    // Frustum tests
+    #[test]
+    fn frustum_contains_origin() {
+        use crate::transforms::projection_perspective;
+        let proj = projection_perspective(std::f32::consts::FRAC_PI_4, 1.0, 0.1, 100.0);
+        let frustum = Frustum::from_view_projection(proj);
+        // Point at center of near plane should be inside
+        assert!(frustum.contains_point(Vec3::new(0.0, 0.0, -1.0)));
+    }
+
+    #[test]
+    fn frustum_rejects_behind_camera() {
+        use crate::transforms::projection_perspective;
+        let proj = projection_perspective(std::f32::consts::FRAC_PI_4, 1.0, 0.1, 100.0);
+        let frustum = Frustum::from_view_projection(proj);
+        // Point behind camera should be outside
+        assert!(!frustum.contains_point(Vec3::new(0.0, 0.0, 1.0)));
+    }
+
+    #[test]
+    fn frustum_rejects_far_point() {
+        use crate::transforms::projection_perspective;
+        let proj = projection_perspective(std::f32::consts::FRAC_PI_4, 1.0, 0.1, 100.0);
+        let frustum = Frustum::from_view_projection(proj);
+        assert!(!frustum.contains_point(Vec3::new(0.0, 0.0, -200.0)));
+    }
+
+    #[test]
+    fn frustum_contains_aabb_inside() {
+        use crate::transforms::projection_perspective;
+        let proj = projection_perspective(std::f32::consts::FRAC_PI_4, 1.0, 0.1, 100.0);
+        let frustum = Frustum::from_view_projection(proj);
+        let bb = Aabb::new(Vec3::new(-0.1, -0.1, -2.0), Vec3::new(0.1, 0.1, -1.0));
+        assert!(frustum.contains_aabb(&bb));
+    }
+
+    #[test]
+    fn frustum_rejects_aabb_outside() {
+        use crate::transforms::projection_perspective;
+        let proj = projection_perspective(std::f32::consts::FRAC_PI_4, 1.0, 0.1, 100.0);
+        let frustum = Frustum::from_view_projection(proj);
+        let bb = Aabb::new(Vec3::splat(500.0), Vec3::splat(600.0));
+        assert!(!frustum.contains_aabb(&bb));
+    }
+
+    // Serde roundtrip for new types
+    #[test]
+    fn triangle_serde_roundtrip() {
+        let tri = Triangle::new(Vec3::ZERO, Vec3::X, Vec3::Y);
+        let json = serde_json::to_string(&tri).unwrap();
+        let tri2: Triangle = serde_json::from_str(&json).unwrap();
+        assert_eq!(tri, tri2);
+    }
+
+    #[test]
+    fn line_serde_roundtrip() {
+        let l = Line::new(Vec3::ZERO, Vec3::X);
+        let json = serde_json::to_string(&l).unwrap();
+        let l2: Line = serde_json::from_str(&json).unwrap();
+        assert_eq!(l, l2);
+    }
+
+    #[test]
+    fn segment_serde_roundtrip() {
+        let s = Segment::new(Vec3::ZERO, Vec3::ONE);
+        let json = serde_json::to_string(&s).unwrap();
+        let s2: Segment = serde_json::from_str(&json).unwrap();
+        assert_eq!(s, s2);
     }
 }

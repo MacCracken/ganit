@@ -60,22 +60,28 @@ Ganit owns **typed mathematical operations** — the programmatic math that engi
 - CI pipeline: fmt, clippy, test, security audit, supply chain, MSRV 1.89, coverage
 - Release pipeline: multi-platform build, crates.io publish, GitHub Release
 
-## V0.2 — Geometry Expansion
+## V0.2 — Geometry Expansion (done, 2026-03-22)
 
-### geo
-- Triangle primitive with ray-triangle intersection (Moller-Trumbore)
-- Line and Segment types
-- Plane-plane intersection (line)
-- AABB-AABB overlap test
+### geo (new types + ~50 tests)
+- Triangle primitive with `normal()`, `area()`, `centroid()`
+- Ray-triangle intersection (Möller–Trumbore algorithm)
+- Line type with `closest_point()`, `distance_to_point()`
+- Segment type with `length()`, `midpoint()`, `closest_point()`, `distance_to_point()`
+- Frustum (6 planes) from VP matrix with `contains_point()`, `contains_aabb()`
+- Plane-plane intersection → Line
+- AABB-AABB overlap test (SIMD via `cmple`)
 - Sphere-sphere overlap test
-- Closest point on ray/line/segment/plane/sphere
-- Frustum struct (6 planes) with contains_point(), contains_aabb()
-- Oriented Bounding Box (OBB)
+- Closest point on ray, plane, sphere, AABB
 
-### transforms
-- Dual quaternion support (for rigid body transforms)
-- Transform interpolation (slerp for rotation, lerp for position)
-- Coordinate system conversions (left-hand/right-hand)
+### transforms (~10 tests)
+- `slerp()` — quaternion spherical interpolation
+- `transform3d_lerp()` — interpolate position/scale (lerp) + rotation (slerp)
+- `Transform3D::inverse_matrix()` — inverse via Mat4
+- `flip_handedness_z()` — LH↔RH coordinate system conversion
+
+### Deferred to V0.2.1
+- Oriented Bounding Box (OBB)
+- Dual quaternion support
 
 ## V0.3 — Curves & Splines
 

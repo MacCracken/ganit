@@ -98,12 +98,55 @@ impl Transform3D {
     pub fn apply_to_point(&self, point: Vec3) -> Vec3 {
         self.rotation * (self.scale * point) + self.position
     }
+
+    /// Compute the inverse of this transform.
+    /// Compute the inverse 4x4 matrix of this transform.
+    ///
+    /// Use this to undo the transform: `t.inverse_matrix() * point4 ≈ original`.
+    /// For non-uniform scale with rotation, the SRT decomposition doesn't
+    /// round-trip cleanly, so we provide the inverse as a matrix directly.
+    #[inline]
+    pub fn inverse_matrix(&self) -> Mat4 {
+        self.to_matrix().inverse()
+    }
 }
 
 impl Default for Transform3D {
     fn default() -> Self {
         Self::IDENTITY
     }
+}
+
+/// Spherical linear interpolation between two quaternions.
+#[inline]
+pub fn slerp(a: Quat, b: Quat, t: f32) -> Quat {
+    a.slerp(b, t)
+}
+
+/// Interpolate between two 3D transforms.
+///
+/// Position and scale are linearly interpolated; rotation uses slerp.
+#[inline]
+pub fn transform3d_lerp(a: &Transform3D, b: &Transform3D, t: f32) -> Transform3D {
+    Transform3D {
+        position: lerp_vec3(a.position, b.position, t),
+        rotation: a.rotation.slerp(b.rotation, t),
+        scale: lerp_vec3(a.scale, b.scale, t),
+    }
+}
+
+/// Flip the handedness of a matrix by negating the Z column.
+///
+/// Converts between left-handed and right-handed coordinate systems.
+#[inline]
+pub fn flip_handedness_z(mat: Mat4) -> Mat4 {
+    let cols = mat.to_cols_array_2d();
+    Mat4::from_cols_array_2d(&[
+        cols[0],
+        cols[1],
+        [-cols[2][0], -cols[2][1], -cols[2][2], -cols[2][3]],
+        cols[3],
+    ])
 }
 
 /// Create an orthographic projection matrix (OpenGL convention, right-handed).
@@ -440,11 +483,111 @@ mod tests {
 
     #[test]
     fn transform3d_apply_combined_rotation_scale_translate() {
-        // Combined with all three components active
         let rot = Quat::from_rotation_z(FRAC_PI_2);
         let t = Transform3D::new(Vec3::new(10.0, 20.0, 30.0), rot, Vec3::new(2.0, 3.0, 4.0));
         let result = t.apply_to_point(Vec3::new(1.0, 0.0, 0.0));
-        // scale(1,0,0) by (2,3,4) => (2,0,0), rotate 90 around Z => (0,2,0), translate => (10,22,30)
         assert!(vec3_approx_eq(result, Vec3::new(10.0, 22.0, 30.0)));
+    }
+
+    // --- V0.2 tests ---
+
+    #[test]
+    fn transform3d_inverse_matrix_identity() {
+        let inv = Transform3D::IDENTITY.inverse_matrix();
+        assert_eq!(inv, Mat4::IDENTITY);
+    }
+
+    #[test]
+    fn transform3d_inverse_matrix_roundtrip() {
+        let t = Transform3D::new(
+            Vec3::new(3.0, -5.0, 7.0),
+            Quat::from_rotation_y(1.2),
+            Vec3::new(2.0, 0.5, 3.0),
+        );
+        let inv = t.inverse_matrix();
+        let p = glam::Vec4::new(1.0, 2.0, 3.0, 1.0);
+        let q = t.to_matrix() * p;
+        let result = inv * q;
+        assert!(approx_eq(result.x, p.x));
+        assert!(approx_eq(result.y, p.y));
+        assert!(approx_eq(result.z, p.z));
+    }
+
+    #[test]
+    fn transform3d_inverse_matrix_translation_only() {
+        let t = Transform3D::new(Vec3::new(10.0, 20.0, 30.0), Quat::IDENTITY, Vec3::ONE);
+        let inv = t.inverse_matrix();
+        let p = glam::Vec4::new(0.0, 0.0, 0.0, 1.0);
+        let result = inv * (t.to_matrix() * p);
+        assert!(approx_eq(result.x, 0.0));
+        assert!(approx_eq(result.y, 0.0));
+        assert!(approx_eq(result.z, 0.0));
+    }
+
+    #[test]
+    fn slerp_endpoints() {
+        let a = Quat::IDENTITY;
+        let b = Quat::from_rotation_y(FRAC_PI_2);
+        let at_0 = slerp(a, b, 0.0);
+        let at_1 = slerp(a, b, 1.0);
+        assert!(approx_eq(at_0.x, a.x) && approx_eq(at_0.w, a.w));
+        assert!(approx_eq(at_1.x, b.x) && approx_eq(at_1.w, b.w));
+    }
+
+    #[test]
+    fn slerp_midpoint() {
+        let a = Quat::IDENTITY;
+        let b = Quat::from_rotation_y(FRAC_PI_2);
+        let mid = slerp(a, b, 0.5);
+        // Midpoint should be a 45-degree rotation
+        let expected = Quat::from_rotation_y(FRAC_PI_4);
+        assert!(approx_eq(mid.x, expected.x));
+        assert!(approx_eq(mid.y, expected.y));
+        assert!(approx_eq(mid.z, expected.z));
+        assert!(approx_eq(mid.w, expected.w));
+    }
+
+    #[test]
+    fn transform3d_lerp_endpoints() {
+        let a = Transform3D::new(Vec3::ZERO, Quat::IDENTITY, Vec3::ONE);
+        let b = Transform3D::new(Vec3::new(10.0, 0.0, 0.0), Quat::from_rotation_y(FRAC_PI_2), Vec3::splat(2.0));
+        let at_0 = transform3d_lerp(&a, &b, 0.0);
+        let at_1 = transform3d_lerp(&a, &b, 1.0);
+        assert!(vec3_approx_eq(at_0.position, a.position));
+        assert!(vec3_approx_eq(at_0.scale, a.scale));
+        assert!(vec3_approx_eq(at_1.position, b.position));
+        assert!(vec3_approx_eq(at_1.scale, b.scale));
+    }
+
+    #[test]
+    fn transform3d_lerp_midpoint() {
+        let a = Transform3D::new(Vec3::ZERO, Quat::IDENTITY, Vec3::ONE);
+        let b = Transform3D::new(Vec3::new(10.0, 0.0, 0.0), Quat::IDENTITY, Vec3::splat(3.0));
+        let mid = transform3d_lerp(&a, &b, 0.5);
+        assert!(vec3_approx_eq(mid.position, Vec3::new(5.0, 0.0, 0.0)));
+        assert!(vec3_approx_eq(mid.scale, Vec3::splat(2.0)));
+    }
+
+    #[test]
+    fn flip_handedness_z_double_flip() {
+        let m = projection_perspective(FRAC_PI_4, 1.0, 0.1, 100.0);
+        let flipped = flip_handedness_z(m);
+        let restored = flip_handedness_z(flipped);
+        // Double flip should restore original
+        let a = m.to_cols_array();
+        let b = restored.to_cols_array();
+        for i in 0..16 {
+            assert!(approx_eq(a[i], b[i]));
+        }
+    }
+
+    #[test]
+    fn flip_handedness_z_negates_z_column() {
+        let m = Mat4::IDENTITY;
+        let f = flip_handedness_z(m);
+        let cols = f.to_cols_array_2d();
+        assert!(approx_eq(cols[2][2], -1.0));
+        assert!(approx_eq(cols[0][0], 1.0)); // X unchanged
+        assert!(approx_eq(cols[1][1], 1.0)); // Y unchanged
     }
 }
