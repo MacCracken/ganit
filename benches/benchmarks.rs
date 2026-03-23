@@ -620,6 +620,96 @@ fn bench_v04c(c: &mut Criterion) {
     group.finish();
 }
 
+// ---------------------------------------------------------------------------
+// V0.5a spatial indexes
+// ---------------------------------------------------------------------------
+
+fn bench_v05a(c: &mut Criterion) {
+    let mut group = c.benchmark_group("v05a");
+
+    group.bench_function("bvh_build_100", |b| {
+        b.iter(|| {
+            let mut items: Vec<(ganit::Aabb, usize)> = (0..100)
+                .map(|i| {
+                    let x = (i % 10) as f32;
+                    let y = (i / 10) as f32;
+                    (ganit::Aabb::new(Vec3::new(x, y, 0.0), Vec3::new(x + 0.5, y + 0.5, 0.5)), i)
+                })
+                .collect();
+            ganit::Bvh::build(black_box(&mut items))
+        })
+    });
+
+    group.bench_function("bvh_ray_query_100", |b| {
+        let mut items: Vec<(ganit::Aabb, usize)> = (0..100)
+            .map(|i| {
+                let x = (i % 10) as f32;
+                let y = (i / 10) as f32;
+                (ganit::Aabb::new(Vec3::new(x, y, 0.0), Vec3::new(x + 0.5, y + 0.5, 0.5)), i)
+            })
+            .collect();
+        let bvh = ganit::Bvh::build(&mut items);
+        let ray = ganit::Ray::new(Vec3::new(0.25, 0.25, -10.0), Vec3::Z);
+        b.iter(|| bvh.query_ray(black_box(&ray)))
+    });
+
+    group.bench_function("bvh_build_1000", |b| {
+        b.iter(|| {
+            let mut items: Vec<(ganit::Aabb, usize)> = (0..1000)
+                .map(|i| {
+                    let x = (i % 10) as f32 * 2.0;
+                    let y = ((i / 10) % 10) as f32 * 2.0;
+                    let z = (i / 100) as f32 * 2.0;
+                    (ganit::Aabb::new(Vec3::new(x, y, z), Vec3::new(x + 1.0, y + 1.0, z + 1.0)), i)
+                })
+                .collect();
+            ganit::Bvh::build(black_box(&mut items))
+        })
+    });
+
+    group.bench_function("kdtree_build_1000", |b| {
+        b.iter(|| {
+            let mut items: Vec<(Vec3, usize)> = (0..1000)
+                .map(|i| {
+                    let x = (i % 10) as f32;
+                    let y = ((i / 10) % 10) as f32;
+                    let z = (i / 100) as f32;
+                    (Vec3::new(x, y, z), i)
+                })
+                .collect();
+            ganit::KdTree::build(black_box(&mut items))
+        })
+    });
+
+    group.bench_function("kdtree_nearest_1000", |b| {
+        let mut items: Vec<(Vec3, usize)> = (0..1000)
+            .map(|i| {
+                let x = (i % 10) as f32;
+                let y = ((i / 10) % 10) as f32;
+                let z = (i / 100) as f32;
+                (Vec3::new(x, y, z), i)
+            })
+            .collect();
+        let tree = ganit::KdTree::build(&mut items);
+        b.iter(|| tree.nearest(black_box(Vec3::new(4.5, 4.5, 4.5))))
+    });
+
+    group.bench_function("kdtree_radius_1000", |b| {
+        let mut items: Vec<(Vec3, usize)> = (0..1000)
+            .map(|i| {
+                let x = (i % 10) as f32;
+                let y = ((i / 10) % 10) as f32;
+                let z = (i / 100) as f32;
+                (Vec3::new(x, y, z), i)
+            })
+            .collect();
+        let tree = ganit::KdTree::build(&mut items);
+        b.iter(|| tree.within_radius(black_box(Vec3::new(5.0, 5.0, 5.0)), black_box(2.0)))
+    });
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_transforms,
@@ -632,5 +722,6 @@ criterion_group!(
     bench_v04a,
     bench_v04b,
     bench_v04c,
+    bench_v05a,
 );
 criterion_main!(benches);

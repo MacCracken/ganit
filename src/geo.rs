@@ -503,6 +503,347 @@ pub fn closest_point_on_aabb(aabb: &Aabb, point: Vec3) -> Vec3 {
     point.clamp(aabb.min, aabb.max)
 }
 
+// ---------------------------------------------------------------------------
+// BVH (Bounding Volume Hierarchy)
+// ---------------------------------------------------------------------------
+
+/// A node in a BVH tree.
+#[derive(Debug, Clone)]
+enum BvhNode {
+    Leaf {
+        bounds: Aabb,
+        index: usize,
+    },
+    Internal {
+        bounds: Aabb,
+        left: Box<BvhNode>,
+        right: Box<BvhNode>,
+    },
+}
+
+/// A Bounding Volume Hierarchy for fast ray-AABB broadphase queries.
+///
+/// Stores a tree of AABBs built from a list of primitives. Each primitive
+/// is represented by its AABB and an index into the caller's primitive array.
+#[derive(Debug, Clone)]
+pub struct Bvh {
+    root: Option<BvhNode>,
+    len: usize,
+}
+
+impl Bvh {
+    /// Build a BVH from a list of (aabb, index) pairs using midpoint splitting.
+    pub fn build(items: &mut [(Aabb, usize)]) -> Self {
+        let len = items.len();
+        if items.is_empty() {
+            return Self { root: None, len: 0 };
+        }
+        let root = Self::build_recursive(items);
+        Self { root: Some(root), len }
+    }
+
+    fn build_recursive(items: &mut [(Aabb, usize)]) -> BvhNode {
+        if items.len() == 1 {
+            return BvhNode::Leaf {
+                bounds: items[0].0,
+                index: items[0].1,
+            };
+        }
+
+        // Compute bounding box of all items
+        let mut bounds = items[0].0;
+        for item in items.iter().skip(1) {
+            bounds = bounds.merge(&item.0);
+        }
+
+        // Split along the longest axis at the midpoint
+        let size = bounds.size();
+        let axis = if size.x >= size.y && size.x >= size.z {
+            0
+        } else if size.y >= size.z {
+            1
+        } else {
+            2
+        };
+
+        let mid = match axis {
+            0 => (bounds.min.x + bounds.max.x) * 0.5,
+            1 => (bounds.min.y + bounds.max.y) * 0.5,
+            _ => (bounds.min.z + bounds.max.z) * 0.5,
+        };
+
+        // Partition items around the midpoint
+        let center_axis = |aabb: &Aabb| -> f32 {
+            let c = aabb.center();
+            match axis {
+                0 => c.x,
+                1 => c.y,
+                _ => c.z,
+            }
+        };
+
+        items.sort_unstable_by(|a, b| {
+            center_axis(&a.0).partial_cmp(&center_axis(&b.0)).unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        // Find split point: first item whose center is >= midpoint
+        let mut split = items.partition_point(|item| center_axis(&item.0) < mid);
+        // Ensure at least one item on each side
+        if split == 0 {
+            split = 1;
+        } else if split == items.len() {
+            split = items.len() - 1;
+        }
+
+        let (left_items, right_items) = items.split_at_mut(split);
+        let left = Self::build_recursive(left_items);
+        let right = Self::build_recursive(right_items);
+
+        BvhNode::Internal {
+            bounds,
+            left: Box::new(left),
+            right: Box::new(right),
+        }
+    }
+
+    /// Number of primitives in the BVH.
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    /// Whether the BVH is empty.
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    /// Query all primitive indices whose AABBs are hit by the ray.
+    ///
+    /// Returns indices in no particular order. Use the indices to test
+    /// against the actual primitives for exact intersection.
+    pub fn query_ray(&self, ray: &Ray) -> Vec<usize> {
+        let mut results = Vec::new();
+        if let Some(ref root) = self.root {
+            Self::query_ray_recursive(root, ray, &mut results);
+        }
+        results
+    }
+
+    fn query_ray_recursive(node: &BvhNode, ray: &Ray, results: &mut Vec<usize>) {
+        match node {
+            BvhNode::Leaf { bounds, index } => {
+                if ray_aabb(ray, bounds).is_some() {
+                    results.push(*index);
+                }
+            }
+            BvhNode::Internal { bounds, left, right } => {
+                if ray_aabb(ray, bounds).is_some() {
+                    Self::query_ray_recursive(left, ray, results);
+                    Self::query_ray_recursive(right, ray, results);
+                }
+            }
+        }
+    }
+
+    /// Query all primitive indices whose AABBs overlap the given AABB.
+    pub fn query_aabb(&self, query: &Aabb) -> Vec<usize> {
+        let mut results = Vec::new();
+        if let Some(ref root) = self.root {
+            Self::query_aabb_recursive(root, query, &mut results);
+        }
+        results
+    }
+
+    fn query_aabb_recursive(node: &BvhNode, query: &Aabb, results: &mut Vec<usize>) {
+        match node {
+            BvhNode::Leaf { bounds, index } => {
+                if aabb_aabb(bounds, query) {
+                    results.push(*index);
+                }
+            }
+            BvhNode::Internal { bounds, left, right } => {
+                if aabb_aabb(bounds, query) {
+                    Self::query_aabb_recursive(left, query, results);
+                    Self::query_aabb_recursive(right, query, results);
+                }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// K-d tree
+// ---------------------------------------------------------------------------
+
+/// A node in a k-d tree.
+#[derive(Debug, Clone)]
+enum KdNode {
+    Leaf {
+        point: Vec3,
+        index: usize,
+    },
+    Split {
+        axis: usize,
+        split_val: f32,
+        left: Box<KdNode>,
+        right: Box<KdNode>,
+    },
+}
+
+/// A 3D k-d tree for nearest-neighbor point queries.
+#[derive(Debug, Clone)]
+pub struct KdTree {
+    root: Option<KdNode>,
+    len: usize,
+}
+
+impl KdTree {
+    /// Build a k-d tree from a list of (point, index) pairs.
+    pub fn build(items: &mut [(Vec3, usize)]) -> Self {
+        let len = items.len();
+        if items.is_empty() {
+            return Self { root: None, len: 0 };
+        }
+        let root = Self::build_recursive(items, 0);
+        Self { root: Some(root), len }
+    }
+
+    fn build_recursive(items: &mut [(Vec3, usize)], depth: usize) -> KdNode {
+        if items.len() == 1 {
+            return KdNode::Leaf {
+                point: items[0].0,
+                index: items[0].1,
+            };
+        }
+
+        let axis = depth % 3;
+        items.sort_unstable_by(|a, b| {
+            let va = [a.0.x, a.0.y, a.0.z][axis];
+            let vb = [b.0.x, b.0.y, b.0.z][axis];
+            va.partial_cmp(&vb).unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        let mid = items.len() / 2;
+        let split_val = [items[mid].0.x, items[mid].0.y, items[mid].0.z][axis];
+
+        let (left_items, right_items) = items.split_at_mut(mid);
+        let left = Self::build_recursive(left_items, depth + 1);
+        let right = Self::build_recursive(right_items, depth + 1);
+
+        KdNode::Split {
+            axis,
+            split_val,
+            left: Box::new(left),
+            right: Box::new(right),
+        }
+    }
+
+    /// Number of points in the tree.
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    /// Whether the tree is empty.
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    /// Find the nearest neighbor to `query`.
+    ///
+    /// Returns `(index, distance_squared)` of the closest point,
+    /// or `None` if the tree is empty.
+    pub fn nearest(&self, query: Vec3) -> Option<(usize, f32)> {
+        let mut best_idx = 0;
+        let mut best_dist_sq = f32::INFINITY;
+        if let Some(ref root) = self.root {
+            Self::nearest_recursive(root, query, &mut best_idx, &mut best_dist_sq);
+        }
+        if best_dist_sq.is_finite() {
+            Some((best_idx, best_dist_sq))
+        } else {
+            None
+        }
+    }
+
+    fn nearest_recursive(
+        node: &KdNode,
+        query: Vec3,
+        best_idx: &mut usize,
+        best_dist_sq: &mut f32,
+    ) {
+        match node {
+            KdNode::Leaf { point, index } => {
+                let dist_sq = (*point - query).length_squared();
+                if dist_sq < *best_dist_sq {
+                    *best_dist_sq = dist_sq;
+                    *best_idx = *index;
+                }
+            }
+            KdNode::Split { axis, split_val, left, right } => {
+                let query_val = [query.x, query.y, query.z][*axis];
+                let diff = query_val - split_val;
+
+                // Visit the closer side first
+                let (near, far) = if diff < 0.0 {
+                    (left.as_ref(), right.as_ref())
+                } else {
+                    (right.as_ref(), left.as_ref())
+                };
+
+                Self::nearest_recursive(near, query, best_idx, best_dist_sq);
+
+                // Only visit the far side if the splitting plane is closer than current best
+                if diff * diff < *best_dist_sq {
+                    Self::nearest_recursive(far, query, best_idx, best_dist_sq);
+                }
+            }
+        }
+    }
+
+    /// Find all points within `radius` of `query`.
+    ///
+    /// Returns a list of `(index, distance_squared)`.
+    pub fn within_radius(&self, query: Vec3, radius: f32) -> Vec<(usize, f32)> {
+        let mut results = Vec::new();
+        let radius_sq = radius * radius;
+        if let Some(ref root) = self.root {
+            Self::radius_recursive(root, query, radius_sq, &mut results);
+        }
+        results
+    }
+
+    fn radius_recursive(
+        node: &KdNode,
+        query: Vec3,
+        radius_sq: f32,
+        results: &mut Vec<(usize, f32)>,
+    ) {
+        match node {
+            KdNode::Leaf { point, index } => {
+                let dist_sq = (*point - query).length_squared();
+                if dist_sq <= radius_sq {
+                    results.push((*index, dist_sq));
+                }
+            }
+            KdNode::Split { axis, split_val, left, right } => {
+                let query_val = [query.x, query.y, query.z][*axis];
+                let diff = query_val - split_val;
+
+                let (near, far) = if diff < 0.0 {
+                    (left.as_ref(), right.as_ref())
+                } else {
+                    (right.as_ref(), left.as_ref())
+                };
+
+                Self::radius_recursive(near, query, radius_sq, results);
+
+                if diff * diff <= radius_sq {
+                    Self::radius_recursive(far, query, radius_sq, results);
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1291,5 +1632,176 @@ mod tests {
         let a = Sphere::new(Vec3::ZERO, 1.0);
         let b = Sphere::new(Vec3::ZERO, 0.5);
         assert!(sphere_sphere(&a, &b));
+    }
+
+    // --- V0.5a: BVH ---
+
+    #[test]
+    fn bvh_empty() {
+        let bvh = Bvh::build(&mut []);
+        assert!(bvh.is_empty());
+        assert_eq!(bvh.len(), 0);
+        let r = Ray::new(Vec3::ZERO, Vec3::X);
+        assert!(bvh.query_ray(&r).is_empty());
+    }
+
+    #[test]
+    fn bvh_single() {
+        let bb = Aabb::new(Vec3::new(-1.0, -1.0, -1.0), Vec3::ONE);
+        let mut items = [(bb, 42)];
+        let bvh = Bvh::build(&mut items);
+        assert_eq!(bvh.len(), 1);
+
+        let r = Ray::new(Vec3::new(0.0, 0.0, -5.0), Vec3::Z);
+        let hits = bvh.query_ray(&r);
+        assert_eq!(hits, vec![42]);
+    }
+
+    #[test]
+    fn bvh_ray_query_hits_and_misses() {
+        let mut items: Vec<(Aabb, usize)> = (0..10)
+            .map(|i| {
+                let x = i as f32 * 3.0;
+                (Aabb::new(Vec3::new(x, 0.0, 0.0), Vec3::new(x + 1.0, 1.0, 1.0)), i)
+            })
+            .collect();
+        let bvh = Bvh::build(&mut items);
+        assert_eq!(bvh.len(), 10);
+
+        // Ray hitting the first box
+        let r = Ray::new(Vec3::new(0.5, 0.5, -5.0), Vec3::Z);
+        let hits = bvh.query_ray(&r);
+        assert!(hits.contains(&0));
+        assert!(!hits.contains(&5));
+
+        // Ray missing everything (way above)
+        let r_miss = Ray::new(Vec3::new(0.5, 100.0, -5.0), Vec3::Z);
+        assert!(bvh.query_ray(&r_miss).is_empty());
+    }
+
+    #[test]
+    fn bvh_aabb_query() {
+        let mut items: Vec<(Aabb, usize)> = (0..5)
+            .map(|i| {
+                let x = i as f32 * 2.0;
+                (Aabb::new(Vec3::new(x, 0.0, 0.0), Vec3::new(x + 1.0, 1.0, 1.0)), i)
+            })
+            .collect();
+        let bvh = Bvh::build(&mut items);
+
+        // Query box overlapping first two items
+        let query = Aabb::new(Vec3::new(-0.5, 0.0, 0.0), Vec3::new(2.5, 1.0, 1.0));
+        let hits = bvh.query_aabb(&query);
+        assert!(hits.contains(&0));
+        assert!(hits.contains(&1));
+    }
+
+    #[test]
+    fn bvh_many_items() {
+        let mut items: Vec<(Aabb, usize)> = (0..100)
+            .map(|i| {
+                let x = (i % 10) as f32;
+                let y = (i / 10) as f32;
+                (Aabb::new(Vec3::new(x, y, 0.0), Vec3::new(x + 0.5, y + 0.5, 0.5)), i)
+            })
+            .collect();
+        let bvh = Bvh::build(&mut items);
+        assert_eq!(bvh.len(), 100);
+
+        let r = Ray::new(Vec3::new(0.25, 0.25, -10.0), Vec3::Z);
+        let hits = bvh.query_ray(&r);
+        assert!(!hits.is_empty());
+    }
+
+    // --- V0.5a: K-d tree ---
+
+    #[test]
+    fn kdtree_empty() {
+        let tree = KdTree::build(&mut []);
+        assert!(tree.is_empty());
+        assert!(tree.nearest(Vec3::ZERO).is_none());
+    }
+
+    #[test]
+    fn kdtree_single() {
+        let mut items = [(Vec3::new(5.0, 0.0, 0.0), 0)];
+        let tree = KdTree::build(&mut items);
+        let (idx, dist_sq) = tree.nearest(Vec3::ZERO).unwrap();
+        assert_eq!(idx, 0);
+        assert!(approx_eq(dist_sq, 25.0));
+    }
+
+    #[test]
+    fn kdtree_nearest_basic() {
+        let mut items: Vec<(Vec3, usize)> = vec![
+            (Vec3::new(0.0, 0.0, 0.0), 0),
+            (Vec3::new(10.0, 0.0, 0.0), 1),
+            (Vec3::new(5.0, 5.0, 0.0), 2),
+        ];
+        let tree = KdTree::build(&mut items);
+
+        let (idx, _) = tree.nearest(Vec3::new(0.1, 0.0, 0.0)).unwrap();
+        assert_eq!(idx, 0);
+
+        let (idx, _) = tree.nearest(Vec3::new(9.9, 0.0, 0.0)).unwrap();
+        assert_eq!(idx, 1);
+
+        let (idx, _) = tree.nearest(Vec3::new(5.0, 4.9, 0.0)).unwrap();
+        assert_eq!(idx, 2);
+    }
+
+    #[test]
+    fn kdtree_within_radius() {
+        let mut items: Vec<(Vec3, usize)> = (0..10)
+            .map(|i| (Vec3::new(i as f32, 0.0, 0.0), i))
+            .collect();
+        let tree = KdTree::build(&mut items);
+
+        let results = tree.within_radius(Vec3::new(5.0, 0.0, 0.0), 1.5);
+        let indices: Vec<usize> = results.iter().map(|&(idx, _)| idx).collect();
+        assert!(indices.contains(&4));
+        assert!(indices.contains(&5));
+        assert!(indices.contains(&6));
+        assert!(!indices.contains(&3));
+        assert!(!indices.contains(&7));
+    }
+
+    #[test]
+    fn kdtree_within_radius_empty() {
+        let mut items = [(Vec3::new(100.0, 100.0, 100.0), 0)];
+        let tree = KdTree::build(&mut items);
+        let results = tree.within_radius(Vec3::ZERO, 1.0);
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn kdtree_many_points() {
+        let mut items: Vec<(Vec3, usize)> = (0..1000)
+            .map(|i| {
+                let x = (i % 10) as f32;
+                let y = ((i / 10) % 10) as f32;
+                let z = (i / 100) as f32;
+                (Vec3::new(x, y, z), i)
+            })
+            .collect();
+        let tree = KdTree::build(&mut items);
+        assert_eq!(tree.len(), 1000);
+
+        // The point (0,0,0) should have index 0 as nearest
+        let (idx, dist_sq) = tree.nearest(Vec3::new(0.01, 0.01, 0.01)).unwrap();
+        assert_eq!(idx, 0);
+        assert!(dist_sq < 0.01);
+    }
+
+    #[test]
+    fn kdtree_nearest_exact_match() {
+        let mut items: Vec<(Vec3, usize)> = vec![
+            (Vec3::new(1.0, 2.0, 3.0), 7),
+            (Vec3::new(4.0, 5.0, 6.0), 8),
+        ];
+        let tree = KdTree::build(&mut items);
+        let (idx, dist_sq) = tree.nearest(Vec3::new(1.0, 2.0, 3.0)).unwrap();
+        assert_eq!(idx, 7);
+        assert!(approx_eq(dist_sq, 0.0));
     }
 }

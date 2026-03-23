@@ -119,13 +119,21 @@ Ganit owns **typed mathematical operations** — the programmatic math that engi
 - `rk4()` — classic fourth-order Runge-Kutta for ODE systems `dy/dt = f(t, y)`
 - `rk4_trajectory()` — same with full `Vec<(t, y)>` output for plotting/analysis
 
-## V0.5 — Spatial Structures
+## V0.5a — Spatial Indexes (done, 2026-03-23)
+
+### geo (~12 tests)
+- `Bvh` — Bounding Volume Hierarchy with midpoint splitting, `query_ray()`, `query_aabb()`
+- `KdTree` — 3D k-d tree with `nearest()`, `within_radius()`
+
+## V0.5b — Spatial Grids
 
 ### geo
-- BVH (Bounding Volume Hierarchy) construction and traversal
-- K-d tree for point queries
-- Grid-based spatial hashing
 - Octree (3D) / Quadtree (2D)
+- Grid-based spatial hashing
+
+## V0.5c — Collision
+
+### geo
 - Convex hull computation (2D and 3D)
 - GJK collision detection (convex-convex)
 - EPA penetration depth

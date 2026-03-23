@@ -55,7 +55,7 @@ pub use transforms::{Transform2D, Transform3D};
 pub use glam::{Mat3, Mat4, Quat, Vec2, Vec3, Vec4};
 
 #[cfg(feature = "geo")]
-pub use geo::{Aabb, Frustum, Line, Plane, Ray, Segment, Sphere, Triangle};
+pub use geo::{Aabb, Bvh, Frustum, KdTree, Line, Plane, Ray, Segment, Sphere, Triangle};
 
 #[cfg(feature = "num")]
 pub use num::Complex;
