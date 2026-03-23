@@ -1,7 +1,8 @@
-//! Numerical methods: root finding, linear solvers, and matrix decompositions.
+//! Numerical methods: root finding, linear solvers, decompositions, FFT, and ODE solvers.
 //!
 //! Provides Newton-Raphson, bisection, Gaussian elimination, LU/Cholesky/QR
-//! decompositions, and least-squares fitting.
+//! decompositions, least-squares fitting, eigenvalue computation (power iteration),
+//! Cooley-Tukey FFT/IFFT, and Runge-Kutta (RK4) ODE integration.
 
 use crate::GanitError;
 
@@ -676,6 +677,39 @@ pub fn ifft(data: &mut [Complex]) {
 // ODE solvers
 // ---------------------------------------------------------------------------
 
+/// Perform one RK4 step in-place, reusing scratch buffers.
+#[allow(clippy::needless_range_loop)]
+fn rk4_step(
+    f: &impl Fn(f64, &[f64]) -> Vec<f64>,
+    t: f64,
+    h: f64,
+    y: &mut [f64],
+    tmp: &mut [f64],
+    dim: usize,
+) {
+    let k1 = f(t, y);
+
+    for i in 0..dim {
+        tmp[i] = y[i] + 0.5 * h * k1[i];
+    }
+    let k2 = f(t + 0.5 * h, tmp);
+
+    for i in 0..dim {
+        tmp[i] = y[i] + 0.5 * h * k2[i];
+    }
+    let k3 = f(t + 0.5 * h, tmp);
+
+    for i in 0..dim {
+        tmp[i] = y[i] + h * k3[i];
+    }
+    let k4 = f(t + h, tmp);
+
+    let h6 = h / 6.0;
+    for i in 0..dim {
+        y[i] += h6 * (k1[i] + 2.0 * k2[i] + 2.0 * k3[i] + k4[i]);
+    }
+}
+
 /// Fourth-order Runge-Kutta (RK4) integrator for a system of ODEs.
 ///
 /// Solves `dy/dt = f(t, y)` from `t0` to `t_end` with `n` steps.
@@ -699,19 +733,10 @@ pub fn rk4(
     let h = (t_end - t0) / n as f64;
     let mut t = t0;
     let mut y = y0.to_vec();
+    let mut tmp = vec![0.0; dim];
 
     for _ in 0..n {
-        let k1 = f(t, &y);
-        let y_mid1: Vec<f64> = (0..dim).map(|i| y[i] + 0.5 * h * k1[i]).collect();
-        let k2 = f(t + 0.5 * h, &y_mid1);
-        let y_mid2: Vec<f64> = (0..dim).map(|i| y[i] + 0.5 * h * k2[i]).collect();
-        let k3 = f(t + 0.5 * h, &y_mid2);
-        let y_end: Vec<f64> = (0..dim).map(|i| y[i] + h * k3[i]).collect();
-        let k4 = f(t + h, &y_end);
-
-        for i in 0..dim {
-            y[i] += h / 6.0 * (k1[i] + 2.0 * k2[i] + 2.0 * k3[i] + k4[i]);
-        }
+        rk4_step(&f, t, h, &mut y, &mut tmp, dim);
         t += h;
     }
 
@@ -733,21 +758,12 @@ pub fn rk4_trajectory(
     let h = (t_end - t0) / n as f64;
     let mut t = t0;
     let mut y = y0.to_vec();
+    let mut tmp = vec![0.0; dim];
     let mut trajectory = Vec::with_capacity(n + 1);
     trajectory.push((t, y.clone()));
 
     for _ in 0..n {
-        let k1 = f(t, &y);
-        let y_mid1: Vec<f64> = (0..dim).map(|i| y[i] + 0.5 * h * k1[i]).collect();
-        let k2 = f(t + 0.5 * h, &y_mid1);
-        let y_mid2: Vec<f64> = (0..dim).map(|i| y[i] + 0.5 * h * k2[i]).collect();
-        let k3 = f(t + 0.5 * h, &y_mid2);
-        let y_end: Vec<f64> = (0..dim).map(|i| y[i] + h * k3[i]).collect();
-        let k4 = f(t + h, &y_end);
-
-        for i in 0..dim {
-            y[i] += h / 6.0 * (k1[i] + 2.0 * k2[i] + 2.0 * k3[i] + k4[i]);
-        }
+        rk4_step(&f, t, h, &mut y, &mut tmp, dim);
         t += h;
         trajectory.push((t, y.clone()));
     }

@@ -190,7 +190,7 @@ pub fn bspline_eval(degree: usize, control_points: &[Vec3], knots: &[f64], t: f6
         let mut v: Vec<Vec3> = (0..=degree)
             .map(|j| control_points[k - degree + j])
             .collect();
-        // SAFETY: we return from this branch, so the borrow is valid
+        // High-degree fallback: use heap allocation and return early
         return {
             for r in 1..=degree {
                 for j in (r..=degree).rev() {
@@ -231,6 +231,7 @@ pub fn bspline_eval(degree: usize, control_points: &[Vec3], knots: &[f64], t: f6
 /// Uses `n` linear segments to approximate. Higher `n` = more accurate.
 #[inline]
 pub fn bezier_cubic_3d_arc_length(p0: Vec3, p1: Vec3, p2: Vec3, p3: Vec3, n: usize) -> f32 {
+    assert!(n > 0, "n must be positive");
     let mut length = 0.0f32;
     let mut prev = p0;
     for i in 1..=n {

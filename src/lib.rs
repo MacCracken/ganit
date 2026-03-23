@@ -90,5 +90,10 @@ mod assert_traits {
             _assert_send_sync::<super::Segment>();
             _assert_send_sync::<super::Frustum>();
         }
+
+        #[cfg(feature = "num")]
+        {
+            _assert_send_sync::<super::Complex>();
+        }
     }
 }
