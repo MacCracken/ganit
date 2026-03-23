@@ -788,6 +788,74 @@ fn bench_v05b(c: &mut Criterion) {
     group.finish();
 }
 
+// ---------------------------------------------------------------------------
+// V0.5c collision
+// ---------------------------------------------------------------------------
+
+fn bench_v05c(c: &mut Criterion) {
+    let mut group = c.benchmark_group("v05c");
+
+    group.bench_function("convex_hull_100", |b| {
+        let pts: Vec<glam::Vec2> = (0..100)
+            .map(|i| {
+                let angle = i as f32 * std::f32::consts::TAU / 100.0;
+                glam::Vec2::new(angle.cos() * 10.0, angle.sin() * 10.0)
+            })
+            .collect();
+        b.iter(|| ganit::geo::convex_hull_2d(black_box(&pts)))
+    });
+
+    group.bench_function("gjk_intersect", |b| {
+        let a = ganit::ConvexPolygon::new(vec![
+            glam::Vec2::new(-1.0, -1.0),
+            glam::Vec2::new(1.0, -1.0),
+            glam::Vec2::new(1.0, 1.0),
+            glam::Vec2::new(-1.0, 1.0),
+        ]);
+        let bb = ganit::ConvexPolygon::new(vec![
+            glam::Vec2::new(0.5, -1.0),
+            glam::Vec2::new(2.5, -1.0),
+            glam::Vec2::new(2.5, 1.0),
+            glam::Vec2::new(0.5, 1.0),
+        ]);
+        b.iter(|| ganit::geo::gjk_intersect(black_box(&a), black_box(&bb)))
+    });
+
+    group.bench_function("gjk_no_intersect", |b| {
+        let a = ganit::ConvexPolygon::new(vec![
+            glam::Vec2::new(-1.0, -1.0),
+            glam::Vec2::new(1.0, -1.0),
+            glam::Vec2::new(1.0, 1.0),
+            glam::Vec2::new(-1.0, 1.0),
+        ]);
+        let bb = ganit::ConvexPolygon::new(vec![
+            glam::Vec2::new(5.0, -1.0),
+            glam::Vec2::new(7.0, -1.0),
+            glam::Vec2::new(7.0, 1.0),
+            glam::Vec2::new(5.0, 1.0),
+        ]);
+        b.iter(|| ganit::geo::gjk_intersect(black_box(&a), black_box(&bb)))
+    });
+
+    group.bench_function("gjk_epa_penetration", |b| {
+        let a = ganit::ConvexPolygon::new(vec![
+            glam::Vec2::new(-1.0, -1.0),
+            glam::Vec2::new(1.0, -1.0),
+            glam::Vec2::new(1.0, 1.0),
+            glam::Vec2::new(-1.0, 1.0),
+        ]);
+        let bb = ganit::ConvexPolygon::new(vec![
+            glam::Vec2::new(0.5, -1.0),
+            glam::Vec2::new(2.5, -1.0),
+            glam::Vec2::new(2.5, 1.0),
+            glam::Vec2::new(0.5, 1.0),
+        ]);
+        b.iter(|| ganit::geo::gjk_epa(black_box(&a), black_box(&bb)))
+    });
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_transforms,
@@ -802,5 +870,6 @@ criterion_group!(
     bench_v04c,
     bench_v05a,
     bench_v05b,
+    bench_v05c,
 );
 criterion_main!(benches);

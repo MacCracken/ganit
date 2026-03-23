@@ -133,12 +133,19 @@ Ganit owns **typed mathematical operations** — the programmatic math that engi
 - `Octree` — 3D spatial index with insert, `query_aabb()`
 - `SpatialHash` — uniform grid with `insert()`, `query_cell()`, `query_radius()`, `clear()`
 
-## V0.5c — Collision
+## V0.5c — Collision (done, 2026-03-23)
 
-### geo
-- Convex hull computation (2D and 3D)
-- GJK collision detection (convex-convex)
-- EPA penetration depth
+### geo (~14 tests)
+- `convex_hull_2d()` — Andrew's monotone chain, O(n log n)
+- `ConvexSupport` trait — support function for GJK/EPA
+- `ConvexPolygon` — convex shape with vertex-based support
+- `gjk_intersect()` — GJK collision test (2D convex-convex)
+- `epa_penetration()` — EPA penetration depth/normal from GJK simplex
+- `gjk_epa()` — combined GJK + EPA in one call
+
+### Deferred to post-V1
+- 3D convex hull (Quickhull)
+- 3D GJK/EPA
 
 ## V1.0 — Stable API
 

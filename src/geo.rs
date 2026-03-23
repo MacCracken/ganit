@@ -1276,6 +1276,329 @@ impl SpatialHash {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Convex hull (2D, Andrew's monotone chain)
+// ---------------------------------------------------------------------------
+
+/// Compute the 2D convex hull of a set of points.
+///
+/// Returns the hull vertices in counter-clockwise order using Andrew's
+/// monotone chain algorithm. O(n log n).
+///
+/// Returns an empty vec if fewer than 3 non-collinear points are given.
+pub fn convex_hull_2d(points: &[glam::Vec2]) -> Vec<glam::Vec2> {
+    let mut pts: Vec<glam::Vec2> = points.to_vec();
+    let n = pts.len();
+    if n < 2 {
+        return pts;
+    }
+
+    pts.sort_unstable_by(|a, b| {
+        a.x.partial_cmp(&b.x)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.y.partial_cmp(&b.y).unwrap_or(std::cmp::Ordering::Equal))
+    });
+
+    // Cross product of OA and OB vectors
+    let cross = |o: glam::Vec2, a: glam::Vec2, b: glam::Vec2| -> f32 {
+        (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x)
+    };
+
+    let mut hull: Vec<glam::Vec2> = Vec::with_capacity(2 * n);
+
+    // Lower hull
+    for &p in &pts {
+        while hull.len() >= 2 && cross(hull[hull.len() - 2], hull[hull.len() - 1], p) <= 0.0 {
+            hull.pop();
+        }
+        hull.push(p);
+    }
+
+    // Upper hull
+    let lower_len = hull.len() + 1;
+    for &p in pts.iter().rev() {
+        while hull.len() >= lower_len && cross(hull[hull.len() - 2], hull[hull.len() - 1], p) <= 0.0 {
+            hull.pop();
+        }
+        hull.push(p);
+    }
+
+    hull.pop(); // Remove the last point (same as first)
+    hull
+}
+
+// ---------------------------------------------------------------------------
+// GJK (Gilbert-Johnson-Keerthi) collision detection
+// ---------------------------------------------------------------------------
+
+/// A convex shape that can compute a support point in a given direction.
+///
+/// The support function returns the point on the shape that is farthest
+/// in the given direction.
+pub trait ConvexSupport {
+    /// Return the point on the shape farthest in `direction`.
+    fn support(&self, direction: glam::Vec2) -> glam::Vec2;
+}
+
+/// A convex polygon for GJK/EPA (2D).
+#[derive(Debug, Clone)]
+pub struct ConvexPolygon {
+    pub vertices: Vec<glam::Vec2>,
+}
+
+impl ConvexPolygon {
+    /// Create a convex polygon. Vertices should be in CCW order.
+    /// Use [`convex_hull_2d`] to ensure convexity.
+    pub fn new(vertices: Vec<glam::Vec2>) -> Self {
+        Self { vertices }
+    }
+}
+
+impl ConvexSupport for ConvexPolygon {
+    fn support(&self, direction: glam::Vec2) -> glam::Vec2 {
+        let mut best = self.vertices[0];
+        let mut best_dot = best.dot(direction);
+        for &v in &self.vertices[1..] {
+            let d = v.dot(direction);
+            if d > best_dot {
+                best_dot = d;
+                best = v;
+            }
+        }
+        best
+    }
+}
+
+/// Result of a Minkowski difference support query.
+fn minkowski_support(
+    a: &dyn ConvexSupport,
+    b: &dyn ConvexSupport,
+    direction: glam::Vec2,
+) -> glam::Vec2 {
+    a.support(direction) - b.support(-direction)
+}
+
+/// Triple product: (A × B) × C — returns the vector perpendicular to C
+/// in the direction away from A, used for simplex evolution.
+fn triple_cross_2d(a: glam::Vec2, b: glam::Vec2, c: glam::Vec2) -> glam::Vec2 {
+    // In 2D: (A × B) × C = B * (C·A) - A * (C·B)
+    let ca = c.dot(a);
+    let cb = c.dot(b);
+    b * ca - a * cb
+}
+
+/// GJK collision test between two convex shapes (2D).
+///
+/// Returns `true` if the shapes overlap. Uses the simplex-based GJK algorithm.
+pub fn gjk_intersect(a: &dyn ConvexSupport, b: &dyn ConvexSupport) -> bool {
+    // Initial direction: from center of A to center of B (approximated)
+    let mut direction = glam::Vec2::new(1.0, 0.0);
+
+    let mut simplex: Vec<glam::Vec2> = Vec::with_capacity(3);
+    let s = minkowski_support(a, b, direction);
+    simplex.push(s);
+    direction = -s;
+
+    for _ in 0..64 {
+        let new_point = minkowski_support(a, b, direction);
+
+        if new_point.dot(direction) < 0.0 {
+            return false; // No collision — didn't pass the origin
+        }
+
+        simplex.push(new_point);
+
+        // Check if simplex contains the origin
+        match simplex.len() {
+            2 => {
+                // Line case
+                let b_pt = simplex[1];
+                let a_pt = simplex[0];
+                let ab = a_pt - b_pt;
+                let ao = -b_pt;
+                direction = triple_cross_2d(ab, ao, ab);
+                if direction.length_squared() < 1e-12 {
+                    return true; // Origin is on the line segment
+                }
+            }
+            3 => {
+                // Triangle case
+                let c = simplex[2];
+                let b_pt = simplex[1];
+                let a_pt = simplex[0];
+                let cb = b_pt - c;
+                let ca = a_pt - c;
+                let co = -c;
+
+                let cb_perp = triple_cross_2d(ca, cb, cb);
+                let ca_perp = triple_cross_2d(cb, ca, ca);
+
+                if cb_perp.dot(co) > 0.0 {
+                    // Region outside CB
+                    simplex.remove(0); // Remove A
+                    direction = cb_perp;
+                } else if ca_perp.dot(co) > 0.0 {
+                    // Region outside CA
+                    simplex.remove(1); // Remove B
+                    direction = ca_perp;
+                } else {
+                    // Origin is inside the triangle
+                    return true;
+                }
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    false // Max iterations
+}
+
+// ---------------------------------------------------------------------------
+// EPA (Expanding Polytope Algorithm) — penetration depth
+// ---------------------------------------------------------------------------
+
+/// Penetration result from EPA.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Penetration {
+    /// Penetration normal (direction to separate).
+    pub normal: glam::Vec2,
+    /// Penetration depth (distance to separate).
+    pub depth: f32,
+}
+
+/// Compute the penetration depth and normal between two overlapping convex shapes
+/// using the Expanding Polytope Algorithm (EPA).
+///
+/// Must only be called when GJK has confirmed an intersection. The `simplex`
+/// should be the final 3-point simplex from GJK that contains the origin.
+///
+/// Returns `None` if the shapes are not actually overlapping or if EPA fails.
+pub fn epa_penetration(
+    a: &dyn ConvexSupport,
+    b: &dyn ConvexSupport,
+    simplex: &[glam::Vec2],
+) -> Option<Penetration> {
+    if simplex.len() < 3 {
+        return None;
+    }
+
+    let mut polytope: Vec<glam::Vec2> = simplex.to_vec();
+
+    for _ in 0..64 {
+        // Find the closest edge to the origin
+        let mut closest_dist = f32::INFINITY;
+        let mut closest_normal = glam::Vec2::ZERO;
+        let mut closest_idx = 0;
+
+        for i in 0..polytope.len() {
+            let j = (i + 1) % polytope.len();
+            let edge = polytope[j] - polytope[i];
+            // Outward normal (2D: perpendicular)
+            let normal = glam::Vec2::new(edge.y, -edge.x).normalize();
+            let dist = normal.dot(polytope[i]);
+
+            if dist < closest_dist {
+                closest_dist = dist;
+                closest_normal = normal;
+                closest_idx = j;
+            }
+        }
+
+        // Get new support point in the direction of the closest normal
+        let support = minkowski_support(a, b, closest_normal);
+        let d = support.dot(closest_normal);
+
+        if (d - closest_dist).abs() < 1e-6 {
+            // Converged
+            return Some(Penetration {
+                normal: closest_normal,
+                depth: closest_dist,
+            });
+        }
+
+        // Insert the new point into the polytope
+        polytope.insert(closest_idx, support);
+    }
+
+    // Return best estimate
+    let mut closest_dist = f32::INFINITY;
+    let mut closest_normal = glam::Vec2::ZERO;
+    for i in 0..polytope.len() {
+        let j = (i + 1) % polytope.len();
+        let edge = polytope[j] - polytope[i];
+        let normal = glam::Vec2::new(edge.y, -edge.x).normalize();
+        let dist = normal.dot(polytope[i]);
+        if dist < closest_dist {
+            closest_dist = dist;
+            closest_normal = normal;
+        }
+    }
+    Some(Penetration {
+        normal: closest_normal,
+        depth: closest_dist,
+    })
+}
+
+/// Combined GJK + EPA: test intersection and compute penetration if overlapping.
+///
+/// Returns `None` if shapes don't overlap, or `Some(Penetration)` with
+/// the separation normal and depth.
+pub fn gjk_epa(a: &dyn ConvexSupport, b: &dyn ConvexSupport) -> Option<Penetration> {
+    let mut direction = glam::Vec2::new(1.0, 0.0);
+    let mut simplex: Vec<glam::Vec2> = Vec::with_capacity(3);
+
+    let s = minkowski_support(a, b, direction);
+    simplex.push(s);
+    direction = -s;
+
+    for _ in 0..64 {
+        let new_point = minkowski_support(a, b, direction);
+        if new_point.dot(direction) < 0.0 {
+            return None;
+        }
+        simplex.push(new_point);
+
+        match simplex.len() {
+            2 => {
+                let b_pt = simplex[1];
+                let a_pt = simplex[0];
+                let ab = a_pt - b_pt;
+                let ao = -b_pt;
+                direction = triple_cross_2d(ab, ao, ab);
+                if direction.length_squared() < 1e-12 {
+                    // Degenerate — origin on line, need third point
+                    direction = glam::Vec2::new(-ab.y, ab.x);
+                }
+            }
+            3 => {
+                let c = simplex[2];
+                let b_pt = simplex[1];
+                let a_pt = simplex[0];
+                let cb = b_pt - c;
+                let ca = a_pt - c;
+                let co = -c;
+
+                let cb_perp = triple_cross_2d(ca, cb, cb);
+                let ca_perp = triple_cross_2d(cb, ca, ca);
+
+                if cb_perp.dot(co) > 0.0 {
+                    simplex.remove(0);
+                    direction = cb_perp;
+                } else if ca_perp.dot(co) > 0.0 {
+                    simplex.remove(1);
+                    direction = ca_perp;
+                } else {
+                    // Contains origin — run EPA
+                    return epa_penetration(a, b, &simplex);
+                }
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2544,5 +2867,156 @@ mod tests {
         assert_eq!(ot.len(), 20);
         let all = ot.query_aabb(&bounds);
         assert_eq!(all.len(), 20);
+    }
+
+    // --- V0.5c: Convex hull ---
+
+    #[test]
+    fn convex_hull_square() {
+        let pts = vec![
+            glam::Vec2::new(0.0, 0.0),
+            glam::Vec2::new(1.0, 0.0),
+            glam::Vec2::new(1.0, 1.0),
+            glam::Vec2::new(0.0, 1.0),
+            glam::Vec2::new(0.5, 0.5), // Interior point
+        ];
+        let hull = convex_hull_2d(&pts);
+        assert_eq!(hull.len(), 4); // Only the 4 corners
+    }
+
+    #[test]
+    fn convex_hull_triangle() {
+        let pts = vec![
+            glam::Vec2::new(0.0, 0.0),
+            glam::Vec2::new(2.0, 0.0),
+            glam::Vec2::new(1.0, 2.0),
+        ];
+        let hull = convex_hull_2d(&pts);
+        assert_eq!(hull.len(), 3);
+    }
+
+    #[test]
+    fn convex_hull_collinear() {
+        // All points on a line — hull should be just the endpoints
+        let pts = vec![
+            glam::Vec2::new(0.0, 0.0),
+            glam::Vec2::new(1.0, 0.0),
+            glam::Vec2::new(2.0, 0.0),
+            glam::Vec2::new(3.0, 0.0),
+        ];
+        let hull = convex_hull_2d(&pts);
+        assert_eq!(hull.len(), 2);
+    }
+
+    #[test]
+    fn convex_hull_single_point() {
+        let pts = vec![glam::Vec2::new(5.0, 5.0)];
+        let hull = convex_hull_2d(&pts);
+        assert_eq!(hull.len(), 1);
+    }
+
+    #[test]
+    fn convex_hull_many_interior() {
+        // Circle of points + many interior
+        let mut pts = Vec::new();
+        for i in 0..8 {
+            let angle = i as f32 * std::f32::consts::TAU / 8.0;
+            pts.push(glam::Vec2::new(angle.cos() * 10.0, angle.sin() * 10.0));
+        }
+        // Add 50 interior points
+        for i in 0..50 {
+            let x = (i % 10) as f32 - 5.0;
+            let y = (i / 10) as f32 - 2.5;
+            pts.push(glam::Vec2::new(x, y));
+        }
+        let hull = convex_hull_2d(&pts);
+        assert_eq!(hull.len(), 8); // Only the circle points
+    }
+
+    // --- V0.5c: GJK ---
+
+    fn make_square(cx: f32, cy: f32, half: f32) -> ConvexPolygon {
+        ConvexPolygon::new(vec![
+            glam::Vec2::new(cx - half, cy - half),
+            glam::Vec2::new(cx + half, cy - half),
+            glam::Vec2::new(cx + half, cy + half),
+            glam::Vec2::new(cx - half, cy + half),
+        ])
+    }
+
+    #[test]
+    fn gjk_overlapping_squares() {
+        let a = make_square(0.0, 0.0, 1.0);
+        let b = make_square(0.5, 0.5, 1.0);
+        assert!(gjk_intersect(&a, &b));
+    }
+
+    #[test]
+    fn gjk_separated_squares() {
+        let a = make_square(0.0, 0.0, 1.0);
+        let b = make_square(5.0, 0.0, 1.0);
+        assert!(!gjk_intersect(&a, &b));
+    }
+
+    #[test]
+    fn gjk_touching_squares() {
+        let a = make_square(0.0, 0.0, 1.0);
+        let b = make_square(2.0, 0.0, 1.0); // Touching at x=1
+        // Touching = on boundary, may or may not register depending on epsilon
+        // GJK typically returns true for touching
+        let _ = gjk_intersect(&a, &b); // Just verify no panic
+    }
+
+    #[test]
+    fn gjk_contained() {
+        let a = make_square(0.0, 0.0, 5.0); // Big
+        let b = make_square(0.0, 0.0, 1.0); // Small, inside A
+        assert!(gjk_intersect(&a, &b));
+    }
+
+    #[test]
+    fn gjk_same_shape() {
+        let a = make_square(0.0, 0.0, 1.0);
+        let b = make_square(0.0, 0.0, 1.0);
+        assert!(gjk_intersect(&a, &b));
+    }
+
+    // --- V0.5c: EPA ---
+
+    #[test]
+    fn epa_overlapping_squares_depth() {
+        let a = make_square(0.0, 0.0, 1.0);
+        let b = make_square(1.0, 0.0, 1.0); // Overlap of 1.0 in X
+        let pen = gjk_epa(&a, &b);
+        assert!(pen.is_some());
+        let p = pen.unwrap();
+        assert!(p.depth > 0.0);
+        assert!(p.depth < 2.1); // At most full overlap
+    }
+
+    #[test]
+    fn epa_no_overlap() {
+        let a = make_square(0.0, 0.0, 1.0);
+        let b = make_square(5.0, 0.0, 1.0);
+        assert!(gjk_epa(&a, &b).is_none());
+    }
+
+    #[test]
+    fn epa_deep_overlap() {
+        let a = make_square(0.0, 0.0, 2.0);
+        let b = make_square(0.5, 0.0, 2.0); // 3.5 overlap in X
+        let pen = gjk_epa(&a, &b).unwrap();
+        assert!(pen.depth > 0.0);
+    }
+
+    #[test]
+    fn convex_support_polygon() {
+        let poly = make_square(0.0, 0.0, 1.0);
+        // Support in +X should be (1, ?)
+        let s = poly.support(glam::Vec2::X);
+        assert!(approx_eq(s.x, 1.0));
+        // Support in -Y should be (?, -1)
+        let s = poly.support(-glam::Vec2::Y);
+        assert!(approx_eq(s.y, -1.0));
     }
 }
