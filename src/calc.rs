@@ -178,10 +178,34 @@ pub fn bspline_eval(degree: usize, control_points: &[Vec3], knots: &[f64], t: f6
         k += 1;
     }
 
-    // De Boor's algorithm
-    let mut d: Vec<Vec3> = (0..=degree)
-        .map(|j| control_points[k - degree + j])
-        .collect();
+    // De Boor's algorithm — stack buffer for degree <= 4, heap otherwise
+    let mut buf = [Vec3::ZERO; 5];
+    let d: &mut [Vec3] = if degree < 5 {
+        for j in 0..=degree {
+            buf[j] = control_points[k - degree + j];
+        }
+        &mut buf[..=degree]
+    } else {
+        // Fallback for high degree (rare)
+        let mut v: Vec<Vec3> = (0..=degree)
+            .map(|j| control_points[k - degree + j])
+            .collect();
+        // SAFETY: we return from this branch, so the borrow is valid
+        return {
+            for r in 1..=degree {
+                for j in (r..=degree).rev() {
+                    let i = k - degree + j;
+                    let denom = knots[i + degree + 1 - r] - knots[i];
+                    if denom.abs() < 1e-12 {
+                        continue;
+                    }
+                    let alpha = ((t - knots[i]) / denom) as f32;
+                    v[j] = v[j - 1] * (1.0 - alpha) + v[j] * alpha;
+                }
+            }
+            Some(v[degree])
+        };
+    };
 
     for r in 1..=degree {
         for j in (r..=degree).rev() {
@@ -221,8 +245,8 @@ pub fn bezier_cubic_3d_arc_length(p0: Vec3, p1: Vec3, p2: Vec3, p3: Vec3, n: usi
 /// Re-parameterize a cubic Bezier by arc length.
 ///
 /// Given a normalized distance `s` in [0, 1] (where 0 = start, 1 = end),
-/// returns the corresponding `t` parameter via binary search.
-/// `n` controls the accuracy of the arc-length estimation.
+/// returns the corresponding `t` parameter.
+/// `n` controls the accuracy (number of linear segments for the lookup table).
 pub fn bezier_cubic_3d_param_at_length(
     p0: Vec3,
     p1: Vec3,
@@ -237,22 +261,49 @@ pub fn bezier_cubic_3d_param_at_length(
     if s >= 1.0 {
         return 1.0;
     }
-    let total = bezier_cubic_3d_arc_length(p0, p1, p2, p3, n);
+    assert!(n > 0, "n must be positive");
+
+    // Build cumulative arc-length table (O(n))
+    let mut table = Vec::with_capacity(n + 1);
+    table.push(0.0f32);
+    let mut prev = p0;
+    for i in 1..=n {
+        let t = i as f32 / n as f32;
+        let curr = bezier_cubic_3d(p0, p1, p2, p3, t);
+        let seg = (curr - prev).length();
+        table.push(table[i - 1] + seg);
+        prev = curr;
+    }
+
+    let total = *table.last().unwrap();
     let target = s * total;
 
-    // Binary search for the t that gives the target arc length
-    let mut lo = 0.0f32;
-    let mut hi = 1.0f32;
-    for _ in 0..32 {
-        let mid = (lo + hi) * 0.5;
-        let len = bezier_cubic_3d_arc_length(p0, p1, p2, p3, (mid * n as f32) as usize);
-        if len < target {
-            lo = mid;
+    // Binary search the table for the segment containing the target length
+    let mut lo = 0usize;
+    let mut hi = n;
+    while lo < hi {
+        let mid = (lo + hi) / 2;
+        if table[mid] < target {
+            lo = mid + 1;
         } else {
             hi = mid;
         }
     }
-    (lo + hi) * 0.5
+
+    // Linearly interpolate within the segment
+    if lo == 0 {
+        return 0.0;
+    }
+    let seg_start = table[lo - 1];
+    let seg_end = table[lo];
+    let seg_len = seg_end - seg_start;
+    let frac = if seg_len > 1e-8 {
+        (target - seg_start) / seg_len
+    } else {
+        0.0
+    };
+
+    ((lo - 1) as f32 + frac) / n as f32
 }
 
 // ---------------------------------------------------------------------------
@@ -283,10 +334,11 @@ pub fn integral_gauss_legendre_5(f: impl Fn(f64) -> f64, a: f64, b: f64) -> f64 
 
     let half = (b - a) * 0.5;
     let mid = (a + b) * 0.5;
-    let mut sum = 0.0;
-    for i in 0..5 {
-        sum += WEIGHTS[i] * f(mid + half * NODES[i]);
-    }
+    let sum = WEIGHTS[0] * f(mid + half * NODES[0])
+        + WEIGHTS[1] * f(mid + half * NODES[1])
+        + WEIGHTS[2] * f(mid + half * NODES[2])
+        + WEIGHTS[3] * f(mid + half * NODES[3])
+        + WEIGHTS[4] * f(mid + half * NODES[4]);
     sum * half
 }
 
@@ -805,6 +857,77 @@ mod tests {
             let v = ease_out(t);
             assert!(v >= prev);
             prev = v;
+        }
+    }
+
+    // --- Audit tests ---
+
+    #[test]
+    fn param_at_length_endpoints() {
+        let p0 = Vec3::ZERO;
+        let p1 = Vec3::new(10.0 / 3.0, 0.0, 0.0);
+        let p2 = Vec3::new(20.0 / 3.0, 0.0, 0.0);
+        let p3 = Vec3::new(10.0, 0.0, 0.0);
+        assert!(approx_eq_f32(bezier_cubic_3d_param_at_length(p0, p1, p2, p3, 0.0, 100), 0.0));
+        assert!(approx_eq_f32(bezier_cubic_3d_param_at_length(p0, p1, p2, p3, 1.0, 100), 1.0));
+    }
+
+    #[test]
+    fn param_at_length_midpoint_straight_line() {
+        // Straight line: s=0.5 should give t≈0.5
+        let p0 = Vec3::ZERO;
+        let p1 = Vec3::new(10.0 / 3.0, 0.0, 0.0);
+        let p2 = Vec3::new(20.0 / 3.0, 0.0, 0.0);
+        let p3 = Vec3::new(10.0, 0.0, 0.0);
+        let t = bezier_cubic_3d_param_at_length(p0, p1, p2, p3, 0.5, 100);
+        assert!((t - 0.5).abs() < 0.02);
+    }
+
+    #[test]
+    fn gauss_legendre_5_high_degree_poly() {
+        // GL5 is exact for degree <= 9: test x^8
+        // ∫₀¹ x^8 dx = 1/9
+        let result = integral_gauss_legendre_5(|x| x.powi(8), 0.0, 1.0);
+        assert!((result - 1.0 / 9.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn bspline_quadratic() {
+        // Degree 2, 3 control points
+        let pts = [Vec3::ZERO, Vec3::new(1.0, 2.0, 0.0), Vec3::new(2.0, 0.0, 0.0)];
+        let knots = [0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+        let start = bspline_eval(2, &pts, &knots, 0.0).unwrap();
+        let end = bspline_eval(2, &pts, &knots, 1.0).unwrap();
+        assert!(vec3_approx_eq(start, pts[0]));
+        assert!(vec3_approx_eq(end, pts[2]));
+    }
+
+    #[test]
+    fn catmull_rom_quarter() {
+        let p0 = Vec3::ZERO;
+        let p1 = Vec3::new(1.0, 0.0, 0.0);
+        let p2 = Vec3::new(2.0, 0.0, 0.0);
+        let p3 = Vec3::new(3.0, 0.0, 0.0);
+        let q = catmull_rom(p0, p1, p2, p3, 0.25);
+        assert!(approx_eq_f32(q.x, 1.25));
+    }
+
+    #[test]
+    fn bezier_quadratic_3d_midpoint() {
+        let p0 = Vec3::ZERO;
+        let p1 = Vec3::new(0.5, 0.5, 0.5);
+        let p2 = Vec3::ONE;
+        let mid = bezier_quadratic_3d(p0, p1, p2, 0.5);
+        assert!(vec3_approx_eq(mid, Vec3::splat(0.5)));
+    }
+
+    #[test]
+    fn ease_in_out_smooth_c2_symmetry() {
+        // Smootherstep is symmetric: f(t) + f(1-t) = 1
+        for i in 0..=10 {
+            let t = i as f32 / 10.0;
+            let sum = ease_in_out_smooth(t) + ease_in_out_smooth(1.0 - t);
+            assert!(approx_eq_f32(sum, 1.0));
         }
     }
 }
