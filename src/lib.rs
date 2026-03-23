@@ -51,8 +51,13 @@ pub mod logging;
 #[cfg(feature = "transforms")]
 pub use transforms::{Transform2D, Transform3D};
 
+// f32 types
 #[cfg(feature = "transforms")]
 pub use glam::{Mat3, Mat4, Quat, Vec2, Vec3, Vec4};
+
+// f64 types
+#[cfg(feature = "transforms")]
+pub use glam::{DMat3, DMat4, DQuat, DVec2, DVec3, DVec4};
 
 #[cfg(feature = "geo")]
 pub use geo::{
