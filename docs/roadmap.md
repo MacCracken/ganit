@@ -113,10 +113,11 @@ Ganit owns **typed mathematical operations** — the programmatic math that engi
 - `fft()` — in-place Cooley-Tukey radix-2 FFT (bit-reversal + butterfly)
 - `ifft()` — inverse FFT via conjugate trick
 
-## V0.4c — ODE Solvers
+## V0.4c — ODE Solvers (done, 2026-03-23)
 
-### num
-- Runge-Kutta ODE solver (RK4)
+### num (~8 tests)
+- `rk4()` — classic fourth-order Runge-Kutta for ODE systems `dy/dt = f(t, y)`
+- `rk4_trajectory()` — same with full `Vec<(t, y)>` output for plotting/analysis
 
 ## V0.5 — Spatial Structures
 

@@ -672,6 +672,89 @@ pub fn ifft(data: &mut [Complex]) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// ODE solvers
+// ---------------------------------------------------------------------------
+
+/// Fourth-order Runge-Kutta (RK4) integrator for a system of ODEs.
+///
+/// Solves `dy/dt = f(t, y)` from `t0` to `t_end` with `n` steps.
+///
+/// - `f`: the derivative function `f(t, &y) -> dy/dt` (returns a Vec of same length as `y`).
+/// - `t0`: initial time.
+/// - `y0`: initial state vector.
+/// - `t_end`: final time.
+/// - `n`: number of integration steps.
+///
+/// Returns the final state vector `y(t_end)`.
+pub fn rk4(
+    f: impl Fn(f64, &[f64]) -> Vec<f64>,
+    t0: f64,
+    y0: &[f64],
+    t_end: f64,
+    n: usize,
+) -> Vec<f64> {
+    assert!(n > 0, "n must be positive");
+    let dim = y0.len();
+    let h = (t_end - t0) / n as f64;
+    let mut t = t0;
+    let mut y = y0.to_vec();
+
+    for _ in 0..n {
+        let k1 = f(t, &y);
+        let y_mid1: Vec<f64> = (0..dim).map(|i| y[i] + 0.5 * h * k1[i]).collect();
+        let k2 = f(t + 0.5 * h, &y_mid1);
+        let y_mid2: Vec<f64> = (0..dim).map(|i| y[i] + 0.5 * h * k2[i]).collect();
+        let k3 = f(t + 0.5 * h, &y_mid2);
+        let y_end: Vec<f64> = (0..dim).map(|i| y[i] + h * k3[i]).collect();
+        let k4 = f(t + h, &y_end);
+
+        for i in 0..dim {
+            y[i] += h / 6.0 * (k1[i] + 2.0 * k2[i] + 2.0 * k3[i] + k4[i]);
+        }
+        t += h;
+    }
+
+    y
+}
+
+/// Fourth-order Runge-Kutta with full trajectory output.
+///
+/// Same as [`rk4`] but returns all intermediate states as `Vec<(t, y)>`.
+pub fn rk4_trajectory(
+    f: impl Fn(f64, &[f64]) -> Vec<f64>,
+    t0: f64,
+    y0: &[f64],
+    t_end: f64,
+    n: usize,
+) -> Vec<(f64, Vec<f64>)> {
+    assert!(n > 0, "n must be positive");
+    let dim = y0.len();
+    let h = (t_end - t0) / n as f64;
+    let mut t = t0;
+    let mut y = y0.to_vec();
+    let mut trajectory = Vec::with_capacity(n + 1);
+    trajectory.push((t, y.clone()));
+
+    for _ in 0..n {
+        let k1 = f(t, &y);
+        let y_mid1: Vec<f64> = (0..dim).map(|i| y[i] + 0.5 * h * k1[i]).collect();
+        let k2 = f(t + 0.5 * h, &y_mid1);
+        let y_mid2: Vec<f64> = (0..dim).map(|i| y[i] + 0.5 * h * k2[i]).collect();
+        let k3 = f(t + 0.5 * h, &y_mid2);
+        let y_end: Vec<f64> = (0..dim).map(|i| y[i] + h * k3[i]).collect();
+        let k4 = f(t + h, &y_end);
+
+        for i in 0..dim {
+            y[i] += h / 6.0 * (k1[i] + 2.0 * k2[i] + 2.0 * k3[i] + k4[i]);
+        }
+        t += h;
+        trajectory.push((t, y.clone()));
+    }
+
+    trajectory
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1399,5 +1482,96 @@ mod tests {
     fn fft_non_power_of_two_panics() {
         let mut data = vec![Complex::default(); 3];
         fft(&mut data);
+    }
+
+    // --- V0.4c: RK4 ODE solver ---
+
+    #[test]
+    fn rk4_exponential_growth() {
+        // dy/dt = y, y(0) = 1 => y(t) = e^t
+        // At t=1, y should be e ≈ 2.71828
+        let y = rk4(|_t, y| vec![y[0]], 0.0, &[1.0], 1.0, 1000);
+        assert!((y[0] - std::f64::consts::E).abs() < 1e-8);
+    }
+
+    #[test]
+    fn rk4_linear_ode() {
+        // dy/dt = 2, y(0) = 0 => y(t) = 2t
+        // At t=5, y = 10
+        let y = rk4(|_t, _y| vec![2.0], 0.0, &[0.0], 5.0, 100);
+        assert!(approx_eq(y[0], 10.0));
+    }
+
+    #[test]
+    fn rk4_harmonic_oscillator() {
+        // x'' + x = 0 => system: dx/dt = v, dv/dt = -x
+        // x(0)=1, v(0)=0 => x(t) = cos(t), v(t) = -sin(t)
+        // At t=pi, x ≈ -1, v ≈ 0
+        let y = rk4(
+            |_t, y| vec![y[1], -y[0]],
+            0.0,
+            &[1.0, 0.0],
+            std::f64::consts::PI,
+            10000,
+        );
+        assert!((y[0] - (-1.0)).abs() < 1e-6); // x(pi) = cos(pi) = -1
+        assert!(y[1].abs() < 1e-6);              // v(pi) = -sin(pi) = 0
+    }
+
+    #[test]
+    fn rk4_quadratic_exact() {
+        // dy/dt = 2t, y(0) = 0 => y(t) = t^2
+        // RK4 is exact for polynomials up to degree 4
+        let y = rk4(|t, _y| vec![2.0 * t], 0.0, &[0.0], 3.0, 10);
+        assert!((y[0] - 9.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn rk4_system_2d() {
+        // dx/dt = -y, dy/dt = x (rotation)
+        // x(0)=1, y(0)=0 => x(t)=cos(t), y(t)=sin(t)
+        // At t=pi/2: x≈0, y≈1
+        let y = rk4(
+            |_t, y| vec![-y[1], y[0]],
+            0.0,
+            &[1.0, 0.0],
+            std::f64::consts::FRAC_PI_2,
+            1000,
+        );
+        assert!(y[0].abs() < 1e-6);
+        assert!((y[1] - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn rk4_trajectory_length() {
+        let traj = rk4_trajectory(|_t, y| vec![y[0]], 0.0, &[1.0], 1.0, 100);
+        assert_eq!(traj.len(), 101); // n+1 points
+        assert!(approx_eq(traj[0].0, 0.0));
+        assert!((traj[100].0 - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn rk4_trajectory_matches_final() {
+        // Trajectory endpoint should match rk4 result
+        let final_state = rk4(|_t, y| vec![y[0]], 0.0, &[1.0], 1.0, 100);
+        let traj = rk4_trajectory(|_t, y| vec![y[0]], 0.0, &[1.0], 1.0, 100);
+        let traj_final = &traj[100].1;
+        assert!((final_state[0] - traj_final[0]).abs() < 1e-12);
+    }
+
+    #[test]
+    fn rk4_damped_oscillator() {
+        // x'' + 0.1*x' + x = 0 (underdamped)
+        // System: dx/dt = v, dv/dt = -x - 0.1*v
+        // Should decay toward zero
+        let y = rk4(
+            |_t, y| vec![y[1], -y[0] - 0.1 * y[1]],
+            0.0,
+            &[1.0, 0.0],
+            20.0,
+            10000,
+        );
+        // After 20 seconds of damping, amplitude should be small
+        assert!(y[0].abs() < 0.5);
     }
 }

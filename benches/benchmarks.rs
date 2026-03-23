@@ -590,6 +590,36 @@ fn bench_v04b(c: &mut Criterion) {
     group.finish();
 }
 
+// ---------------------------------------------------------------------------
+// V0.4c ODE solvers
+// ---------------------------------------------------------------------------
+
+fn bench_v04c(c: &mut Criterion) {
+    let mut group = c.benchmark_group("v04c");
+
+    group.bench_function("rk4_exp_100_steps", |b| {
+        b.iter(|| ganit::num::rk4(|_t, y| vec![y[0]], 0.0, black_box(&[1.0]), 1.0, 100))
+    });
+
+    group.bench_function("rk4_exp_1000_steps", |b| {
+        b.iter(|| ganit::num::rk4(|_t, y| vec![y[0]], 0.0, black_box(&[1.0]), 1.0, 1000))
+    });
+
+    group.bench_function("rk4_oscillator_1000", |b| {
+        b.iter(|| {
+            ganit::num::rk4(
+                |_t, y| vec![y[1], -y[0]],
+                0.0,
+                black_box(&[1.0, 0.0]),
+                std::f64::consts::PI,
+                1000,
+            )
+        })
+    });
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_transforms,
@@ -601,5 +631,6 @@ criterion_group!(
     bench_v03,
     bench_v04a,
     bench_v04b,
+    bench_v04c,
 );
 criterion_main!(benches);
