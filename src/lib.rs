@@ -1,6 +1,6 @@
-//! # Ganit
+//! # Hisab
 //!
-//! गणित (Sanskrit: mathematics) — Higher mathematics library for the AGNOS ecosystem.
+//! حساب (Arabic: calculation, reckoning) — Higher mathematics library for the AGNOS ecosystem.
 //!
 //! Provides typed mathematical operations — linear algebra, geometry, calculus,
 //! and numerical methods — built on [glam](https://docs.rs/glam).
@@ -18,13 +18,13 @@
 //! | `full` | — | Enables all features |
 
 pub mod error;
-pub use error::GanitError;
+pub use error::HisabError;
 
 #[cfg(feature = "ai")]
 pub use error::DaimonError;
 
-/// Convenience alias for `Result<T, GanitError>`.
-pub type Result<T> = std::result::Result<T, GanitError>;
+/// Convenience alias for `Result<T, HisabError>`.
+pub type Result<T> = std::result::Result<T, HisabError>;
 
 #[cfg(feature = "transforms")]
 pub mod transforms;

@@ -1,6 +1,6 @@
-# Contributing to Ganit
+# Contributing to Hisab
 
-Thank you for your interest in contributing to Ganit.
+Thank you for your interest in contributing to Hisab.
 
 ## Development Workflow
 

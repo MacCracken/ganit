@@ -71,7 +71,7 @@ Initial release — 360 tests, 82 benchmarks.
 
 ### Infrastructure
 - Flat `src/` module structure with feature flags
-- Unified `GanitError` with `#[non_exhaustive]`, `DaimonError` (AI feature-gated)
+- Unified `HisabError` with `#[non_exhaustive]`, `DaimonError` (AI feature-gated)
 - 82 criterion benchmarks with CSV history tracking and 3-point trend markdown
 - CI: fmt, clippy, test, security audit, supply chain, MSRV 1.89, coverage
 - Release: multi-platform build, version verification, crates.io publish, GitHub Release

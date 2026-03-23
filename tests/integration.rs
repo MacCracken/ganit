@@ -1,10 +1,10 @@
 //! Integration tests exercising cross-module usage.
 
-use ganit::geo::{
+use hisab::geo::{
     aabb_aabb, closest_point_on_aabb, ray_aabb, ray_plane, ray_sphere, ray_triangle, sphere_sphere,
 };
-use ganit::transforms::{Transform3D, lerp_vec3, transform3d_lerp};
-use ganit::{Aabb, Frustum, GanitError, Plane, Quat, Ray, Segment, Sphere, Triangle, Vec3};
+use hisab::transforms::{Transform3D, lerp_vec3, transform3d_lerp};
+use hisab::{Aabb, Frustum, HisabError, Plane, Quat, Ray, Segment, Sphere, Triangle, Vec3};
 
 const EPSILON: f32 = 1e-4;
 
@@ -49,7 +49,7 @@ fn numerical_root_matches_geometry() {
     let geo_t = ray_plane(&ray, &plane).unwrap();
 
     // Numerical method: find t where ray.at(t).y - 7.0 = 0
-    let num_t = ganit::num::bisection(|t| t - 7.0, 0.0, 20.0, 1e-10, 100).unwrap();
+    let num_t = hisab::num::bisection(|t| t - 7.0, 0.0, 20.0, 1e-10, 100).unwrap();
 
     assert!((geo_t as f64 - num_t).abs() < 1e-4);
 }
@@ -60,24 +60,24 @@ fn calculus_and_numerical_consistency() {
     // f(x) = x^3, F(x) = x^4/4
     // ∫₁² 3x² dx = F(2) - F(1) = 4 - 0.25 = 3.75
     // But actually d/dx(x^3) = 3x^2, and ∫₁² 3x² dx = [x³]₁² = 8 - 1 = 7
-    let integral = ganit::calc::integral_simpson(|x| 3.0 * x * x, 1.0, 2.0, 100);
+    let integral = hisab::calc::integral_simpson(|x| 3.0 * x * x, 1.0, 2.0, 100);
     assert!((integral - 7.0).abs() < 1e-6);
 
     // Verify the derivative at x=2: d/dx(x^3)|₂ = 3*4 = 12
-    let deriv = ganit::calc::derivative(|x| x * x * x, 2.0, 1e-7);
+    let deriv = hisab::calc::derivative(|x| x * x * x, 2.0, 1e-7);
     assert!((deriv - 12.0).abs() < 1e-4);
 }
 
 #[test]
 fn error_types_unified() {
-    // Different modules produce the same GanitError type.
-    let num_err: Result<f64, GanitError> =
-        ganit::num::bisection(|x| x * x + 1.0, 1.0, 2.0, 1e-10, 100);
+    // Different modules produce the same HisabError type.
+    let num_err: Result<f64, HisabError> =
+        hisab::num::bisection(|x| x * x + 1.0, 1.0, 2.0, 1e-10, 100);
     assert!(num_err.is_err());
 
     // Can pattern-match on the unified enum.
     match num_err.unwrap_err() {
-        GanitError::InvalidInput(msg) => assert!(msg.contains("opposite signs")),
+        HisabError::InvalidInput(msg) => assert!(msg.contains("opposite signs")),
         other => panic!("unexpected error: {other}"),
     }
 }
@@ -102,7 +102,7 @@ fn ray_triangle_through_transformed_mesh() {
 fn frustum_culling_with_aabb() {
     // Build a frustum and test AABBs at various positions
     let proj =
-        ganit::transforms::projection_perspective(std::f32::consts::FRAC_PI_4, 1.0, 0.1, 100.0);
+        hisab::transforms::projection_perspective(std::f32::consts::FRAC_PI_4, 1.0, 0.1, 100.0);
     let frustum = Frustum::from_view_projection(proj);
 
     // AABB in front of camera — should be visible

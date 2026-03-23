@@ -1,6 +1,6 @@
-# Ganit
+# Hisab
 
-> **Ganit** (Sanskrit: गणित — mathematics) — higher mathematics library for AGNOS
+> **Hisab** (Arabic: حساب — calculation) — higher mathematics library for AGNOS
 
 Higher math for the AGNOS ecosystem. Provides typed mathematical operations — linear algebra, geometry, calculus, and numerical methods — built on [glam](https://crates.io/crates/glam). Used by [impetus](https://github.com/MacCracken/impetus) (physics), [kiran](https://github.com/MacCracken/kiran) (game engine), and [joshua](https://github.com/MacCracken/joshua) (simulation).
 
@@ -15,7 +15,7 @@ For expression evaluation and unit conversion, see [abaco](https://github.com/Ma
 | `calc` | yes | Differentiation, integration, Bezier 2D/3D, splines, easing, Gauss-Legendre |
 | `num` | yes | Root finding, LU/Cholesky/QR, eigenvalues, FFT, RK4 ODE solver |
 | `ai` | no | Daimon/hoosh AI client (network deps) |
-| `logging` | no | Structured logging via `GANIT_LOG` env var |
+| `logging` | no | Structured logging via `HISAB_LOG` env var |
 | `full` | — | Enables all features |
 
 ## Modules
@@ -32,14 +32,14 @@ For expression evaluation and unit conversion, see [abaco](https://github.com/Ma
 
 ```toml
 [dependencies]
-ganit = "0.22"
+hisab = "0.22"
 ```
 
 ```rust
-use ganit::{Vec3, Quat, Transform3D, Ray, Sphere};
-use ganit::geo::{ray_sphere, gjk_intersect};
-use ganit::calc::integral_simpson;
-use ganit::num::{newton_raphson, fft, Complex};
+use hisab::{Vec3, Quat, Transform3D, Ray, Sphere};
+use hisab::geo::{ray_sphere, gjk_intersect};
+use hisab::calc::integral_simpson;
+use hisab::num::{newton_raphson, fft, Complex};
 
 // 3D transform
 let t = Transform3D::new(Vec3::new(1.0, 2.0, 3.0), Quat::IDENTITY, Vec3::ONE);

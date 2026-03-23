@@ -399,18 +399,18 @@ mod tests {
 
     #[test]
     fn error_display_all_variants() {
-        use crate::GanitError;
+        use crate::HisabError;
         assert_eq!(
-            GanitError::InvalidTransform("bad".to_string()).to_string(),
+            HisabError::InvalidTransform("bad".to_string()).to_string(),
             "invalid transform: bad"
         );
         assert_eq!(
-            GanitError::OutOfRange("too big".to_string()).to_string(),
+            HisabError::OutOfRange("too big".to_string()).to_string(),
             "value out of range: too big"
         );
-        assert_eq!(GanitError::DivisionByZero.to_string(), "division by zero");
+        assert_eq!(HisabError::DivisionByZero.to_string(), "division by zero");
         assert_eq!(
-            GanitError::SingularMatrix.to_string(),
+            HisabError::SingularMatrix.to_string(),
             "singular matrix — cannot invert"
         );
     }

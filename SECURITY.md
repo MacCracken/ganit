@@ -2,7 +2,7 @@
 
 ## Scope
 
-Ganit is a pure mathematics library providing linear algebra, geometry, calculus, numerical methods, spatial structures, and collision detection for Rust. The core library performs no I/O and contains no `unsafe` code.
+Hisab is a pure mathematics library providing linear algebra, geometry, calculus, numerical methods, spatial structures, and collision detection for Rust. The core library performs no I/O and contains no `unsafe` code.
 
 ## Attack Surface
 

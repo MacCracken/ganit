@@ -20,7 +20,7 @@ if [ ! -f "$HISTORY_FILE" ]; then
 fi
 
 echo "╔══════════════════════════════════════════╗"
-echo "║         ganit benchmark suite            ║"
+echo "║         hisab benchmark suite            ║"
 echo "╠══════════════════════════════════════════╣"
 echo "║  commit: $COMMIT                          ║"
 echo "║  branch: $BRANCH                            ║"

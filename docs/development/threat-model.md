@@ -2,12 +2,12 @@
 
 ## Trust Boundaries
 
-Ganit operates at the **library boundary**. It trusts the calling application to:
+Hisab operates at the **library boundary**. It trusts the calling application to:
 - Provide valid numeric inputs (not NaN/Infinity unless documented)
 - Respect feature-gate contracts (AI module requires network access)
 - Handle `Result` errors appropriately
 
-Ganit does NOT trust:
+Hisab does NOT trust:
 - Input sizes (validates dimensions for matrix operations)
 - Input magnitudes (uses epsilon thresholds for near-zero detection)
 
@@ -33,13 +33,13 @@ Ganit does NOT trust:
 
 | Location | Trigger | Planned fix |
 |----------|---------|-------------|
-| `calc::integral_trapezoidal` | `n == 0` | Return `Err(GanitError::ZeroSteps)` |
-| `calc::integral_simpson` | `n == 0` | Return `Err(GanitError::ZeroSteps)` |
-| `calc::integral_gauss_legendre` | `n == 0` | Return `Err(GanitError::ZeroSteps)` |
-| `calc::bezier_cubic_3d_arc_length` | `n == 0` | Return `Err(GanitError::ZeroSteps)` |
-| `calc::bezier_cubic_3d_param_at_length` | `n == 0` | Return `Err(GanitError::ZeroSteps)` |
-| `num::fft` | Non-power-of-2 length | Return `Err(GanitError::InvalidInput)` |
-| `num::rk4` | `n == 0` | Return `Err(GanitError::ZeroSteps)` |
+| `calc::integral_trapezoidal` | `n == 0` | Return `Err(HisabError::ZeroSteps)` |
+| `calc::integral_simpson` | `n == 0` | Return `Err(HisabError::ZeroSteps)` |
+| `calc::integral_gauss_legendre` | `n == 0` | Return `Err(HisabError::ZeroSteps)` |
+| `calc::bezier_cubic_3d_arc_length` | `n == 0` | Return `Err(HisabError::ZeroSteps)` |
+| `calc::bezier_cubic_3d_param_at_length` | `n == 0` | Return `Err(HisabError::ZeroSteps)` |
+| `num::fft` | Non-power-of-2 length | Return `Err(HisabError::InvalidInput)` |
+| `num::rk4` | `n == 0` | Return `Err(HisabError::ZeroSteps)` |
 | `geo::ConvexPolygon::support` | Empty vertices | Validate in `new()` |
 
 ## Unsafe Code
@@ -58,7 +58,7 @@ None. The crate contains zero `unsafe` blocks.
 
 ## Numerical Precision
 
-Ganit uses inconsistent epsilon values across modules:
+Hisab uses inconsistent epsilon values across modules:
 
 | Context | Current value | Location |
 |---------|--------------|----------|

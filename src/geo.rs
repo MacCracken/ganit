@@ -1983,8 +1983,8 @@ mod tests {
 
     #[test]
     fn geo_error_display() {
-        use crate::GanitError;
-        let e = GanitError::Degenerate("zero-length edge".to_string());
+        use crate::HisabError;
+        let e = HisabError::Degenerate("zero-length edge".to_string());
         assert_eq!(e.to_string(), "degenerate geometry: zero-length edge");
     }
 

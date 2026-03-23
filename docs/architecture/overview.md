@@ -3,7 +3,7 @@
 ## Module Map
 
 ```
-ganit
+hisab
 ├── transforms      — Transform2D/3D, projections, slerp, lerp, handedness
 ├── geo             — Primitives, intersections, spatial structures, collision
 │   ├── primitives  — Ray, Plane, Aabb, Sphere, Triangle, Line, Segment, Rect
@@ -26,8 +26,8 @@ ganit
 │   ├── spectral    — eigenvalue_power, Complex, fft, ifft
 │   └── ode         — rk4, rk4_trajectory
 ├── ai              — DaimonClient, hoosh queries                [feature: ai]
-├── logging         — GANIT_LOG tracing init                     [feature: logging]
-└── error           — GanitError, DaimonError
+├── logging         — HISAB_LOG tracing init                     [feature: logging]
+└── error           — HisabError, DaimonError
 ```
 
 ## Feature Flags
@@ -39,7 +39,7 @@ ganit
 | `calc` | (default) | Calculus, curves, splines, easing |
 | `num` | (default) | Numerical methods, decompositions, FFT, ODE |
 | `ai` | `reqwest`, `tokio`, `serde_json` | AGNOS daimon/hoosh AI client |
-| `logging` | `tracing-subscriber` | Structured logging via `GANIT_LOG` env |
+| `logging` | `tracing-subscriber` | Structured logging via `HISAB_LOG` env |
 | `full` | all above | Everything |
 
 All default features are pure computation — no I/O, no async, no network.
@@ -112,4 +112,4 @@ dy/dt = f(t, y)
 | **kiran** | Projections, frustum culling, camera transforms, easing |
 | **joshua** | RK4 ODE solver, deterministic simulation math |
 | **aethersafha** | Projection matrices, transform composition |
-| **abaco** | Future: ganit num for expression-level solve commands |
+| **abaco** | Future: hisab num for expression-level solve commands |

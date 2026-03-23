@@ -1,4 +1,4 @@
-# cargo-deny configuration for ganit
+# cargo-deny configuration for hisab
 # https://embarkstudios.github.io/cargo-deny/
 
 [graph]

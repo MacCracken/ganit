@@ -1,11 +1,11 @@
 //! Structured logging and tracing initialisation.
 //!
 //! Provides [`init`] to set up a `tracing-subscriber` with env-based filtering
-//! via the `GANIT_LOG` environment variable. Requires the `logging` feature.
+//! via the `HISAB_LOG` environment variable. Requires the `logging` feature.
 //!
 //! # Log levels
 //!
-//! Set `GANIT_LOG` to control verbosity:
+//! Set `HISAB_LOG` to control verbosity:
 //!
 //! | Value | Shows |
 //! |-------|-------|
@@ -15,29 +15,29 @@
 //! | `debug` | Detailed operations |
 //! | `trace` | Per-call tracing (high volume) |
 //!
-//! Supports per-module filtering: `GANIT_LOG=ganit::num=debug,ganit::geo=trace`
+//! Supports per-module filtering: `HISAB_LOG=hisab::num=debug,hisab::geo=trace`
 //!
 //! # Example
 //!
 //! ```rust,no_run
 //! // At the start of your application:
-//! ganit::logging::init();
+//! hisab::logging::init();
 //!
 //! // Or with a specific default level:
-//! ganit::logging::init_with_level("debug");
+//! hisab::logging::init_with_level("debug");
 //! ```
 
-/// Initialise ganit logging with the `GANIT_LOG` environment variable.
+/// Initialise hisab logging with the `HISAB_LOG` environment variable.
 ///
-/// Falls back to `info` if `GANIT_LOG` is not set.
+/// Falls back to `info` if `HISAB_LOG` is not set.
 /// Safe to call multiple times — subsequent calls are no-ops.
 pub fn init() {
     init_with_level("info");
 }
 
-/// Initialise ganit logging with a specific default level.
+/// Initialise hisab logging with a specific default level.
 ///
-/// The `GANIT_LOG` environment variable overrides `default_level` if set.
+/// The `HISAB_LOG` environment variable overrides `default_level` if set.
 /// Safe to call multiple times — subsequent calls are no-ops.
 pub fn init_with_level(default_level: &str) {
     use tracing_subscriber::EnvFilter;
@@ -45,7 +45,7 @@ pub fn init_with_level(default_level: &str) {
     use tracing_subscriber::prelude::*;
 
     let filter =
-        EnvFilter::try_from_env("GANIT_LOG").unwrap_or_else(|_| EnvFilter::new(default_level));
+        EnvFilter::try_from_env("HISAB_LOG").unwrap_or_else(|_| EnvFilter::new(default_level));
 
     let _ = tracing_subscriber::registry()
         .with(fmt::layer().with_target(true).with_thread_ids(true))

@@ -6,9 +6,9 @@ Tracked dependency version constraints, known incompatibilities, and upgrade pat
 
 **Status:** Pinned to `glam` 0.29
 
-**Note:** Ganit re-exports glam types (`Vec2`, `Vec3`, `Mat4`, `Quat`, etc.) as public API. A major glam version bump is a breaking change for ganit consumers. Coordinate glam upgrades with impetus, kiran, and joshua.
+**Note:** Hisab re-exports glam types (`Vec2`, `Vec3`, `Mat4`, `Quat`, etc.) as public API. A major glam version bump is a breaking change for hisab consumers. Coordinate glam upgrades with impetus, kiran, and joshua.
 
-**SIMD:** glam 0.29 uses SIMD by default on x86_64 and aarch64. No special feature flags needed — ganit benefits automatically.
+**SIMD:** glam 0.29 uses SIMD by default on x86_64 and aarch64. No special feature flags needed — hisab benefits automatically.
 
 ## reqwest (AI feature)
 
@@ -26,7 +26,7 @@ Tracked dependency version constraints, known incompatibilities, and upgrade pat
 
 **Status:** `tracing` 0.1 (always), `tracing-subscriber` 0.3 (optional, `logging` feature)
 
-**Note:** `tracing` 0.1 is a lightweight facade — it adds near-zero overhead when no subscriber is active. The `logging` feature adds `tracing-subscriber` with env-filter for `GANIT_LOG` support.
+**Note:** `tracing` 0.1 is a lightweight facade — it adds near-zero overhead when no subscriber is active. The `logging` feature adds `tracing-subscriber` with env-filter for `HISAB_LOG` support.
 
 ## criterion (dev-dependency)
 

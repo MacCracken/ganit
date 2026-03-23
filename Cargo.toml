@@ -1,14 +1,14 @@
 [package]
-name = "ganit"
+name = "hisab"
 version = "0.22.3"
 edition = "2024"
 rust-version = "1.89"
 license = "GPL-3.0"
 description = "Higher mathematics library — linear algebra, geometry, calculus, and numerical methods for Rust"
-homepage = "https://github.com/MacCracken/ganit"
-repository = "https://github.com/MacCracken/ganit"
+homepage = "https://github.com/MacCracken/hisab"
+repository = "https://github.com/MacCracken/hisab"
 readme = "README.md"
-documentation = "https://docs.rs/ganit"
+documentation = "https://docs.rs/hisab"
 keywords = ["math", "geometry", "calculus", "linear-algebra", "numerical"]
 categories = ["mathematics", "science"]
 exclude = [".claude/", ".github/", "docs/", "scripts/"]

@@ -1,6 +1,6 @@
 //! AI integration: daimon client, hoosh inference.
 //!
-//! Provides the standard AGNOS daimon/hoosh client pattern for the ganit agent.
+//! Provides the standard AGNOS daimon/hoosh client pattern for the hisab agent.
 //! Requires the `ai` feature.
 
 use serde::{Deserialize, Serialize};
@@ -9,7 +9,7 @@ use tracing::{debug, warn};
 use crate::error::DaimonError;
 
 /// Agent name used when registering with daimon.
-pub const AGENT_NAME: &str = "ganit";
+pub const AGENT_NAME: &str = "hisab";
 
 /// Default daimon API URL.
 pub const DEFAULT_DAIMON_URL: &str = "http://localhost:8090";
@@ -30,7 +30,7 @@ struct RegisterResponse {
     id: String,
 }
 
-/// Daimon client for the ganit agent.
+/// Daimon client for the hisab agent.
 pub struct DaimonClient {
     client: reqwest::Client,
     daimon_url: String,
@@ -200,7 +200,7 @@ mod tests {
 
     #[test]
     fn constants_are_correct() {
-        assert_eq!(AGENT_NAME, "ganit");
+        assert_eq!(AGENT_NAME, "hisab");
         assert!(DEFAULT_DAIMON_URL.starts_with("http://"));
         assert!(DEFAULT_HOOSH_URL.starts_with("http://"));
     }

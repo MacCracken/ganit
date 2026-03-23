@@ -1,20 +1,20 @@
 # Roadmap
 
-> **Ganit** (Sanskrit: गणित) — higher mathematics library for the AGNOS ecosystem.
+> **Hisab** (Sanskrit: गणित) — higher mathematics library for the AGNOS ecosystem.
 > Basic expression evaluation and unit conversion lives in [abaco](https://github.com/MacCracken/abaco).
 
 ## Scope
 
-Ganit owns **typed mathematical operations** — the programmatic math that engines, physics, rendering, and simulation need. It does NOT own:
+Hisab owns **typed mathematical operations** — the programmatic math that engines, physics, rendering, and simulation need. It does NOT own:
 
 - **Expression parsing, user-typed math** → abaco (eval engine)
 - **Unit conversion** → abaco (unit registry)
-- **Physics simulation** → impetus (wraps rapier, uses ganit types)
-- **Game engine** → kiran (uses ganit for transforms/projections)
+- **Physics simulation** → impetus (wraps rapier, uses hisab types)
+- **Game engine** → kiran (uses hisab for transforms/projections)
 
 ## Consumers
 
-| Consumer | What it uses from ganit |
+| Consumer | What it uses from hisab |
 |----------|----------------------|
 | **impetus** | Vectors, quaternions, transforms, spatial geometry for broadphase |
 | **kiran** | Projections, transforms, frustum culling, camera math |
@@ -32,7 +32,7 @@ Ganit owns **typed mathematical operations** — the programmatic math that engi
 - calc: derivative, trapezoidal/Simpson integration, 2D Bezier (29 tests)
 - num: Newton-Raphson, bisection, Gaussian elimination (25 tests)
 - ai: daimon/hoosh client (7 tests, feature-gated)
-- Infrastructure: flat src/ modules, feature flags, unified GanitError, CI, docs
+- Infrastructure: flat src/ modules, feature flags, unified HisabError, CI, docs
 
 ### V0.2 — Geometry Expansion (2026-03-22)
 - Triangle, Line, Segment, Frustum primitives
@@ -188,7 +188,7 @@ The codebase has feature completeness for V1.0. This milestone focuses on safety
 
 ## Boundary with Abaco
 
-| Feature | abaco | ganit |
+| Feature | abaco | hisab |
 |---------|-------|-------|
 | `eval("sin(pi/4)")` | abaco parses and evaluates | — |
 | `Vec3::cross(a, b)` | — | transforms |
@@ -197,4 +197,4 @@ The codebase has feature completeness for V1.0. This milestone focuses on safety
 | `newton_raphson(f, df, x0)` | — | num |
 | `eval("solve x^2 - 2 = 0")` | abaco parses | num solves |
 
-Ganit should never depend on abaco. Abaco may optionally depend on ganit (num) for symbolic/solver features in the future.
+Hisab should never depend on abaco. Abaco may optionally depend on hisab (num) for symbolic/solver features in the future.

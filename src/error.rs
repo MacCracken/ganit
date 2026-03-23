@@ -1,11 +1,11 @@
-//! Unified error types for ganit.
+//! Unified error types for hisab.
 
 use thiserror::Error;
 
-/// Top-level error type for ganit operations.
+/// Top-level error type for hisab operations.
 #[derive(Debug, Error)]
 #[non_exhaustive]
-pub enum GanitError {
+pub enum HisabError {
     /// Invalid transform parameters.
     #[error("invalid transform: {0}")]
     InvalidTransform(String),
@@ -74,5 +74,5 @@ pub enum DaimonError {
     HooshQuery(String),
 }
 
-/// Convenience alias for `Result<T, GanitError>`.
-pub type Result<T> = std::result::Result<T, GanitError>;
+/// Convenience alias for `Result<T, HisabError>`.
+pub type Result<T> = std::result::Result<T, HisabError>;

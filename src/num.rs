@@ -4,7 +4,7 @@
 //! decompositions, least-squares fitting, eigenvalue computation (power iteration),
 //! Cooley-Tukey FFT/IFFT, and Runge-Kutta (RK4) ODE integration.
 
-use crate::GanitError;
+use crate::HisabError;
 
 /// Newton-Raphson root finding.
 ///
@@ -21,7 +21,7 @@ pub fn newton_raphson(
     x0: f64,
     tol: f64,
     max_iter: usize,
-) -> Result<f64, GanitError> {
+) -> Result<f64, HisabError> {
     let mut x = x0;
     for _ in 0..max_iter {
         let fx = f(x);
@@ -30,11 +30,11 @@ pub fn newton_raphson(
         }
         let dfx = df(x);
         if dfx.abs() < 1e-15 {
-            return Err(GanitError::InvalidInput("derivative is zero".to_string()));
+            return Err(HisabError::InvalidInput("derivative is zero".to_string()));
         }
         x -= fx / dfx;
     }
-    Err(GanitError::NoConvergence(max_iter))
+    Err(HisabError::NoConvergence(max_iter))
 }
 
 /// Bisection root finding.
@@ -47,14 +47,14 @@ pub fn bisection(
     b: f64,
     tol: f64,
     max_iter: usize,
-) -> Result<f64, GanitError> {
+) -> Result<f64, HisabError> {
     let mut lo = a;
     let mut hi = b;
     let f_lo = f(lo);
     let f_hi = f(hi);
 
     if f_lo * f_hi > 0.0 {
-        return Err(GanitError::InvalidInput(
+        return Err(HisabError::InvalidInput(
             "f(a) and f(b) must have opposite signs".to_string(),
         ));
     }
@@ -88,14 +88,14 @@ pub fn bisection(
 /// with dimensions `n x (n+1)`.
 ///
 /// The matrix is modified in place. Returns the solution vector `x`.
-pub fn gaussian_elimination(matrix: &mut [Vec<f64>]) -> Result<Vec<f64>, GanitError> {
+pub fn gaussian_elimination(matrix: &mut [Vec<f64>]) -> Result<Vec<f64>, HisabError> {
     let n = matrix.len();
     if n == 0 {
-        return Err(GanitError::InvalidInput("empty matrix".to_string()));
+        return Err(HisabError::InvalidInput("empty matrix".to_string()));
     }
     for row in matrix.iter() {
         if row.len() != n + 1 {
-            return Err(GanitError::InvalidInput(format!(
+            return Err(HisabError::InvalidInput(format!(
                 "expected {} columns, got {}",
                 n + 1,
                 row.len()
@@ -117,7 +117,7 @@ pub fn gaussian_elimination(matrix: &mut [Vec<f64>]) -> Result<Vec<f64>, GanitEr
         }
 
         if max_val < 1e-12 {
-            return Err(GanitError::SingularPivot);
+            return Err(HisabError::SingularPivot);
         }
 
         // Swap rows
@@ -164,14 +164,14 @@ pub fn gaussian_elimination(matrix: &mut [Vec<f64>]) -> Result<Vec<f64>, GanitEr
 /// Returns `(lu, pivot)` where `lu` stores both L (below diagonal) and U
 /// (on and above diagonal) in a single matrix.
 #[allow(clippy::needless_range_loop)]
-pub fn lu_decompose(a: &[Vec<f64>]) -> Result<(Vec<Vec<f64>>, Vec<usize>), GanitError> {
+pub fn lu_decompose(a: &[Vec<f64>]) -> Result<(Vec<Vec<f64>>, Vec<usize>), HisabError> {
     let n = a.len();
     if n == 0 {
-        return Err(GanitError::InvalidInput("empty matrix".to_string()));
+        return Err(HisabError::InvalidInput("empty matrix".to_string()));
     }
     for row in a {
         if row.len() != n {
-            return Err(GanitError::InvalidInput(format!(
+            return Err(HisabError::InvalidInput(format!(
                 "expected square {}x{}, got row length {}",
                 n,
                 n,
@@ -195,7 +195,7 @@ pub fn lu_decompose(a: &[Vec<f64>]) -> Result<(Vec<Vec<f64>>, Vec<usize>), Ganit
             }
         }
         if max_val < 1e-12 {
-            return Err(GanitError::SingularPivot);
+            return Err(HisabError::SingularPivot);
         }
         if max_row != col {
             lu.swap(col, max_row);
@@ -219,10 +219,10 @@ pub fn lu_decompose(a: &[Vec<f64>]) -> Result<(Vec<Vec<f64>>, Vec<usize>), Ganit
 /// Solve `A * x = b` using a pre-computed LU decomposition.
 #[inline]
 #[allow(clippy::needless_range_loop)]
-pub fn lu_solve(lu: &[Vec<f64>], pivot: &[usize], b: &[f64]) -> Result<Vec<f64>, GanitError> {
+pub fn lu_solve(lu: &[Vec<f64>], pivot: &[usize], b: &[f64]) -> Result<Vec<f64>, HisabError> {
     let n = lu.len();
     if b.len() != n {
-        return Err(GanitError::InvalidInput(format!(
+        return Err(HisabError::InvalidInput(format!(
             "b length {} != matrix size {}",
             b.len(),
             n
@@ -264,14 +264,14 @@ pub fn lu_solve(lu: &[Vec<f64>], pivot: &[usize], b: &[f64]) -> Result<Vec<f64>,
 ///
 /// Only the lower triangle of `A` is read. The caller must ensure `A` is symmetric.
 #[allow(clippy::needless_range_loop)]
-pub fn cholesky(a: &[Vec<f64>]) -> Result<Vec<Vec<f64>>, GanitError> {
+pub fn cholesky(a: &[Vec<f64>]) -> Result<Vec<Vec<f64>>, HisabError> {
     let n = a.len();
     if n == 0 {
-        return Err(GanitError::InvalidInput("empty matrix".to_string()));
+        return Err(HisabError::InvalidInput("empty matrix".to_string()));
     }
     for row in a {
         if row.len() != n {
-            return Err(GanitError::InvalidInput(format!(
+            return Err(HisabError::InvalidInput(format!(
                 "expected square {}x{}, got row length {}",
                 n,
                 n,
@@ -290,7 +290,7 @@ pub fn cholesky(a: &[Vec<f64>]) -> Result<Vec<Vec<f64>>, GanitError> {
             }
             if i == j {
                 if sum <= 0.0 {
-                    return Err(GanitError::InvalidInput(
+                    return Err(HisabError::InvalidInput(
                         "matrix is not positive-definite".to_string(),
                     ));
                 }
@@ -307,10 +307,10 @@ pub fn cholesky(a: &[Vec<f64>]) -> Result<Vec<Vec<f64>>, GanitError> {
 /// Solve `A * x = b` using a pre-computed Cholesky factor `L` (where `A = L * L^T`).
 #[inline]
 #[allow(clippy::needless_range_loop)]
-pub fn cholesky_solve(l: &[Vec<f64>], b: &[f64]) -> Result<Vec<f64>, GanitError> {
+pub fn cholesky_solve(l: &[Vec<f64>], b: &[f64]) -> Result<Vec<f64>, HisabError> {
     let n = l.len();
     if b.len() != n {
-        return Err(GanitError::InvalidInput(format!(
+        return Err(HisabError::InvalidInput(format!(
             "b length {} != matrix size {}",
             b.len(),
             n
@@ -353,14 +353,14 @@ pub fn cholesky_solve(l: &[Vec<f64>], b: &[f64]) -> Result<Vec<f64>, GanitError>
 /// Input is column-major: `a[j]` is the j-th column vector.
 /// Output `r` uses the same layout: `R[i][j]` is stored as `r[j][i]`.
 #[allow(clippy::type_complexity, clippy::needless_range_loop)]
-pub fn qr_decompose(a: &[Vec<f64>]) -> Result<(Vec<Vec<f64>>, Vec<Vec<f64>>), GanitError> {
+pub fn qr_decompose(a: &[Vec<f64>]) -> Result<(Vec<Vec<f64>>, Vec<Vec<f64>>), HisabError> {
     let n = a.len(); // number of columns
     if n == 0 {
-        return Err(GanitError::InvalidInput("empty matrix".to_string()));
+        return Err(HisabError::InvalidInput("empty matrix".to_string()));
     }
     let m = a[0].len(); // number of rows
     if m < n {
-        return Err(GanitError::InvalidInput(
+        return Err(HisabError::InvalidInput(
             "QR requires m >= n (more rows than columns)".to_string(),
         ));
     }
@@ -380,7 +380,7 @@ pub fn qr_decompose(a: &[Vec<f64>]) -> Result<(Vec<Vec<f64>>, Vec<Vec<f64>>), Ga
         // Normalize
         let norm: f64 = (0..m).map(|k| q[j][k] * q[j][k]).sum::<f64>().sqrt();
         if norm < 1e-12 {
-            return Err(GanitError::InvalidInput(
+            return Err(HisabError::InvalidInput(
                 "columns are linearly dependent".to_string(),
             ));
         }
@@ -402,16 +402,16 @@ pub fn qr_decompose(a: &[Vec<f64>]) -> Result<(Vec<Vec<f64>>, Vec<Vec<f64>>), Ga
 ///
 /// Returns coefficients `[a0, a1, a2, ...]` where `y ≈ a0 + a1*x + a2*x^2 + ...`.
 #[allow(clippy::needless_range_loop)]
-pub fn least_squares_poly(x: &[f64], y: &[f64], degree: usize) -> Result<Vec<f64>, GanitError> {
+pub fn least_squares_poly(x: &[f64], y: &[f64], degree: usize) -> Result<Vec<f64>, HisabError> {
     let m = x.len();
     if m != y.len() || m == 0 {
-        return Err(GanitError::InvalidInput(
+        return Err(HisabError::InvalidInput(
             "x and y must have equal non-zero length".to_string(),
         ));
     }
     let n = degree + 1;
     if m < n {
-        return Err(GanitError::InvalidInput(
+        return Err(HisabError::InvalidInput(
             "need at least degree+1 data points".to_string(),
         ));
     }
@@ -463,14 +463,14 @@ pub fn eigenvalue_power(
     a: &[Vec<f64>],
     tol: f64,
     max_iter: usize,
-) -> Result<(f64, Vec<f64>), GanitError> {
+) -> Result<(f64, Vec<f64>), HisabError> {
     let n = a.len();
     if n == 0 {
-        return Err(GanitError::InvalidInput("empty matrix".to_string()));
+        return Err(HisabError::InvalidInput("empty matrix".to_string()));
     }
     for row in a {
         if row.len() != n {
-            return Err(GanitError::InvalidInput(format!(
+            return Err(HisabError::InvalidInput(format!(
                 "expected square {}x{}, got row length {}",
                 n,
                 n,
@@ -505,7 +505,7 @@ pub fn eigenvalue_power(
         }
 
         if max_val.abs() < 1e-15 {
-            return Err(GanitError::NoConvergence(max_iter));
+            return Err(HisabError::NoConvergence(max_iter));
         }
 
         let new_eigenvalue = max_val;
@@ -523,7 +523,7 @@ pub fn eigenvalue_power(
         std::mem::swap(&mut v, &mut w);
     }
 
-    Err(GanitError::NoConvergence(max_iter))
+    Err(HisabError::NoConvergence(max_iter))
 }
 
 // ---------------------------------------------------------------------------
@@ -886,15 +886,15 @@ mod tests {
 
     #[test]
     fn error_display() {
-        let e = GanitError::NoConvergence(50);
+        let e = HisabError::NoConvergence(50);
         assert_eq!(e.to_string(), "no convergence after 50 iterations");
-        let e = GanitError::SingularPivot;
+        let e = HisabError::SingularPivot;
         assert!(e.to_string().contains("singular"));
     }
 
     #[test]
     fn error_display_invalid_input() {
-        let e = GanitError::InvalidInput("bad data".to_string());
+        let e = HisabError::InvalidInput("bad data".to_string());
         assert_eq!(e.to_string(), "invalid input: bad data");
     }
 

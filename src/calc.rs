@@ -403,7 +403,7 @@ pub fn ease_in_out_smooth(t: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::GanitError;
+    use crate::HisabError;
 
     const EPSILON_F64: f64 = 1e-6;
     const EPSILON_F32: f32 = 1e-4;
@@ -618,11 +618,11 @@ mod tests {
     #[test]
     fn calc_error_display() {
         assert_eq!(
-            GanitError::InvalidInterval.to_string(),
+            HisabError::InvalidInterval.to_string(),
             "invalid interval: a must be less than b"
         );
         assert_eq!(
-            GanitError::ZeroSteps.to_string(),
+            HisabError::ZeroSteps.to_string(),
             "step count must be positive"
         );
     }
