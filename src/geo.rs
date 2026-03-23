@@ -526,6 +526,7 @@ enum BvhNode {
 /// Stores a tree of AABBs built from a list of primitives. Each primitive
 /// is represented by its AABB and an index into the caller's primitive array.
 #[derive(Debug, Clone)]
+#[must_use]
 pub struct Bvh {
     root: Option<BvhNode>,
     len: usize,
@@ -572,22 +573,20 @@ impl Bvh {
             _ => (bounds.min.z + bounds.max.z) * 0.5,
         };
 
-        // Partition items around the midpoint
-        let center_axis = |aabb: &Aabb| -> f32 {
-            let c = aabb.center();
-            match axis {
-                0 => c.x,
-                1 => c.y,
-                _ => c.z,
-            }
+        // Partition items around the midpoint (O(n) instead of O(n log n) sort)
+        let center_val = |aabb: &Aabb| -> f32 {
+            let arr = aabb.center().to_array();
+            arr[axis]
         };
 
-        items.sort_unstable_by(|a, b| {
-            center_axis(&a.0).partial_cmp(&center_axis(&b.0)).unwrap_or(std::cmp::Ordering::Equal)
-        });
-
-        // Find split point: first item whose center is >= midpoint
-        let mut split = items.partition_point(|item| center_axis(&item.0) < mid);
+        // In-place partition: items with center < mid go left
+        let mut split = 0;
+        for i in 0..items.len() {
+            if center_val(&items[i].0) < mid {
+                items.swap(i, split);
+                split += 1;
+            }
+        }
         // Ensure at least one item on each side
         if split == 0 {
             split = 1;
@@ -691,6 +690,7 @@ enum KdNode {
 
 /// A 3D k-d tree for nearest-neighbor point queries.
 #[derive(Debug, Clone)]
+#[must_use]
 pub struct KdTree {
     root: Option<KdNode>,
     len: usize,
@@ -716,14 +716,14 @@ impl KdTree {
         }
 
         let axis = depth % 3;
-        items.sort_unstable_by(|a, b| {
-            let va = [a.0.x, a.0.y, a.0.z][axis];
-            let vb = [b.0.x, b.0.y, b.0.z][axis];
-            va.partial_cmp(&vb).unwrap_or(std::cmp::Ordering::Equal)
-        });
-
         let mid = items.len() / 2;
-        let split_val = [items[mid].0.x, items[mid].0.y, items[mid].0.z][axis];
+        // O(n) partial sort: only ensures the median element is in position
+        items.select_nth_unstable_by(mid, |a, b| {
+            a.0.to_array()[axis]
+                .partial_cmp(&b.0.to_array()[axis])
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let split_val = items[mid].0.to_array()[axis];
 
         let (left_items, right_items) = items.split_at_mut(mid);
         let left = Self::build_recursive(left_items, depth + 1);
@@ -779,7 +779,7 @@ impl KdTree {
                 }
             }
             KdNode::Split { axis, split_val, left, right } => {
-                let query_val = [query.x, query.y, query.z][*axis];
+                let query_val = query.to_array()[*axis];
                 let diff = query_val - split_val;
 
                 // Visit the closer side first
@@ -825,7 +825,7 @@ impl KdTree {
                 }
             }
             KdNode::Split { axis, split_val, left, right } => {
-                let query_val = [query.x, query.y, query.z][*axis];
+                let query_val = query.to_array()[*axis];
                 let diff = query_val - split_val;
 
                 let (near, far) = if diff < 0.0 {
@@ -1803,5 +1803,70 @@ mod tests {
         let (idx, dist_sq) = tree.nearest(Vec3::new(1.0, 2.0, 3.0)).unwrap();
         assert_eq!(idx, 7);
         assert!(approx_eq(dist_sq, 0.0));
+    }
+
+    // --- V0.5a audit tests ---
+
+    #[test]
+    fn bvh_degenerate_same_position() {
+        // All items at the same position — should still build and query
+        let mut items: Vec<(Aabb, usize)> = (0..5)
+            .map(|i| (Aabb::new(Vec3::ZERO, Vec3::ONE), i))
+            .collect();
+        let bvh = Bvh::build(&mut items);
+        assert_eq!(bvh.len(), 5);
+        let r = Ray::new(Vec3::new(0.5, 0.5, -5.0), Vec3::Z);
+        let hits = bvh.query_ray(&r);
+        assert_eq!(hits.len(), 5);
+    }
+
+    #[test]
+    fn bvh_aabb_query_no_overlap() {
+        let mut items: Vec<(Aabb, usize)> = (0..5)
+            .map(|i| {
+                let x = i as f32 * 10.0;
+                (Aabb::new(Vec3::new(x, 0.0, 0.0), Vec3::new(x + 1.0, 1.0, 1.0)), i)
+            })
+            .collect();
+        let bvh = Bvh::build(&mut items);
+        let query = Aabb::new(Vec3::splat(1000.0), Vec3::splat(2000.0));
+        assert!(bvh.query_aabb(&query).is_empty());
+    }
+
+    #[test]
+    fn kdtree_duplicate_points() {
+        // Multiple points at the same location
+        let mut items: Vec<(Vec3, usize)> = (0..5)
+            .map(|i| (Vec3::ZERO, i))
+            .collect();
+        let tree = KdTree::build(&mut items);
+        let (_, dist_sq) = tree.nearest(Vec3::ZERO).unwrap();
+        assert!(approx_eq(dist_sq, 0.0));
+    }
+
+    #[test]
+    fn kdtree_two_points() {
+        let mut items = [
+            (Vec3::new(0.0, 0.0, 0.0), 0),
+            (Vec3::new(10.0, 0.0, 0.0), 1),
+        ];
+        let tree = KdTree::build(&mut items);
+        let (idx, _) = tree.nearest(Vec3::new(3.0, 0.0, 0.0)).unwrap();
+        assert_eq!(idx, 0); // closer to origin
+        let (idx, _) = tree.nearest(Vec3::new(7.0, 0.0, 0.0)).unwrap();
+        assert_eq!(idx, 1); // closer to 10
+    }
+
+    #[test]
+    fn bvh_two_items() {
+        let mut items = [
+            (Aabb::new(Vec3::ZERO, Vec3::ONE), 0),
+            (Aabb::new(Vec3::new(5.0, 0.0, 0.0), Vec3::new(6.0, 1.0, 1.0)), 1),
+        ];
+        let bvh = Bvh::build(&mut items);
+        let r = Ray::new(Vec3::new(5.5, 0.5, -5.0), Vec3::Z);
+        let hits = bvh.query_ray(&r);
+        assert!(hits.contains(&1));
+        assert!(!hits.contains(&0));
     }
 }
