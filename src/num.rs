@@ -439,6 +439,208 @@ pub fn least_squares_poly(x: &[f64], y: &[f64], degree: usize) -> Result<Vec<f64
     Ok(coeffs)
 }
 
+// ---------------------------------------------------------------------------
+// Eigenvalue computation (power iteration)
+// ---------------------------------------------------------------------------
+
+/// Find the dominant eigenvalue and eigenvector of a square matrix
+/// using power iteration.
+///
+/// - `a`: square `n x n` matrix (row-major).
+/// - `tol`: convergence tolerance on the eigenvalue estimate.
+/// - `max_iter`: maximum iterations.
+///
+/// Returns `(eigenvalue, eigenvector)`.
+#[allow(clippy::needless_range_loop)]
+pub fn eigenvalue_power(
+    a: &[Vec<f64>],
+    tol: f64,
+    max_iter: usize,
+) -> Result<(f64, Vec<f64>), GanitError> {
+    let n = a.len();
+    if n == 0 {
+        return Err(GanitError::InvalidInput("empty matrix".to_string()));
+    }
+
+    // Initial guess: unit vector
+    let mut v = vec![0.0; n];
+    v[0] = 1.0;
+    let mut eigenvalue = 0.0;
+
+    for _ in 0..max_iter {
+        // w = A * v
+        let mut w = vec![0.0; n];
+        for i in 0..n {
+            for j in 0..n {
+                w[i] += a[i][j] * v[j];
+            }
+        }
+
+        // Find the component with largest absolute value
+        let mut max_val = 0.0f64;
+        for &wi in &w {
+            if wi.abs() > max_val.abs() {
+                max_val = wi;
+            }
+        }
+
+        if max_val.abs() < 1e-15 {
+            return Err(GanitError::NoConvergence(max_iter));
+        }
+
+        let new_eigenvalue = max_val;
+
+        // Normalize
+        for vi in &mut w {
+            *vi /= max_val;
+        }
+
+        if (new_eigenvalue - eigenvalue).abs() < tol {
+            return Ok((new_eigenvalue, w));
+        }
+
+        eigenvalue = new_eigenvalue;
+        v = w;
+    }
+
+    Err(GanitError::NoConvergence(max_iter))
+}
+
+// ---------------------------------------------------------------------------
+// FFT (Cooley-Tukey radix-2)
+// ---------------------------------------------------------------------------
+
+/// A complex number for FFT operations.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Complex {
+    pub re: f64,
+    pub im: f64,
+}
+
+impl Complex {
+    /// Create a new complex number.
+    #[inline]
+    pub const fn new(re: f64, im: f64) -> Self {
+        Self { re, im }
+    }
+
+    /// Complex number from a real value.
+    #[inline]
+    pub const fn from_real(re: f64) -> Self {
+        Self { re, im: 0.0 }
+    }
+
+    /// Magnitude (absolute value).
+    #[inline]
+    pub fn abs(self) -> f64 {
+        (self.re * self.re + self.im * self.im).sqrt()
+    }
+
+    /// Complex conjugate.
+    #[inline]
+    pub const fn conj(self) -> Self {
+        Self { re: self.re, im: -self.im }
+    }
+}
+
+impl std::ops::Add for Complex {
+    type Output = Self;
+    #[inline]
+    fn add(self, rhs: Self) -> Self {
+        Self { re: self.re + rhs.re, im: self.im + rhs.im }
+    }
+}
+
+impl std::ops::Sub for Complex {
+    type Output = Self;
+    #[inline]
+    fn sub(self, rhs: Self) -> Self {
+        Self { re: self.re - rhs.re, im: self.im - rhs.im }
+    }
+}
+
+impl std::ops::Mul for Complex {
+    type Output = Self;
+    #[inline]
+    fn mul(self, rhs: Self) -> Self {
+        Self {
+            re: self.re * rhs.re - self.im * rhs.im,
+            im: self.re * rhs.im + self.im * rhs.re,
+        }
+    }
+}
+
+impl std::ops::Mul<f64> for Complex {
+    type Output = Self;
+    #[inline]
+    fn mul(self, rhs: f64) -> Self {
+        Self { re: self.re * rhs, im: self.im * rhs }
+    }
+}
+
+/// In-place Cooley-Tukey radix-2 FFT.
+///
+/// `data` must have a power-of-2 length. Computes the DFT in-place.
+pub fn fft(data: &mut [Complex]) {
+    let n = data.len();
+    if n <= 1 {
+        return;
+    }
+    assert!(n.is_power_of_two(), "FFT requires power-of-2 length");
+
+    // Bit-reversal permutation
+    let mut j = 0usize;
+    for i in 1..n {
+        let mut bit = n >> 1;
+        while j & bit != 0 {
+            j ^= bit;
+            bit >>= 1;
+        }
+        j ^= bit;
+        if i < j {
+            data.swap(i, j);
+        }
+    }
+
+    // Butterfly stages
+    let mut len = 2;
+    while len <= n {
+        let half = len / 2;
+        let angle = -2.0 * std::f64::consts::PI / len as f64;
+        let wn = Complex::new(angle.cos(), angle.sin());
+
+        let mut start = 0;
+        while start < n {
+            let mut w = Complex::new(1.0, 0.0);
+            for k in 0..half {
+                let u = data[start + k];
+                let t = w * data[start + k + half];
+                data[start + k] = u + t;
+                data[start + k + half] = u - t;
+                w = w * wn;
+            }
+            start += len;
+        }
+        len <<= 1;
+    }
+}
+
+/// In-place inverse FFT.
+///
+/// `data` must have a power-of-2 length.
+pub fn ifft(data: &mut [Complex]) {
+    let n = data.len();
+    // Conjugate, FFT, conjugate, scale
+    for d in data.iter_mut() {
+        *d = d.conj();
+    }
+    fft(data);
+    let scale = 1.0 / n as f64;
+    for d in data.iter_mut() {
+        *d = d.conj() * scale;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -910,5 +1112,170 @@ mod tests {
         // 2x+y=3, x+3y=7 => x=0.4, y=2.2
         assert!(approx_eq(x2[0], 0.4));
         assert!(approx_eq(x2[1], 2.2));
+    }
+
+    // --- V0.4b: Eigenvalues ---
+
+    #[test]
+    fn eigenvalue_2x2_diagonal() {
+        // Diagonal matrix [[5, 0], [0, 2]] — dominant eigenvalue is 5
+        let a = vec![vec![5.0, 0.0], vec![0.0, 2.0]];
+        let (eval, evec) = eigenvalue_power(&a, 1e-10, 100).unwrap();
+        assert!(approx_eq(eval, 5.0));
+        // Eigenvector should be [1, 0] (or proportional)
+        assert!(evec[0].abs() > 0.9);
+    }
+
+    #[test]
+    fn eigenvalue_3x3_symmetric() {
+        // Symmetric matrix with known dominant eigenvalue
+        // [[2, 1, 0], [1, 3, 1], [0, 1, 2]]
+        // Eigenvalues: 4, 2, 1 — dominant is 4
+        let a = vec![
+            vec![2.0, 1.0, 0.0],
+            vec![1.0, 3.0, 1.0],
+            vec![0.0, 1.0, 2.0],
+        ];
+        let (eval, _evec) = eigenvalue_power(&a, 1e-10, 200).unwrap();
+        assert!((eval - 4.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn eigenvalue_identity() {
+        let a = vec![vec![1.0, 0.0], vec![0.0, 1.0]];
+        let (eval, _) = eigenvalue_power(&a, 1e-10, 100).unwrap();
+        assert!(approx_eq(eval, 1.0));
+    }
+
+    #[test]
+    fn eigenvalue_empty() {
+        let a: Vec<Vec<f64>> = vec![];
+        assert!(eigenvalue_power(&a, 1e-10, 100).is_err());
+    }
+
+    // --- V0.4b: FFT ---
+
+    #[test]
+    fn complex_arithmetic() {
+        let a = Complex::new(3.0, 4.0);
+        let b = Complex::new(1.0, -2.0);
+        let sum = a + b;
+        assert!(approx_eq(sum.re, 4.0));
+        assert!(approx_eq(sum.im, 2.0));
+        let diff = a - b;
+        assert!(approx_eq(diff.re, 2.0));
+        assert!(approx_eq(diff.im, 6.0));
+        let prod = a * b;
+        // (3+4i)(1-2i) = 3-6i+4i-8i² = 3-2i+8 = 11+(-2)i
+        assert!(approx_eq(prod.re, 11.0));
+        assert!(approx_eq(prod.im, -2.0));
+    }
+
+    #[test]
+    fn complex_abs_and_conj() {
+        let z = Complex::new(3.0, 4.0);
+        assert!(approx_eq(z.abs(), 5.0));
+        let c = z.conj();
+        assert!(approx_eq(c.re, 3.0));
+        assert!(approx_eq(c.im, -4.0));
+    }
+
+    #[test]
+    fn fft_dc_signal() {
+        // Constant signal [1, 1, 1, 1] -> FFT should have DC = 4, rest = 0
+        let mut data = [
+            Complex::from_real(1.0),
+            Complex::from_real(1.0),
+            Complex::from_real(1.0),
+            Complex::from_real(1.0),
+        ];
+        fft(&mut data);
+        assert!(approx_eq(data[0].re, 4.0));
+        assert!(approx_eq(data[0].im, 0.0));
+        assert!(approx_eq(data[1].abs(), 0.0));
+        assert!(approx_eq(data[2].abs(), 0.0));
+        assert!(approx_eq(data[3].abs(), 0.0));
+    }
+
+    #[test]
+    fn fft_single_frequency() {
+        // [1, -1, 1, -1] is a Nyquist frequency signal
+        let mut data = [
+            Complex::from_real(1.0),
+            Complex::from_real(-1.0),
+            Complex::from_real(1.0),
+            Complex::from_real(-1.0),
+        ];
+        fft(&mut data);
+        assert!(approx_eq(data[0].abs(), 0.0)); // DC = 0
+        assert!(approx_eq(data[2].re, 4.0));     // Nyquist bin
+    }
+
+    #[test]
+    fn fft_ifft_roundtrip() {
+        let original = [
+            Complex::new(1.0, 0.0),
+            Complex::new(2.0, -1.0),
+            Complex::new(0.0, 3.0),
+            Complex::new(-1.0, 2.0),
+        ];
+        let mut data = original;
+        fft(&mut data);
+        ifft(&mut data);
+        for i in 0..4 {
+            assert!((data[i].re - original[i].re).abs() < 1e-10);
+            assert!((data[i].im - original[i].im).abs() < 1e-10);
+        }
+    }
+
+    #[test]
+    fn fft_8_point() {
+        // 8-point FFT of real signal
+        let mut data: Vec<Complex> = (0..8)
+            .map(|i| Complex::from_real(i as f64))
+            .collect();
+        fft(&mut data);
+        // DC should be sum of all values = 0+1+2+3+4+5+6+7 = 28
+        assert!(approx_eq(data[0].re, 28.0));
+        assert!(approx_eq(data[0].im, 0.0));
+    }
+
+    #[test]
+    fn fft_ifft_roundtrip_8() {
+        let original: Vec<Complex> = (0..8)
+            .map(|i| Complex::new(i as f64, (i as f64 * 0.5).sin()))
+            .collect();
+        let mut data = original.clone();
+        fft(&mut data);
+        ifft(&mut data);
+        for i in 0..8 {
+            assert!((data[i].re - original[i].re).abs() < 1e-10);
+            assert!((data[i].im - original[i].im).abs() < 1e-10);
+        }
+    }
+
+    #[test]
+    fn fft_parseval() {
+        // Parseval's theorem: sum |x[n]|^2 = (1/N) * sum |X[k]|^2
+        let original: Vec<Complex> = vec![
+            Complex::new(1.0, 0.0),
+            Complex::new(0.0, 1.0),
+            Complex::new(-1.0, 0.0),
+            Complex::new(0.0, -1.0),
+        ];
+        let time_energy: f64 = original.iter().map(|c| c.re * c.re + c.im * c.im).sum();
+        let mut freq = original;
+        fft(&mut freq);
+        let freq_energy: f64 = freq.iter().map(|c| c.re * c.re + c.im * c.im).sum();
+        // N * time_energy = freq_energy
+        assert!((4.0 * time_energy - freq_energy).abs() < 1e-10);
+    }
+
+    #[test]
+    fn fft_single_element() {
+        let mut data = [Complex::new(42.0, -7.0)];
+        fft(&mut data);
+        assert!(approx_eq(data[0].re, 42.0));
+        assert!(approx_eq(data[0].im, -7.0));
     }
 }

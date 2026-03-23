@@ -537,6 +537,59 @@ fn bench_v04a(c: &mut Criterion) {
     group.finish();
 }
 
+// ---------------------------------------------------------------------------
+// V0.4b spectral & dynamics
+// ---------------------------------------------------------------------------
+
+fn bench_v04b(c: &mut Criterion) {
+    let mut group = c.benchmark_group("v04b");
+
+    group.bench_function("eigenvalue_3x3", |b| {
+        let a = vec![
+            vec![2.0, 1.0, 0.0],
+            vec![1.0, 3.0, 1.0],
+            vec![0.0, 1.0, 2.0],
+        ];
+        b.iter(|| ganit::num::eigenvalue_power(black_box(&a), 1e-10, 100))
+    });
+
+    group.bench_function("fft_64", |b| {
+        let data: Vec<ganit::num::Complex> = (0..64)
+            .map(|i| ganit::num::Complex::from_real(i as f64))
+            .collect();
+        b.iter(|| {
+            let mut d = data.clone();
+            ganit::num::fft(black_box(&mut d));
+            d
+        })
+    });
+
+    group.bench_function("fft_1024", |b| {
+        let data: Vec<ganit::num::Complex> = (0..1024)
+            .map(|i| ganit::num::Complex::from_real((i as f64 * 0.1).sin()))
+            .collect();
+        b.iter(|| {
+            let mut d = data.clone();
+            ganit::num::fft(black_box(&mut d));
+            d
+        })
+    });
+
+    group.bench_function("fft_ifft_256", |b| {
+        let data: Vec<ganit::num::Complex> = (0..256)
+            .map(|i| ganit::num::Complex::new(i as f64, (i as f64 * 0.3).cos()))
+            .collect();
+        b.iter(|| {
+            let mut d = data.clone();
+            ganit::num::fft(&mut d);
+            ganit::num::ifft(&mut d);
+            d
+        })
+    });
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_transforms,
@@ -547,5 +600,6 @@ criterion_group!(
     bench_v02,
     bench_v03,
     bench_v04a,
+    bench_v04b,
 );
 criterion_main!(benches);

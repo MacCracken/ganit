@@ -105,12 +105,13 @@ Ganit owns **typed mathematical operations** — the programmatic math that engi
 - `qr_decompose()` — modified Gram-Schmidt QR decomposition (column-major)
 - `least_squares_poly()` — polynomial least-squares fitting via QR
 
-## V0.4b — Spectral & Dynamics
+## V0.4b — Spectral & Dynamics (done, 2026-03-23)
 
-### num
-- Eigenvalue computation (power iteration)
-- Basic FFT (Cooley-Tukey radix-2)
-- Inverse FFT
+### num (~13 tests)
+- `eigenvalue_power()` — dominant eigenvalue/eigenvector via power iteration
+- `Complex` type with full arithmetic (`+`, `-`, `*`, `abs`, `conj`)
+- `fft()` — in-place Cooley-Tukey radix-2 FFT (bit-reversal + butterfly)
+- `ifft()` — inverse FFT via conjugate trick
 
 ## V0.4c — ODE Solvers
 

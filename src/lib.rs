@@ -57,6 +57,9 @@ pub use glam::{Mat3, Mat4, Quat, Vec2, Vec3, Vec4};
 #[cfg(feature = "geo")]
 pub use geo::{Aabb, Frustum, Line, Plane, Ray, Segment, Sphere, Triangle};
 
+#[cfg(feature = "num")]
+pub use num::Complex;
+
 #[cfg(feature = "ai")]
 pub use ai::DaimonClient;
 
