@@ -882,6 +882,12 @@ impl Rect {
     pub fn center(&self) -> glam::Vec2 {
         (self.min + self.max) * 0.5
     }
+
+    /// Size (extents) of the rectangle.
+    #[inline]
+    pub fn size(&self) -> glam::Vec2 {
+        self.max - self.min
+    }
 }
 
 /// A quadtree node.
@@ -1068,10 +1074,12 @@ impl Octree {
         }
     }
 
+    /// Number of items in the octree.
     pub fn len(&self) -> usize {
         self.len
     }
 
+    /// Whether the octree is empty.
     pub fn is_empty(&self) -> bool {
         self.len == 0
     }
@@ -1244,10 +1252,11 @@ impl SpatialHash {
         self.cells.get(&key).map_or(&[], |v| v.as_slice())
     }
 
-    /// Query all indices within a radius of the given point.
+    /// Query all indices within a radius of the given point (broadphase).
     ///
     /// Checks all cells that could contain points within `radius`.
-    /// The caller should perform exact distance checks on the returned indices.
+    /// Returns candidate indices — the caller should perform exact distance
+    /// checks. Cost is O((2*ceil(r/cell_size)+1)^3) in cell lookups.
     pub fn query_radius(&self, point: Vec3, radius: f32) -> Vec<usize> {
         let mut results = Vec::new();
         let cells_r = (radius * self.inv_cell_size).ceil() as i32;
@@ -2467,5 +2476,73 @@ mod tests {
         let json = serde_json::to_string(&r).unwrap();
         let r2: Rect = serde_json::from_str(&json).unwrap();
         assert_eq!(r, r2);
+    }
+
+    // --- V0.5b audit tests ---
+
+    #[test]
+    fn rect_size() {
+        let r = Rect::new(glam::Vec2::new(1.0, 2.0), glam::Vec2::new(4.0, 6.0));
+        let s = r.size();
+        assert!(approx_eq(s.x, 3.0));
+        assert!(approx_eq(s.y, 4.0));
+    }
+
+    #[test]
+    fn quadtree_query_no_results() {
+        let bounds = Rect::new(glam::Vec2::ZERO, glam::Vec2::splat(100.0));
+        let mut qt = Quadtree::new(bounds, 4, 8);
+        for i in 0..10 {
+            qt.insert(glam::Vec2::new(i as f32, i as f32), i);
+        }
+        let query = Rect::new(glam::Vec2::splat(80.0), glam::Vec2::splat(90.0));
+        assert!(qt.query_rect(&query).is_empty());
+    }
+
+    #[test]
+    fn octree_query_all() {
+        let bounds = Aabb::new(Vec3::ZERO, Vec3::splat(10.0));
+        let mut ot = Octree::new(bounds, 4, 8);
+        for i in 0..5 {
+            ot.insert(Vec3::splat(i as f32 + 1.0), i);
+        }
+        // Query the full bounds should return everything
+        let all = ot.query_aabb(&bounds);
+        assert_eq!(all.len(), 5);
+    }
+
+    #[test]
+    fn spatial_hash_many_in_one_cell() {
+        let mut sh = SpatialHash::new(100.0); // Huge cell
+        for i in 0..50 {
+            sh.insert(Vec3::new(i as f32, 0.0, 0.0), i); // All in one cell
+        }
+        let cell = sh.query_cell(Vec3::ZERO);
+        assert_eq!(cell.len(), 50);
+    }
+
+    #[test]
+    fn quadtree_max_depth_prevents_infinite_split() {
+        let bounds = Rect::new(glam::Vec2::ZERO, glam::Vec2::splat(10.0));
+        let mut qt = Quadtree::new(bounds, 1, 3); // Split after 1 item, max 3 levels
+        // Insert many items at the same spot — should stop splitting at depth 3
+        for i in 0..20 {
+            qt.insert(glam::Vec2::splat(5.0), i);
+        }
+        assert_eq!(qt.len(), 20);
+        let all = qt.query_rect(&bounds);
+        assert_eq!(all.len(), 20);
+    }
+
+    #[test]
+    fn octree_max_depth_prevents_infinite_split() {
+        let bounds = Aabb::new(Vec3::ZERO, Vec3::splat(10.0));
+        let mut ot = Octree::new(bounds, 1, 3);
+        for i in 0..20 {
+            ot.insert(Vec3::splat(5.0), i);
+        }
+        assert_eq!(ot.len(), 20);
+        let all = ot.query_aabb(&bounds);
+        assert_eq!(all.len(), 20);
     }
 }
