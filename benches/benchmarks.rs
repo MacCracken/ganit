@@ -87,8 +87,8 @@ fn bench_transforms(c: &mut Criterion) {
 fn bench_geo(c: &mut Criterion) {
     let mut group = c.benchmark_group("geo");
 
-    let ray = hisab::Ray::new(Vec3::new(0.0, 0.0, -10.0), Vec3::Z);
-    let sphere = hisab::Sphere::new(Vec3::ZERO, 1.0);
+    let ray = hisab::Ray::new(Vec3::new(0.0, 0.0, -10.0), Vec3::Z).unwrap();
+    let sphere = hisab::Sphere::new(Vec3::ZERO, 1.0).unwrap();
     let plane = hisab::Plane::from_point_normal(Vec3::new(0.0, 5.0, 0.0), Vec3::Y);
     let aabb = hisab::Aabb::new(Vec3::new(-1.0, -1.0, -1.0), Vec3::new(1.0, 1.0, 1.0));
 
@@ -97,7 +97,7 @@ fn bench_geo(c: &mut Criterion) {
     });
 
     group.bench_function("ray_plane_hit", |b| {
-        let r = hisab::Ray::new(Vec3::ZERO, Vec3::Y);
+        let r = hisab::Ray::new(Vec3::ZERO, Vec3::Y).unwrap();
         b.iter(|| ray_plane(black_box(&r), black_box(&plane)))
     });
 
@@ -106,7 +106,7 @@ fn bench_geo(c: &mut Criterion) {
     });
 
     group.bench_function("ray_sphere_miss", |b| {
-        let r = hisab::Ray::new(Vec3::new(100.0, 100.0, -10.0), Vec3::Z);
+        let r = hisab::Ray::new(Vec3::new(100.0, 100.0, -10.0), Vec3::Z).unwrap();
         b.iter(|| ray_sphere(black_box(&r), black_box(&sphere)))
     });
 
@@ -228,9 +228,9 @@ fn bench_batch(c: &mut Criterion) {
     let mut group = c.benchmark_group("batch");
 
     group.bench_function("ray_sphere_100", |b| {
-        let ray = hisab::Ray::new(Vec3::new(0.0, 0.0, -20.0), Vec3::Z);
+        let ray = hisab::Ray::new(Vec3::new(0.0, 0.0, -20.0), Vec3::Z).unwrap();
         let spheres: Vec<hisab::Sphere> = (0..100)
-            .map(|i| hisab::Sphere::new(Vec3::new(i as f32 * 0.1 - 5.0, 0.0, 0.0), 0.5))
+            .map(|i| hisab::Sphere::new(Vec3::new(i as f32 * 0.1 - 5.0, 0.0, 0.0), 0.5).unwrap())
             .collect();
         b.iter(|| {
             let mut count = 0u32;
@@ -299,7 +299,7 @@ fn bench_v02(c: &mut Criterion) {
     let mut group = c.benchmark_group("v02");
 
     group.bench_function("ray_triangle", |b| {
-        let ray = hisab::Ray::new(Vec3::new(0.0, 0.0, -10.0), Vec3::Z);
+        let ray = hisab::Ray::new(Vec3::new(0.0, 0.0, -10.0), Vec3::Z).unwrap();
         let tri = hisab::Triangle::new(
             Vec3::new(-1.0, -1.0, 0.0),
             Vec3::new(1.0, -1.0, 0.0),
@@ -315,8 +315,8 @@ fn bench_v02(c: &mut Criterion) {
     });
 
     group.bench_function("sphere_sphere_overlap", |b| {
-        let a = hisab::Sphere::new(Vec3::ZERO, 1.0);
-        let bb = hisab::Sphere::new(Vec3::new(1.5, 0.0, 0.0), 1.0);
+        let a = hisab::Sphere::new(Vec3::ZERO, 1.0).unwrap();
+        let bb = hisab::Sphere::new(Vec3::new(1.5, 0.0, 0.0), 1.0).unwrap();
         b.iter(|| hisab::geo::sphere_sphere(black_box(&a), black_box(&bb)))
     });
 
@@ -378,13 +378,13 @@ fn bench_v02(c: &mut Criterion) {
     });
 
     group.bench_function("line_closest_point", |b| {
-        let l = hisab::Line::new(Vec3::ZERO, Vec3::X);
+        let l = hisab::Line::new(Vec3::ZERO, Vec3::X).unwrap();
         let point = Vec3::new(5.0, 3.0, 4.0);
         b.iter(|| l.closest_point(black_box(point)))
     });
 
     group.bench_function("closest_on_sphere", |b| {
-        let s = hisab::Sphere::new(Vec3::ZERO, 5.0);
+        let s = hisab::Sphere::new(Vec3::ZERO, 5.0).unwrap();
         let point = Vec3::new(10.0, 0.0, 0.0);
         b.iter(|| hisab::geo::closest_point_on_sphere(black_box(&s), black_box(point)))
     });
@@ -686,7 +686,7 @@ fn bench_v05a(c: &mut Criterion) {
             })
             .collect();
         let bvh = hisab::Bvh::build(&mut items);
-        let ray = hisab::Ray::new(Vec3::new(0.25, 0.25, -10.0), Vec3::Z);
+        let ray = hisab::Ray::new(Vec3::new(0.25, 0.25, -10.0), Vec3::Z).unwrap();
         b.iter(|| bvh.query_ray(black_box(&ray)))
     });
 

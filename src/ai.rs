@@ -68,6 +68,11 @@ impl DaimonClient {
     }
 
     /// Register with the daimon agent runtime.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DaimonError::Http`] if the HTTP request fails.
+    /// Returns [`DaimonError::Registration`] if the server rejects registration.
     pub async fn register(&mut self) -> Result<String, DaimonError> {
         let url = format!("{}/v1/agents/register", self.daimon_url);
         let body = RegisterRequest {
@@ -97,6 +102,11 @@ impl DaimonClient {
     }
 
     /// Send a heartbeat to daimon.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DaimonError::Heartbeat`] if the client is not registered or the server rejects the heartbeat.
+    /// Returns [`DaimonError::Http`] if the HTTP request fails.
     pub async fn heartbeat(&self) -> Result<(), DaimonError> {
         let id = self.agent_id.as_deref().ok_or_else(|| {
             DaimonError::Heartbeat("not registered — call register() first".to_string())
@@ -114,6 +124,11 @@ impl DaimonClient {
     }
 
     /// Query hoosh (LLM gateway) with a prompt.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DaimonError::Http`] if the HTTP request fails.
+    /// Returns [`DaimonError::HooshQuery`] if the server returns a non-success status.
     pub async fn hoosh_query(&self, prompt: &str) -> Result<String, DaimonError> {
         let url = format!("{}/v1/chat/completions", self.hoosh_url);
 

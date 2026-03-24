@@ -19,9 +19,12 @@ Hisab does NOT trust:
 | `num` (newton/bisection) | Non-convergence / infinite loop | `max_iter` parameter; returns `Err(NoConvergence)` |
 | `num` (eigenvalue) | Non-convergence for repeated eigenvalues | `max_iter` + tolerance; returns `Err(NoConvergence)` |
 | `num` (cholesky) | Non-positive-definite matrix | Returns `Err(InvalidInput)` on non-positive diagonal |
-| `num` (fft) | Non-power-of-2 input | **Panics** (V1.0 will return Result) |
-| `calc` (integration) | Zero step count | **Panics via assert** (V1.0 will return Result) |
-| `geo` (ConvexPolygon) | Empty vertex list | **Panics on support()** (V1.0 will validate in constructor) |
+| `num` (fft) | Non-power-of-2 input | Returns `Err(InvalidInput)` |
+| `calc` (integration) | Zero step count | Returns `Err(ZeroSteps)` |
+| `geo` (ConvexPolygon) | Empty vertex list | Validated in constructor; returns `Err(InvalidInput)` |
+| `geo` (Sphere) | Negative radius | Validated in constructor; returns `Err(InvalidInput)` |
+| `geo` (Ray/Line) | Zero-length direction | Validated in constructor; returns `Err(InvalidInput)` |
+| `geo` (SpatialHash) | Non-positive cell size | Validated in constructor; returns `Err(InvalidInput)` |
 | `geo` (GJK/EPA) | Non-convergence on degenerate shapes | 64-iteration hard limit; returns false/None |
 | `geo` (Quadtree/Octree) | Unbounded tree depth with coincident points | Configurable `max_depth` prevents stack overflow |
 | `geo` (SpatialHash) | Memory growth with many cells | Caller controls cell_size; `clear()` available |
@@ -29,18 +32,9 @@ Hisab does NOT trust:
 | `ai` (DaimonClient) | Network I/O, untrusted responses | Feature-gated; not compiled by default |
 | All | NaN/Infinity propagation | IEEE 754 semantics; no special handling (caller's responsibility) |
 
-## Known Panic Sites (to be fixed in V1.0)
+## Known Panic Sites
 
-| Location | Trigger | Planned fix |
-|----------|---------|-------------|
-| `calc::integral_trapezoidal` | `n == 0` | Return `Err(HisabError::ZeroSteps)` |
-| `calc::integral_simpson` | `n == 0` | Return `Err(HisabError::ZeroSteps)` |
-| `calc::integral_gauss_legendre` | `n == 0` | Return `Err(HisabError::ZeroSteps)` |
-| `calc::bezier_cubic_3d_arc_length` | `n == 0` | Return `Err(HisabError::ZeroSteps)` |
-| `calc::bezier_cubic_3d_param_at_length` | `n == 0` | Return `Err(HisabError::ZeroSteps)` |
-| `num::fft` | Non-power-of-2 length | Return `Err(HisabError::InvalidInput)` |
-| `num::rk4` | `n == 0` | Return `Err(HisabError::ZeroSteps)` |
-| `geo::ConvexPolygon::support` | Empty vertices | Validate in `new()` |
+All previously identified panic sites have been resolved (0.24.3-audit). The library contains **zero `assert!`/`unwrap`/`panic!`** in non-test code.
 
 ## Unsafe Code
 
@@ -70,4 +64,4 @@ Hisab uses inconsistent epsilon values across modules:
 | Degenerate segment | `1e-12` | `geo::Segment::closest_point` |
 | GJK degenerate | `1e-12` | `geo::gjk_intersect` |
 
-**V1.0 action:** Define `EPSILON_F32` and `EPSILON_F64` constants and normalize.
+**0.25.3 action:** Define `EPSILON_F32` and `EPSILON_F64` constants and normalize all checks.

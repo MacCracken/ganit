@@ -17,13 +17,21 @@ pub struct Ray {
 
 impl Ray {
     /// Create a new ray. Direction is normalized automatically.
-    #[must_use]
+    ///
+    /// # Errors
+    /// Returns [`crate::HisabError::InvalidInput`] if `direction` is zero-length.
     #[inline]
-    pub fn new(origin: Vec3, direction: Vec3) -> Self {
-        Self {
+    pub fn new(origin: Vec3, direction: Vec3) -> Result<Self, crate::HisabError> {
+        let len_sq = direction.length_squared();
+        if len_sq < crate::EPSILON_F32 {
+            return Err(crate::HisabError::InvalidInput(
+                "ray direction must be non-zero".into(),
+            ));
+        }
+        Ok(Self {
             origin,
             direction: direction.normalize(),
-        }
+        })
     }
 
     /// Point along the ray at parameter `t`.
@@ -179,10 +187,18 @@ pub struct Sphere {
 }
 
 impl Sphere {
-    #[must_use]
+    /// Create a new sphere.
+    ///
+    /// # Errors
+    /// Returns [`crate::HisabError::InvalidInput`] if `radius` is negative.
     #[inline]
-    pub fn new(center: Vec3, radius: f32) -> Self {
-        Self { center, radius }
+    pub fn new(center: Vec3, radius: f32) -> Result<Self, crate::HisabError> {
+        if radius < 0.0 {
+            return Err(crate::HisabError::InvalidInput(
+                "sphere radius must be non-negative".into(),
+            ));
+        }
+        Ok(Self { center, radius })
     }
 
     /// Check whether a point is inside (or on the surface of) this sphere.
@@ -214,7 +230,7 @@ impl fmt::Display for Sphere {
 #[inline]
 pub fn ray_plane(ray: &Ray, plane: &Plane) -> Option<f32> {
     let denom = plane.normal.dot(ray.direction);
-    if denom.abs() < 1e-8 {
+    if denom.abs() < crate::EPSILON_F32 {
         return None; // Ray parallel to plane
     }
     let t = (plane.distance - plane.normal.dot(ray.origin)) / denom;
@@ -267,7 +283,7 @@ pub fn ray_aabb(ray: &Ray, aabb: &Aabb) -> Option<f32> {
     let mut t_max = f32::INFINITY;
 
     for i in 0..3 {
-        if dir[i].abs() < 1e-8 {
+        if dir[i].abs() < crate::EPSILON_F32 {
             if origin[i] < bb_min[i] || origin[i] > bb_max[i] {
                 return None;
             }
@@ -377,13 +393,21 @@ pub struct Line {
 
 impl Line {
     /// Create a new line. Direction is normalized automatically.
-    #[must_use]
+    ///
+    /// # Errors
+    /// Returns [`crate::HisabError::InvalidInput`] if `direction` is zero-length.
     #[inline]
-    pub fn new(origin: Vec3, direction: Vec3) -> Self {
-        Self {
+    pub fn new(origin: Vec3, direction: Vec3) -> Result<Self, crate::HisabError> {
+        let len_sq = direction.length_squared();
+        if len_sq < crate::EPSILON_F32 {
+            return Err(crate::HisabError::InvalidInput(
+                "line direction must be non-zero".into(),
+            ));
+        }
+        Ok(Self {
             origin,
             direction: direction.normalize(),
-        }
+        })
     }
 
     /// Closest point on this infinite line to the given point.
@@ -444,7 +468,7 @@ impl Segment {
     pub fn closest_point(&self, point: Vec3) -> Vec3 {
         let ab = self.end - self.start;
         let len_sq = ab.dot(ab);
-        if len_sq < 1e-12 {
+        if len_sq < crate::EPSILON_F32 {
             return self.start; // Degenerate segment
         }
         let t = ((point - self.start).dot(ab) / len_sq).clamp(0.0, 1.0);
@@ -563,7 +587,7 @@ pub fn ray_triangle(ray: &Ray, tri: &Triangle) -> Option<f32> {
     let h = ray.direction.cross(edge2);
     let a = edge1.dot(h);
 
-    if a.abs() < 1e-8 {
+    if a.abs() < crate::EPSILON_F32 {
         return None; // Ray parallel to triangle
     }
 
@@ -606,7 +630,7 @@ pub fn sphere_sphere(a: &Sphere, b: &Sphere) -> bool {
 pub fn plane_plane(a: &Plane, b: &Plane) -> Option<Line> {
     let dir = a.normal.cross(b.normal);
     let len_sq = dir.dot(dir);
-    if len_sq < 1e-12 {
+    if len_sq < crate::EPSILON_F32 {
         return None; // Planes are parallel
     }
     // Find a point on the intersection line
@@ -644,7 +668,7 @@ pub fn closest_point_on_plane(plane: &Plane, point: Vec3) -> Vec3 {
 pub fn closest_point_on_sphere(sphere: &Sphere, point: Vec3) -> Vec3 {
     let dir = point - sphere.center;
     let len = dir.length();
-    if len < 1e-8 {
+    if len < crate::EPSILON_F32 {
         return sphere.center + Vec3::new(sphere.radius, 0.0, 0.0);
     }
     sphere.center + dir * (sphere.radius / len)
@@ -1763,7 +1787,7 @@ pub fn gjk_intersect(a: &dyn ConvexSupport, b: &dyn ConvexSupport) -> bool {
                 let ab = a_pt - b_pt;
                 let ao = -b_pt;
                 direction = triple_cross_2d(ab, ao, ab);
-                if direction.length_squared() < 1e-12 {
+                if direction.length_squared() < crate::EPSILON_F32 {
                     return true; // Origin is on the line segment
                 }
             }
@@ -1855,7 +1879,7 @@ pub fn epa_penetration(
         let support = minkowski_support(a, b, closest_normal);
         let d = support.dot(closest_normal);
 
-        if (d - closest_dist).abs() < 1e-6 {
+        if (d - closest_dist).abs() < crate::EPSILON_F32 {
             // Converged — depth is always positive
             return Some(Penetration {
                 normal: closest_normal,
@@ -1913,7 +1937,7 @@ pub fn gjk_epa(a: &dyn ConvexSupport, b: &dyn ConvexSupport) -> Option<Penetrati
                 let ab = a_pt - b_pt;
                 let ao = -b_pt;
                 direction = triple_cross_2d(ab, ao, ab);
-                if direction.length_squared() < 1e-12 {
+                if direction.length_squared() < crate::EPSILON_F32 {
                     // Degenerate — origin on line, need third point
                     direction = glam::Vec2::new(-ab.y, ab.x);
                 }
@@ -1963,7 +1987,7 @@ mod tests {
 
     #[test]
     fn ray_at_parameter() {
-        let r = Ray::new(Vec3::ZERO, Vec3::X);
+        let r = Ray::new(Vec3::ZERO, Vec3::X).unwrap();
         assert_eq!(r.at(0.0), Vec3::ZERO);
         assert!(approx_eq(r.at(5.0).x, 5.0));
     }
@@ -2002,7 +2026,7 @@ mod tests {
 
     #[test]
     fn sphere_contains() {
-        let s = Sphere::new(Vec3::ZERO, 1.0);
+        let s = Sphere::new(Vec3::ZERO, 1.0).unwrap();
         assert!(s.contains_point(Vec3::ZERO));
         assert!(s.contains_point(Vec3::new(1.0, 0.0, 0.0)));
         assert!(!s.contains_point(Vec3::new(1.1, 0.0, 0.0)));
@@ -2010,7 +2034,7 @@ mod tests {
 
     #[test]
     fn ray_plane_intersection() {
-        let r = Ray::new(Vec3::ZERO, Vec3::Y);
+        let r = Ray::new(Vec3::ZERO, Vec3::Y).unwrap();
         let p = Plane::from_point_normal(Vec3::new(0.0, 5.0, 0.0), Vec3::Y);
         let t = ray_plane(&r, &p).unwrap();
         assert!(approx_eq(t, 5.0));
@@ -2018,29 +2042,29 @@ mod tests {
 
     #[test]
     fn ray_plane_parallel_no_hit() {
-        let r = Ray::new(Vec3::ZERO, Vec3::X);
+        let r = Ray::new(Vec3::ZERO, Vec3::X).unwrap();
         let p = Plane::from_point_normal(Vec3::new(0.0, 5.0, 0.0), Vec3::Y);
         assert!(ray_plane(&r, &p).is_none());
     }
 
     #[test]
     fn ray_sphere_hit() {
-        let r = Ray::new(Vec3::new(0.0, 0.0, -5.0), Vec3::Z);
-        let s = Sphere::new(Vec3::ZERO, 1.0);
+        let r = Ray::new(Vec3::new(0.0, 0.0, -5.0), Vec3::Z).unwrap();
+        let s = Sphere::new(Vec3::ZERO, 1.0).unwrap();
         let t = ray_sphere(&r, &s).unwrap();
         assert!(approx_eq(t, 4.0));
     }
 
     #[test]
     fn ray_sphere_miss() {
-        let r = Ray::new(Vec3::new(0.0, 5.0, -5.0), Vec3::Z);
-        let s = Sphere::new(Vec3::ZERO, 1.0);
+        let r = Ray::new(Vec3::new(0.0, 5.0, -5.0), Vec3::Z).unwrap();
+        let s = Sphere::new(Vec3::ZERO, 1.0).unwrap();
         assert!(ray_sphere(&r, &s).is_none());
     }
 
     #[test]
     fn ray_aabb_hit() {
-        let r = Ray::new(Vec3::new(0.5, 0.5, -5.0), Vec3::Z);
+        let r = Ray::new(Vec3::new(0.5, 0.5, -5.0), Vec3::Z).unwrap();
         let bb = Aabb::new(Vec3::ZERO, Vec3::ONE);
         let t = ray_aabb(&r, &bb).unwrap();
         assert!(approx_eq(t, 5.0));
@@ -2048,15 +2072,15 @@ mod tests {
 
     #[test]
     fn ray_aabb_miss() {
-        let r = Ray::new(Vec3::new(5.0, 5.0, -5.0), Vec3::Z);
+        let r = Ray::new(Vec3::new(5.0, 5.0, -5.0), Vec3::Z).unwrap();
         let bb = Aabb::new(Vec3::ZERO, Vec3::ONE);
         assert!(ray_aabb(&r, &bb).is_none());
     }
 
     #[test]
     fn ray_inside_sphere() {
-        let r = Ray::new(Vec3::ZERO, Vec3::X);
-        let s = Sphere::new(Vec3::ZERO, 10.0);
+        let r = Ray::new(Vec3::ZERO, Vec3::X).unwrap();
+        let s = Sphere::new(Vec3::ZERO, 10.0).unwrap();
         let t = ray_sphere(&r, &s).unwrap();
         assert!(t > 0.0);
         assert!(approx_eq(t, 10.0));
@@ -2064,7 +2088,7 @@ mod tests {
 
     #[test]
     fn ray_inside_aabb() {
-        let r = Ray::new(Vec3::splat(0.5), Vec3::X);
+        let r = Ray::new(Vec3::splat(0.5), Vec3::X).unwrap();
         let bb = Aabb::new(Vec3::ZERO, Vec3::ONE);
         let t = ray_aabb(&r, &bb).unwrap();
         assert!(t >= 0.0);
@@ -2079,7 +2103,7 @@ mod tests {
 
     #[test]
     fn ray_normalizes_direction() {
-        let r = Ray::new(Vec3::ZERO, Vec3::new(0.0, 0.0, 10.0));
+        let r = Ray::new(Vec3::ZERO, Vec3::new(0.0, 0.0, 10.0)).unwrap();
         let len = r.direction.length();
         assert!(approx_eq(len, 1.0));
         assert!(approx_eq(r.direction.z, 1.0));
@@ -2087,7 +2111,7 @@ mod tests {
 
     #[test]
     fn ray_at_negative_parameter() {
-        let r = Ray::new(Vec3::new(1.0, 0.0, 0.0), Vec3::X);
+        let r = Ray::new(Vec3::new(1.0, 0.0, 0.0), Vec3::X).unwrap();
         let p = r.at(-2.0);
         assert!(approx_eq(p.x, -1.0));
     }
@@ -2131,29 +2155,29 @@ mod tests {
 
     #[test]
     fn sphere_surface_point() {
-        let s = Sphere::new(Vec3::ZERO, 5.0);
+        let s = Sphere::new(Vec3::ZERO, 5.0).unwrap();
         assert!(s.contains_point(Vec3::new(5.0, 0.0, 0.0)));
         assert!(s.contains_point(Vec3::new(0.0, -5.0, 0.0)));
     }
 
     #[test]
     fn sphere_offset_center() {
-        let s = Sphere::new(Vec3::new(10.0, 0.0, 0.0), 1.0);
+        let s = Sphere::new(Vec3::new(10.0, 0.0, 0.0), 1.0).unwrap();
         assert!(s.contains_point(Vec3::new(10.5, 0.0, 0.0)));
         assert!(!s.contains_point(Vec3::ZERO));
     }
 
     #[test]
     fn ray_plane_behind_origin() {
-        let r = Ray::new(Vec3::new(0.0, 0.0, 5.0), Vec3::Z);
+        let r = Ray::new(Vec3::new(0.0, 0.0, 5.0), Vec3::Z).unwrap();
         let p = Plane::from_point_normal(Vec3::ZERO, Vec3::Z);
         assert!(ray_plane(&r, &p).is_none());
     }
 
     #[test]
     fn ray_sphere_tangent() {
-        let s = Sphere::new(Vec3::ZERO, 1.0);
-        let r = Ray::new(Vec3::new(0.0, 1.0, -5.0), Vec3::Z);
+        let s = Sphere::new(Vec3::ZERO, 1.0).unwrap();
+        let r = Ray::new(Vec3::new(0.0, 1.0, -5.0), Vec3::Z).unwrap();
         let t = ray_sphere(&r, &s);
         assert!(t.is_some());
         assert!(approx_eq(t.unwrap(), 5.0));
@@ -2161,14 +2185,14 @@ mod tests {
 
     #[test]
     fn ray_sphere_behind_ray() {
-        let r = Ray::new(Vec3::new(0.0, 0.0, 5.0), Vec3::Z);
-        let s = Sphere::new(Vec3::ZERO, 1.0);
+        let r = Ray::new(Vec3::new(0.0, 0.0, 5.0), Vec3::Z).unwrap();
+        let s = Sphere::new(Vec3::ZERO, 1.0).unwrap();
         assert!(ray_sphere(&r, &s).is_none());
     }
 
     #[test]
     fn ray_aabb_axis_aligned_hit() {
-        let r = Ray::new(Vec3::new(-5.0, 0.5, 0.5), Vec3::X);
+        let r = Ray::new(Vec3::new(-5.0, 0.5, 0.5), Vec3::X).unwrap();
         let bb = Aabb::new(Vec3::ZERO, Vec3::ONE);
         let t = ray_aabb(&r, &bb).unwrap();
         assert!(approx_eq(t, 5.0));
@@ -2176,14 +2200,14 @@ mod tests {
 
     #[test]
     fn ray_aabb_parallel_to_slab_inside() {
-        let r = Ray::new(Vec3::new(-5.0, 0.5, 0.5), Vec3::X);
+        let r = Ray::new(Vec3::new(-5.0, 0.5, 0.5), Vec3::X).unwrap();
         let bb = Aabb::new(Vec3::ZERO, Vec3::ONE);
         assert!(ray_aabb(&r, &bb).is_some());
     }
 
     #[test]
     fn ray_aabb_parallel_to_slab_outside() {
-        let r = Ray::new(Vec3::new(-5.0, 5.0, 0.5), Vec3::X);
+        let r = Ray::new(Vec3::new(-5.0, 5.0, 0.5), Vec3::X).unwrap();
         let bb = Aabb::new(Vec3::ZERO, Vec3::ONE);
         assert!(ray_aabb(&r, &bb).is_none());
     }
@@ -2197,7 +2221,7 @@ mod tests {
 
     #[test]
     fn ray_serde_roundtrip() {
-        let r = Ray::new(Vec3::new(1.0, 2.0, 3.0), Vec3::Y);
+        let r = Ray::new(Vec3::new(1.0, 2.0, 3.0), Vec3::Y).unwrap();
         let json = serde_json::to_string(&r).unwrap();
         let r2: Ray = serde_json::from_str(&json).unwrap();
         assert_eq!(r, r2);
@@ -2213,7 +2237,7 @@ mod tests {
 
     #[test]
     fn sphere_serde_roundtrip() {
-        let s = Sphere::new(Vec3::new(1.0, 2.0, 3.0), 5.0);
+        let s = Sphere::new(Vec3::new(1.0, 2.0, 3.0), 5.0).unwrap();
         let json = serde_json::to_string(&s).unwrap();
         let s2: Sphere = serde_json::from_str(&json).unwrap();
         assert_eq!(s, s2);
@@ -2229,7 +2253,7 @@ mod tests {
 
     #[test]
     fn ray_plane_intersection_at_angle() {
-        let r = Ray::new(Vec3::new(0.0, 5.0, 0.0), Vec3::new(0.0, -1.0, 1.0));
+        let r = Ray::new(Vec3::new(0.0, 5.0, 0.0), Vec3::new(0.0, -1.0, 1.0)).unwrap();
         let p = Plane::from_point_normal(Vec3::ZERO, Vec3::Y);
         let t = ray_plane(&r, &p).unwrap();
         let hit = r.at(t);
@@ -2239,8 +2263,8 @@ mod tests {
     #[test]
     fn ray_sphere_optimized_matches_distance() {
         // Verify half-b optimization gives correct hit distance
-        let r = Ray::new(Vec3::new(0.0, 0.0, -10.0), Vec3::Z);
-        let s = Sphere::new(Vec3::ZERO, 2.0);
+        let r = Ray::new(Vec3::new(0.0, 0.0, -10.0), Vec3::Z).unwrap();
+        let s = Sphere::new(Vec3::ZERO, 2.0).unwrap();
         let t = ray_sphere(&r, &s).unwrap();
         assert!(approx_eq(t, 8.0)); // 10 - 2
         let hit = r.at(t);
@@ -2249,8 +2273,8 @@ mod tests {
 
     #[test]
     fn ray_sphere_large_radius() {
-        let r = Ray::new(Vec3::new(0.0, 0.0, -1000.0), Vec3::Z);
-        let s = Sphere::new(Vec3::ZERO, 500.0);
+        let r = Ray::new(Vec3::new(0.0, 0.0, -1000.0), Vec3::Z).unwrap();
+        let s = Sphere::new(Vec3::ZERO, 500.0).unwrap();
         let t = ray_sphere(&r, &s).unwrap();
         assert!(approx_eq(t, 500.0));
     }
@@ -2279,7 +2303,7 @@ mod tests {
     #[test]
     fn ray_aabb_diagonal_ray() {
         // Diagonal ray through AABB
-        let r = Ray::new(Vec3::new(-5.0, -5.0, -5.0), Vec3::new(1.0, 1.0, 1.0));
+        let r = Ray::new(Vec3::new(-5.0, -5.0, -5.0), Vec3::new(1.0, 1.0, 1.0)).unwrap();
         let bb = Aabb::new(Vec3::ZERO, Vec3::ONE);
         assert!(ray_aabb(&r, &bb).is_some());
     }
@@ -2334,7 +2358,7 @@ mod tests {
     // Line tests
     #[test]
     fn line_closest_point() {
-        let l = Line::new(Vec3::ZERO, Vec3::X);
+        let l = Line::new(Vec3::ZERO, Vec3::X).unwrap();
         let p = Vec3::new(5.0, 3.0, 0.0);
         let cp = l.closest_point(p);
         assert!(vec3_approx_eq(cp, Vec3::new(5.0, 0.0, 0.0)));
@@ -2342,7 +2366,7 @@ mod tests {
 
     #[test]
     fn line_distance_to_point() {
-        let l = Line::new(Vec3::ZERO, Vec3::X);
+        let l = Line::new(Vec3::ZERO, Vec3::X).unwrap();
         let d = l.distance_to_point(Vec3::new(5.0, 3.0, 4.0));
         assert!(approx_eq(d, 5.0)); // sqrt(9+16) = 5
     }
@@ -2350,7 +2374,7 @@ mod tests {
     #[test]
     fn line_closest_point_behind_origin() {
         // Line is infinite — should work for negative t
-        let l = Line::new(Vec3::ZERO, Vec3::X);
+        let l = Line::new(Vec3::ZERO, Vec3::X).unwrap();
         let cp = l.closest_point(Vec3::new(-10.0, 1.0, 0.0));
         assert!(vec3_approx_eq(cp, Vec3::new(-10.0, 0.0, 0.0)));
     }
@@ -2406,7 +2430,7 @@ mod tests {
             Vec3::new(1.0, -1.0, 5.0),
             Vec3::new(0.0, 1.0, 5.0),
         );
-        let r = Ray::new(Vec3::ZERO, Vec3::Z);
+        let r = Ray::new(Vec3::ZERO, Vec3::Z).unwrap();
         let t = ray_triangle(&r, &tri).unwrap();
         assert!(approx_eq(t, 5.0));
     }
@@ -2418,7 +2442,7 @@ mod tests {
             Vec3::new(1.0, -1.0, 5.0),
             Vec3::new(0.0, 1.0, 5.0),
         );
-        let r = Ray::new(Vec3::new(10.0, 10.0, 0.0), Vec3::Z);
+        let r = Ray::new(Vec3::new(10.0, 10.0, 0.0), Vec3::Z).unwrap();
         assert!(ray_triangle(&r, &tri).is_none());
     }
 
@@ -2426,7 +2450,7 @@ mod tests {
     fn ray_triangle_parallel() {
         // Ray parallel to triangle plane
         let tri = Triangle::new(Vec3::ZERO, Vec3::X, Vec3::Y);
-        let r = Ray::new(Vec3::new(0.0, 0.0, 1.0), Vec3::X);
+        let r = Ray::new(Vec3::new(0.0, 0.0, 1.0), Vec3::X).unwrap();
         assert!(ray_triangle(&r, &tri).is_none());
     }
 
@@ -2437,7 +2461,7 @@ mod tests {
             Vec3::new(1.0, -1.0, -5.0),
             Vec3::new(0.0, 1.0, -5.0),
         );
-        let r = Ray::new(Vec3::ZERO, Vec3::Z); // Points away from triangle
+        let r = Ray::new(Vec3::ZERO, Vec3::Z).unwrap(); // Points away from triangle
         assert!(ray_triangle(&r, &tri).is_none());
     }
 
@@ -2473,22 +2497,22 @@ mod tests {
     // Sphere-sphere overlap tests
     #[test]
     fn sphere_sphere_overlap() {
-        let a = Sphere::new(Vec3::ZERO, 1.0);
-        let b = Sphere::new(Vec3::new(1.5, 0.0, 0.0), 1.0);
+        let a = Sphere::new(Vec3::ZERO, 1.0).unwrap();
+        let b = Sphere::new(Vec3::new(1.5, 0.0, 0.0), 1.0).unwrap();
         assert!(sphere_sphere(&a, &b));
     }
 
     #[test]
     fn sphere_sphere_no_overlap() {
-        let a = Sphere::new(Vec3::ZERO, 1.0);
-        let b = Sphere::new(Vec3::new(3.0, 0.0, 0.0), 1.0);
+        let a = Sphere::new(Vec3::ZERO, 1.0).unwrap();
+        let b = Sphere::new(Vec3::new(3.0, 0.0, 0.0), 1.0).unwrap();
         assert!(!sphere_sphere(&a, &b));
     }
 
     #[test]
     fn sphere_sphere_touching() {
-        let a = Sphere::new(Vec3::ZERO, 1.0);
-        let b = Sphere::new(Vec3::new(2.0, 0.0, 0.0), 1.0);
+        let a = Sphere::new(Vec3::ZERO, 1.0).unwrap();
+        let b = Sphere::new(Vec3::new(2.0, 0.0, 0.0), 1.0).unwrap();
         assert!(sphere_sphere(&a, &b)); // Touching = overlap
     }
 
@@ -2512,7 +2536,7 @@ mod tests {
     // Closest-point tests
     #[test]
     fn closest_on_ray_forward() {
-        let r = Ray::new(Vec3::ZERO, Vec3::X);
+        let r = Ray::new(Vec3::ZERO, Vec3::X).unwrap();
         let cp = closest_point_on_ray(&r, Vec3::new(5.0, 3.0, 0.0));
         assert!(vec3_approx_eq(cp, Vec3::new(5.0, 0.0, 0.0)));
     }
@@ -2520,7 +2544,7 @@ mod tests {
     #[test]
     fn closest_on_ray_clamped() {
         // Point behind the ray — should clamp to origin
-        let r = Ray::new(Vec3::ZERO, Vec3::X);
+        let r = Ray::new(Vec3::ZERO, Vec3::X).unwrap();
         let cp = closest_point_on_ray(&r, Vec3::new(-5.0, 3.0, 0.0));
         assert!(vec3_approx_eq(cp, Vec3::ZERO));
     }
@@ -2534,21 +2558,21 @@ mod tests {
 
     #[test]
     fn closest_on_sphere_outside() {
-        let s = Sphere::new(Vec3::ZERO, 1.0);
+        let s = Sphere::new(Vec3::ZERO, 1.0).unwrap();
         let cp = closest_point_on_sphere(&s, Vec3::new(10.0, 0.0, 0.0));
         assert!(vec3_approx_eq(cp, Vec3::new(1.0, 0.0, 0.0)));
     }
 
     #[test]
     fn closest_on_sphere_inside() {
-        let s = Sphere::new(Vec3::ZERO, 10.0);
+        let s = Sphere::new(Vec3::ZERO, 10.0).unwrap();
         let cp = closest_point_on_sphere(&s, Vec3::new(1.0, 0.0, 0.0));
         assert!(vec3_approx_eq(cp, Vec3::new(10.0, 0.0, 0.0)));
     }
 
     #[test]
     fn closest_on_sphere_at_center() {
-        let s = Sphere::new(Vec3::ZERO, 5.0);
+        let s = Sphere::new(Vec3::ZERO, 5.0).unwrap();
         let cp = closest_point_on_sphere(&s, Vec3::ZERO);
         assert!(vec3_approx_eq(cp, Vec3::new(5.0, 0.0, 0.0)));
     }
@@ -2623,7 +2647,7 @@ mod tests {
 
     #[test]
     fn line_serde_roundtrip() {
-        let l = Line::new(Vec3::ZERO, Vec3::X);
+        let l = Line::new(Vec3::ZERO, Vec3::X).unwrap();
         let json = serde_json::to_string(&l).unwrap();
         let l2: Line = serde_json::from_str(&json).unwrap();
         assert_eq!(l, l2);
@@ -2682,7 +2706,7 @@ mod tests {
 
     #[test]
     fn closest_on_sphere_direction_consistent() {
-        let s = Sphere::new(Vec3::ZERO, 5.0);
+        let s = Sphere::new(Vec3::ZERO, 5.0).unwrap();
         // Point along +Y axis -> closest should be along +Y
         let cp = closest_point_on_sphere(&s, Vec3::new(0.0, 100.0, 0.0));
         assert!(vec3_approx_eq(cp, Vec3::new(0.0, 5.0, 0.0)));
@@ -2719,7 +2743,7 @@ mod tests {
             Vec3::new(1.0, 0.0, 5.0),
             Vec3::new(0.0, 2.0, 5.0),
         );
-        let r = Ray::new(Vec3::new(0.0, 0.0, 0.0), Vec3::Z);
+        let r = Ray::new(Vec3::new(0.0, 0.0, 0.0), Vec3::Z).unwrap();
         // Should hit at the bottom edge (y=0)
         let t = ray_triangle(&r, &tri).unwrap();
         assert!(approx_eq(t, 5.0));
@@ -2735,7 +2759,7 @@ mod tests {
 
     #[test]
     fn line_distance_at_origin() {
-        let l = Line::new(Vec3::new(0.0, 5.0, 0.0), Vec3::X);
+        let l = Line::new(Vec3::new(0.0, 5.0, 0.0), Vec3::X).unwrap();
         assert!(approx_eq(l.distance_to_point(Vec3::ZERO), 5.0));
     }
 
@@ -2749,15 +2773,15 @@ mod tests {
 
     #[test]
     fn closest_on_ray_along_direction() {
-        let r = Ray::new(Vec3::ZERO, Vec3::X);
+        let r = Ray::new(Vec3::ZERO, Vec3::X).unwrap();
         let cp = closest_point_on_ray(&r, Vec3::new(5.0, 0.0, 0.0));
         assert!(vec3_approx_eq(cp, Vec3::new(5.0, 0.0, 0.0)));
     }
 
     #[test]
     fn sphere_sphere_concentric() {
-        let a = Sphere::new(Vec3::ZERO, 1.0);
-        let b = Sphere::new(Vec3::ZERO, 0.5);
+        let a = Sphere::new(Vec3::ZERO, 1.0).unwrap();
+        let b = Sphere::new(Vec3::ZERO, 0.5).unwrap();
         assert!(sphere_sphere(&a, &b));
     }
 
@@ -2768,7 +2792,7 @@ mod tests {
         let bvh = Bvh::build(&mut []);
         assert!(bvh.is_empty());
         assert_eq!(bvh.len(), 0);
-        let r = Ray::new(Vec3::ZERO, Vec3::X);
+        let r = Ray::new(Vec3::ZERO, Vec3::X).unwrap();
         assert!(bvh.query_ray(&r).is_empty());
     }
 
@@ -2779,7 +2803,7 @@ mod tests {
         let bvh = Bvh::build(&mut items);
         assert_eq!(bvh.len(), 1);
 
-        let r = Ray::new(Vec3::new(0.0, 0.0, -5.0), Vec3::Z);
+        let r = Ray::new(Vec3::new(0.0, 0.0, -5.0), Vec3::Z).unwrap();
         let hits = bvh.query_ray(&r);
         assert_eq!(hits, vec![42]);
     }
@@ -2799,13 +2823,13 @@ mod tests {
         assert_eq!(bvh.len(), 10);
 
         // Ray hitting the first box
-        let r = Ray::new(Vec3::new(0.5, 0.5, -5.0), Vec3::Z);
+        let r = Ray::new(Vec3::new(0.5, 0.5, -5.0), Vec3::Z).unwrap();
         let hits = bvh.query_ray(&r);
         assert!(hits.contains(&0));
         assert!(!hits.contains(&5));
 
         // Ray missing everything (way above)
-        let r_miss = Ray::new(Vec3::new(0.5, 100.0, -5.0), Vec3::Z);
+        let r_miss = Ray::new(Vec3::new(0.5, 100.0, -5.0), Vec3::Z).unwrap();
         assert!(bvh.query_ray(&r_miss).is_empty());
     }
 
@@ -2844,7 +2868,7 @@ mod tests {
         let bvh = Bvh::build(&mut items);
         assert_eq!(bvh.len(), 100);
 
-        let r = Ray::new(Vec3::new(0.25, 0.25, -10.0), Vec3::Z);
+        let r = Ray::new(Vec3::new(0.25, 0.25, -10.0), Vec3::Z).unwrap();
         let hits = bvh.query_ray(&r);
         assert!(!hits.is_empty());
     }
@@ -2949,7 +2973,7 @@ mod tests {
             .collect();
         let bvh = Bvh::build(&mut items);
         assert_eq!(bvh.len(), 5);
-        let r = Ray::new(Vec3::new(0.5, 0.5, -5.0), Vec3::Z);
+        let r = Ray::new(Vec3::new(0.5, 0.5, -5.0), Vec3::Z).unwrap();
         let hits = bvh.query_ray(&r);
         assert_eq!(hits.len(), 5);
     }
@@ -3002,7 +3026,7 @@ mod tests {
             ),
         ];
         let bvh = Bvh::build(&mut items);
-        let r = Ray::new(Vec3::new(5.5, 0.5, -5.0), Vec3::Z);
+        let r = Ray::new(Vec3::new(5.5, 0.5, -5.0), Vec3::Z).unwrap();
         let hits = bvh.query_ray(&r);
         assert!(hits.contains(&1));
         assert!(!hits.contains(&0));
@@ -3470,13 +3494,13 @@ mod tests {
 
     #[test]
     fn ray_display() {
-        let r = Ray::new(Vec3::new(1.0, 0.0, 0.0), Vec3::X);
+        let r = Ray::new(Vec3::new(1.0, 0.0, 0.0), Vec3::X).unwrap();
         assert_eq!(r.to_string(), "Ray(1, 0, 0 -> 1, 0, 0)");
     }
 
     #[test]
     fn ray_display_precision() {
-        let r = Ray::new(Vec3::new(1.0, 2.0, 3.0), Vec3::X);
+        let r = Ray::new(Vec3::new(1.0, 2.0, 3.0), Vec3::X).unwrap();
         assert_eq!(format!("{r:.1}"), "Ray(1.0, 2.0, 3.0 -> 1.0, 0.0, 0.0)");
     }
 
@@ -3500,13 +3524,13 @@ mod tests {
 
     #[test]
     fn sphere_display() {
-        let sp = Sphere::new(Vec3::new(1.0, 2.0, 3.0), 5.0);
+        let sp = Sphere::new(Vec3::new(1.0, 2.0, 3.0), 5.0).unwrap();
         assert_eq!(sp.to_string(), "Sphere((1, 2, 3), r=5)");
     }
 
     #[test]
     fn sphere_display_precision() {
-        let sp = Sphere::new(Vec3::ZERO, 2.5);
+        let sp = Sphere::new(Vec3::ZERO, 2.5).unwrap();
         assert_eq!(format!("{sp:.1}"), "Sphere((0.0, 0.0, 0.0), r=2.5)");
     }
 

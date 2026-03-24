@@ -26,6 +26,12 @@ pub use error::DaimonError;
 /// Convenience alias for `Result<T, HisabError>`.
 pub type Result<T> = std::result::Result<T, HisabError>;
 
+/// Default tolerance for f32 comparisons.
+pub const EPSILON_F32: f32 = 1e-7;
+
+/// Default tolerance for f64 comparisons.
+pub const EPSILON_F64: f64 = 1e-12;
+
 #[cfg(feature = "transforms")]
 pub mod transforms;
 

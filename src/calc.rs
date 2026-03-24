@@ -20,6 +20,10 @@ pub fn derivative(f: impl Fn(f64) -> f64, x: f64, h: f64) -> f64 {
 /// Numerical integration using the trapezoidal rule.
 ///
 /// Divides [a, b] into `n` sub-intervals.
+///
+/// # Errors
+///
+/// Returns [`HisabError::ZeroSteps`] if `n` is zero.
 #[must_use = "returns the computed integral"]
 #[inline]
 pub fn integral_trapezoidal(
@@ -42,6 +46,10 @@ pub fn integral_trapezoidal(
 /// Numerical integration using Simpson's rule.
 ///
 /// `n` must be even. If odd, it is rounded up.
+///
+/// # Errors
+///
+/// Returns [`HisabError::ZeroSteps`] if `n` is zero (after rounding).
 #[must_use = "returns the computed integral"]
 #[inline]
 pub fn integral_simpson(
@@ -223,7 +231,7 @@ pub fn bspline_eval(degree: usize, control_points: &[Vec3], knots: &[f64], t: f6
                 for j in (r..=degree).rev() {
                     let i = k - degree + j;
                     let denom = knots[i + degree + 1 - r] - knots[i];
-                    if denom.abs() < 1e-12 {
+                    if denom.abs() < crate::EPSILON_F64 {
                         continue;
                     }
                     let alpha = ((t - knots[i]) / denom) as f32;
@@ -238,7 +246,7 @@ pub fn bspline_eval(degree: usize, control_points: &[Vec3], knots: &[f64], t: f6
         for j in (r..=degree).rev() {
             let i = k - degree + j;
             let denom = knots[i + degree + 1 - r] - knots[i];
-            if denom.abs() < 1e-12 {
+            if denom.abs() < crate::EPSILON_F64 {
                 continue;
             }
             let alpha = ((t - knots[i]) / denom) as f32;
@@ -256,6 +264,10 @@ pub fn bspline_eval(degree: usize, control_points: &[Vec3], knots: &[f64], t: f6
 /// Approximate the arc length of a cubic Bezier curve in 3D.
 ///
 /// Uses `n` linear segments to approximate. Higher `n` = more accurate.
+///
+/// # Errors
+///
+/// Returns [`HisabError::ZeroSteps`] if `n` is zero.
 #[must_use = "returns the computed arc length"]
 #[inline]
 pub fn bezier_cubic_3d_arc_length(
@@ -284,6 +296,10 @@ pub fn bezier_cubic_3d_arc_length(
 /// Given a normalized distance `s` in [0, 1] (where 0 = start, 1 = end),
 /// returns the corresponding `t` parameter.
 /// `n` controls the accuracy (number of linear segments for the lookup table).
+///
+/// # Errors
+///
+/// Returns [`HisabError::ZeroSteps`] if `n` is zero.
 #[must_use = "returns the parameter at the given arc length"]
 #[inline]
 pub fn bezier_cubic_3d_param_at_length(
@@ -338,7 +354,7 @@ pub fn bezier_cubic_3d_param_at_length(
     let seg_start = table[lo - 1];
     let seg_end = table[lo];
     let seg_len = seg_end - seg_start;
-    let frac = if seg_len > 1e-8 {
+    let frac = if seg_len > crate::EPSILON_F32 {
         (target - seg_start) / seg_len
     } else {
         0.0
@@ -387,6 +403,10 @@ pub fn integral_gauss_legendre_5(f: impl Fn(f64) -> f64, a: f64, b: f64) -> f64 
 /// Composite Gauss-Legendre quadrature (5-point) over `n` sub-intervals.
 ///
 /// Divides `[a, b]` into `n` panels and applies 5-point GL to each.
+///
+/// # Errors
+///
+/// Returns [`HisabError::ZeroSteps`] if `n` is zero.
 #[must_use = "returns the computed integral"]
 #[inline]
 pub fn integral_gauss_legendre(

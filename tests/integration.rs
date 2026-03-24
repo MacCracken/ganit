@@ -18,8 +18,8 @@ fn transform_then_ray_intersection() {
     let t = Transform3D::new(Vec3::new(0.0, 0.0, 10.0), Quat::IDENTITY, Vec3::ONE);
     let sphere_center = t.apply_to_point(Vec3::ZERO);
 
-    let sphere = Sphere::new(sphere_center, 1.0);
-    let ray = Ray::new(Vec3::ZERO, Vec3::Z);
+    let sphere = Sphere::new(sphere_center, 1.0).unwrap();
+    let ray = Ray::new(Vec3::ZERO, Vec3::Z).unwrap();
 
     let hit_t = ray_sphere(&ray, &sphere).expect("should hit");
     assert!(approx_eq(hit_t, 9.0)); // 10.0 - 1.0 radius
@@ -32,7 +32,7 @@ fn interpolated_ray_origin() {
     let b = Vec3::new(5.0, 0.5, 0.5);
     let mid = lerp_vec3(a, b, 0.5);
 
-    let ray = Ray::new(mid, Vec3::Z);
+    let ray = Ray::new(mid, Vec3::Z).unwrap();
     let aabb = Aabb::new(Vec3::ZERO, Vec3::new(1.0, 1.0, 10.0));
 
     let hit = ray_aabb(&ray, &aabb);
@@ -42,7 +42,7 @@ fn interpolated_ray_origin() {
 #[test]
 fn numerical_root_matches_geometry() {
     // Find the distance where a ray hits a plane using both geometry and root-finding.
-    let ray = Ray::new(Vec3::ZERO, Vec3::Y);
+    let ray = Ray::new(Vec3::ZERO, Vec3::Y).unwrap();
     let plane = Plane::from_point_normal(Vec3::new(0.0, 7.0, 0.0), Vec3::Y);
 
     // Geometric method
@@ -93,7 +93,7 @@ fn ray_triangle_through_transformed_mesh() {
         t.apply_to_point(Vec3::new(1.0, -1.0, 0.0)),
         t.apply_to_point(Vec3::new(0.0, 1.0, 0.0)),
     );
-    let ray = Ray::new(Vec3::ZERO, Vec3::Z);
+    let ray = Ray::new(Vec3::ZERO, Vec3::Z).unwrap();
     let hit = ray_triangle(&ray, &tri).unwrap();
     assert!(approx_eq(hit, 10.0));
 }
@@ -121,8 +121,8 @@ fn broadphase_then_narrowphase() {
     let b_aabb = Aabb::new(Vec3::splat(1.0), Vec3::splat(3.0));
     assert!(aabb_aabb(&a_aabb, &b_aabb)); // Broadphase pass
 
-    let a_sphere = Sphere::new(Vec3::ONE, 1.0);
-    let b_sphere = Sphere::new(Vec3::splat(2.0), 1.0);
+    let a_sphere = Sphere::new(Vec3::ONE, 1.0).unwrap();
+    let b_sphere = Sphere::new(Vec3::splat(2.0), 1.0).unwrap();
     assert!(sphere_sphere(&a_sphere, &b_sphere)); // Narrowphase pass
 }
 
@@ -133,8 +133,8 @@ fn interpolated_transform_ray_test() {
     let b = Transform3D::new(Vec3::new(0.0, 0.0, -15.0), Quat::IDENTITY, Vec3::ONE);
     let mid = transform3d_lerp(&a, &b, 0.5);
 
-    let sphere = Sphere::new(mid.position, 1.0);
-    let ray = Ray::new(Vec3::ZERO, Vec3::new(0.0, 0.0, -1.0));
+    let sphere = Sphere::new(mid.position, 1.0).unwrap();
+    let ray = Ray::new(Vec3::ZERO, Vec3::new(0.0, 0.0, -1.0)).unwrap();
     let hit = ray_sphere(&ray, &sphere).unwrap();
     assert!(approx_eq(hit, 9.0)); // z=-10 center, radius 1 -> hit at z=-9 -> t=9
 }

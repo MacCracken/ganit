@@ -18,8 +18,8 @@ fn main() {
     println!("lerp(0, 100, 0.75) = {val}");
 
     // Ray-sphere intersection
-    let ray = Ray::new(Vec3::ZERO, Vec3::Z);
-    let sphere = Sphere::new(Vec3::new(0.0, 0.0, 10.0), 2.0);
+    let ray = Ray::new(Vec3::ZERO, Vec3::Z).unwrap();
+    let sphere = Sphere::new(Vec3::new(0.0, 0.0, 10.0), 2.0).unwrap();
     match hisab::geo::ray_sphere(&ray, &sphere) {
         Some(t) => println!("Ray hits sphere at t={t}, point={}", ray.at(t)),
         None => println!("Ray misses sphere"),

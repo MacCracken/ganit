@@ -5,6 +5,7 @@
 //! Cooley-Tukey FFT/IFFT, DST-I/IDST-I, DCT-II/IDCT, and Runge-Kutta (RK4) ODE integration.
 
 use crate::HisabError;
+use serde::{Deserialize, Serialize};
 
 /// Newton-Raphson root finding.
 ///
@@ -15,6 +16,11 @@ use crate::HisabError;
 /// - `x0`: initial guess.
 /// - `tol`: convergence tolerance (stops when `|f(x)| < tol`).
 /// - `max_iter`: maximum iterations.
+///
+/// # Errors
+///
+/// Returns [`HisabError::InvalidInput`] if the derivative is zero at any iterate.
+/// Returns [`HisabError::NoConvergence`] if `max_iter` iterations are exhausted.
 #[must_use = "contains the computed root or an error"]
 pub fn newton_raphson(
     f: impl Fn(f64) -> f64,
@@ -30,7 +36,7 @@ pub fn newton_raphson(
             return Ok(x);
         }
         let dfx = df(x);
-        if dfx.abs() < 1e-15 {
+        if dfx.abs() < crate::EPSILON_F64 {
             return Err(HisabError::InvalidInput("derivative is zero".to_string()));
         }
         x -= fx / dfx;
@@ -42,6 +48,11 @@ pub fn newton_raphson(
 ///
 /// Finds `x` in `[a, b]` such that `f(x) ≈ 0`. Requires `f(a)` and `f(b)`
 /// to have opposite signs (intermediate value theorem).
+///
+/// # Errors
+///
+/// Returns [`HisabError::InvalidInput`] if `f(a)` and `f(b)` have the same sign.
+/// Returns [`HisabError::NoConvergence`] if `max_iter` iterations are exhausted.
 #[must_use = "contains the computed root or an error"]
 pub fn bisection(
     f: impl Fn(f64) -> f64,
@@ -90,6 +101,11 @@ pub fn bisection(
 /// with dimensions `n x (n+1)`.
 ///
 /// The matrix is modified in place. Returns the solution vector `x`.
+///
+/// # Errors
+///
+/// Returns [`HisabError::InvalidInput`] if the matrix is empty.
+/// Returns [`HisabError::SingularPivot`] if a zero pivot is encountered.
 #[must_use = "contains the solution vector or an error"]
 pub fn gaussian_elimination(matrix: &mut [Vec<f64>]) -> Result<Vec<f64>, HisabError> {
     let n = matrix.len();
@@ -119,7 +135,7 @@ pub fn gaussian_elimination(matrix: &mut [Vec<f64>]) -> Result<Vec<f64>, HisabEr
             }
         }
 
-        if max_val < 1e-12 {
+        if max_val < crate::EPSILON_F64 {
             return Err(HisabError::SingularPivot);
         }
 
@@ -166,6 +182,11 @@ pub fn gaussian_elimination(matrix: &mut [Vec<f64>]) -> Result<Vec<f64>, HisabEr
 ///
 /// Returns `(lu, pivot)` where `lu` stores both L (below diagonal) and U
 /// (on and above diagonal) in a single matrix.
+///
+/// # Errors
+///
+/// Returns [`HisabError::InvalidInput`] if the matrix is empty or not square.
+/// Returns [`HisabError::SingularPivot`] if a zero pivot is encountered.
 #[must_use = "contains the LU factors or an error"]
 #[allow(clippy::needless_range_loop)]
 pub fn lu_decompose(a: &[Vec<f64>]) -> Result<(Vec<Vec<f64>>, Vec<usize>), HisabError> {
@@ -198,7 +219,7 @@ pub fn lu_decompose(a: &[Vec<f64>]) -> Result<(Vec<Vec<f64>>, Vec<usize>), Hisab
                 max_row = row;
             }
         }
-        if max_val < 1e-12 {
+        if max_val < crate::EPSILON_F64 {
             return Err(HisabError::SingularPivot);
         }
         if max_row != col {
@@ -221,6 +242,10 @@ pub fn lu_decompose(a: &[Vec<f64>]) -> Result<(Vec<Vec<f64>>, Vec<usize>), Hisab
 }
 
 /// Solve `A * x = b` using a pre-computed LU decomposition.
+///
+/// # Errors
+///
+/// Returns [`HisabError::InvalidInput`] if `b` length does not match the matrix size.
 #[must_use = "contains the solution vector or an error"]
 #[inline]
 #[allow(clippy::needless_range_loop)]
@@ -268,6 +293,11 @@ pub fn lu_solve(lu: &[Vec<f64>], pivot: &[usize], b: &[f64]) -> Result<Vec<f64>,
 /// Returns `L`. Fails if `A` is not positive-definite.
 ///
 /// Only the lower triangle of `A` is read. The caller must ensure `A` is symmetric.
+///
+/// # Errors
+///
+/// Returns [`HisabError::InvalidInput`] if the matrix is empty or not square.
+/// Returns [`HisabError::InvalidInput`] if the matrix is not positive-definite.
 #[must_use = "contains the Cholesky factor or an error"]
 #[allow(clippy::needless_range_loop)]
 pub fn cholesky(a: &[Vec<f64>]) -> Result<Vec<Vec<f64>>, HisabError> {
@@ -311,6 +341,10 @@ pub fn cholesky(a: &[Vec<f64>]) -> Result<Vec<Vec<f64>>, HisabError> {
 }
 
 /// Solve `A * x = b` using a pre-computed Cholesky factor `L` (where `A = L * L^T`).
+///
+/// # Errors
+///
+/// Returns [`HisabError::InvalidInput`] if `b` length does not match the matrix size.
 #[must_use = "contains the solution vector or an error"]
 #[inline]
 #[allow(clippy::needless_range_loop)]
@@ -359,6 +393,10 @@ pub fn cholesky_solve(l: &[Vec<f64>], b: &[f64]) -> Result<Vec<f64>, HisabError>
 ///
 /// Input is column-major: `a[j]` is the j-th column vector.
 /// Output `r` uses the same layout: `R[i][j]` is stored as `r[j][i]`.
+///
+/// # Errors
+///
+/// Returns [`HisabError::InvalidInput`] if the matrix is empty, not tall enough, or rank-deficient.
 #[must_use = "contains the QR factors or an error"]
 #[allow(clippy::type_complexity, clippy::needless_range_loop)]
 pub fn qr_decompose(a: &[Vec<f64>]) -> Result<(Vec<Vec<f64>>, Vec<Vec<f64>>), HisabError> {
@@ -387,7 +425,7 @@ pub fn qr_decompose(a: &[Vec<f64>]) -> Result<(Vec<Vec<f64>>, Vec<Vec<f64>>), Hi
         }
         // Normalize
         let norm: f64 = (0..m).map(|k| q[j][k] * q[j][k]).sum::<f64>().sqrt();
-        if norm < 1e-12 {
+        if norm < crate::EPSILON_F64 {
             return Err(HisabError::InvalidInput(
                 "columns are linearly dependent".to_string(),
             ));
@@ -402,6 +440,140 @@ pub fn qr_decompose(a: &[Vec<f64>]) -> Result<(Vec<Vec<f64>>, Vec<Vec<f64>>), Hi
 }
 
 // ---------------------------------------------------------------------------
+// Matrix helpers
+// ---------------------------------------------------------------------------
+
+/// Compute the determinant of a square matrix using LU decomposition.
+///
+/// Input is row-major: `a[i]` is the i-th row.
+///
+/// # Errors
+///
+/// Returns [`HisabError::InvalidInput`] if the matrix is empty or not square.
+#[must_use = "returns the computed determinant"]
+pub fn matrix_determinant(a: &[Vec<f64>]) -> Result<f64, HisabError> {
+    let n = a.len();
+    if n == 0 {
+        return Err(HisabError::InvalidInput("empty matrix".into()));
+    }
+    for row in a {
+        if row.len() != n {
+            return Err(HisabError::InvalidInput(format!(
+                "expected square {}x{}, got row length {}",
+                n,
+                n,
+                row.len()
+            )));
+        }
+    }
+    // Use LU decomposition; det = product of U diagonal * sign from pivoting
+    match lu_decompose(a) {
+        Ok((lu, pivot)) => {
+            let mut det = 1.0;
+            for (i, row) in lu.iter().enumerate().take(n) {
+                det *= row[i];
+            }
+            // Determine sign from permutation parity
+            let mut perm = pivot.to_vec();
+            let mut sign = 1.0;
+            for i in 0..n {
+                while perm[i] != i {
+                    let j = perm[i];
+                    perm.swap(i, j);
+                    sign = -sign;
+                }
+            }
+            Ok(det * sign)
+        }
+        Err(HisabError::SingularPivot) => Ok(0.0),
+        Err(e) => Err(e),
+    }
+}
+
+/// Compute the trace (sum of diagonal elements) of a square matrix.
+///
+/// Input is row-major: `a[i]` is the i-th row.
+///
+/// # Errors
+///
+/// Returns [`HisabError::InvalidInput`] if the matrix is empty or not square.
+#[must_use = "returns the computed trace"]
+#[inline]
+pub fn matrix_trace(a: &[Vec<f64>]) -> Result<f64, HisabError> {
+    let n = a.len();
+    if n == 0 {
+        return Err(HisabError::InvalidInput("empty matrix".into()));
+    }
+    for row in a {
+        if row.len() != n {
+            return Err(HisabError::InvalidInput(format!(
+                "expected square {}x{}, got row length {}",
+                n,
+                n,
+                row.len()
+            )));
+        }
+    }
+    Ok((0..n).map(|i| a[i][i]).sum())
+}
+
+/// Multiply two dense matrices: C = A * B.
+///
+/// `a` is `m x p` and `b` is `p x n`, both row-major.
+/// Returns the `m x n` result matrix.
+///
+/// # Errors
+///
+/// Returns [`HisabError::InvalidInput`] if dimensions are incompatible or inputs are empty.
+#[must_use = "returns the product matrix"]
+pub fn matrix_multiply(a: &[Vec<f64>], b: &[Vec<f64>]) -> Result<Vec<Vec<f64>>, HisabError> {
+    let m = a.len();
+    if m == 0 {
+        return Err(HisabError::InvalidInput("empty matrix".into()));
+    }
+    let p = a[0].len();
+    if p == 0 {
+        return Err(HisabError::InvalidInput("empty matrix".into()));
+    }
+    for row in a {
+        if row.len() != p {
+            return Err(HisabError::InvalidInput(
+                "inconsistent row lengths in A".into(),
+            ));
+        }
+    }
+    let n_rows_b = b.len();
+    if n_rows_b != p {
+        return Err(HisabError::InvalidInput(format!(
+            "A is {}x{} but B has {} rows \u{2014} inner dimensions must match",
+            m, p, n_rows_b
+        )));
+    }
+    let n = b[0].len();
+    if n == 0 {
+        return Err(HisabError::InvalidInput("empty matrix".into()));
+    }
+    for row in b {
+        if row.len() != n {
+            return Err(HisabError::InvalidInput(
+                "inconsistent row lengths in B".into(),
+            ));
+        }
+    }
+
+    let mut c = vec![vec![0.0; n]; m];
+    for i in 0..m {
+        for k in 0..p {
+            let a_ik = a[i][k];
+            for j in 0..n {
+                c[i][j] += a_ik * b[k][j];
+            }
+        }
+    }
+    Ok(c)
+}
+
+// ---------------------------------------------------------------------------
 // Least squares fitting
 // ---------------------------------------------------------------------------
 
@@ -409,6 +581,11 @@ pub fn qr_decompose(a: &[Vec<f64>]) -> Result<(Vec<Vec<f64>>, Vec<Vec<f64>>), Hi
 /// using least squares (via QR decomposition).
 ///
 /// Returns coefficients `[a0, a1, a2, ...]` where `y ≈ a0 + a1*x + a2*x^2 + ...`.
+///
+/// # Errors
+///
+/// Returns [`HisabError::InvalidInput`] if `x` and `y` differ in length, are empty,
+/// or have fewer points than `degree + 1`.
 #[must_use = "contains the polynomial coefficients or an error"]
 #[allow(clippy::needless_range_loop)]
 pub fn least_squares_poly(x: &[f64], y: &[f64], degree: usize) -> Result<Vec<f64>, HisabError> {
@@ -467,6 +644,11 @@ pub fn least_squares_poly(x: &[f64], y: &[f64], degree: usize) -> Result<Vec<f64
 /// - `max_iter`: maximum iterations.
 ///
 /// Returns `(eigenvalue, eigenvector)`.
+///
+/// # Errors
+///
+/// Returns [`HisabError::InvalidInput`] if the matrix is empty or not square.
+/// Returns [`HisabError::NoConvergence`] if `max_iter` iterations are exhausted.
 #[must_use = "contains the dominant eigenvalue/eigenvector or an error"]
 #[allow(clippy::needless_range_loop)]
 pub fn eigenvalue_power(
@@ -514,7 +696,7 @@ pub fn eigenvalue_power(
             }
         }
 
-        if max_val.abs() < 1e-15 {
+        if max_val.abs() < crate::EPSILON_F64 {
             return Err(HisabError::NoConvergence(max_iter));
         }
 
@@ -541,7 +723,7 @@ pub fn eigenvalue_power(
 // ---------------------------------------------------------------------------
 
 /// A complex number for FFT operations.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Complex {
     pub re: f64,
     pub im: f64,
@@ -637,6 +819,54 @@ impl std::ops::Mul<f64> for Complex {
             re: self.re * rhs,
             im: self.im * rhs,
         }
+    }
+}
+
+impl std::ops::Div for Complex {
+    type Output = Self;
+    #[inline]
+    fn div(self, rhs: Self) -> Self {
+        let denom = rhs.re * rhs.re + rhs.im * rhs.im;
+        Self {
+            re: (self.re * rhs.re + self.im * rhs.im) / denom,
+            im: (self.im * rhs.re - self.re * rhs.im) / denom,
+        }
+    }
+}
+
+impl std::ops::Div<f64> for Complex {
+    type Output = Self;
+    #[inline]
+    fn div(self, rhs: f64) -> Self {
+        Self {
+            re: self.re / rhs,
+            im: self.im / rhs,
+        }
+    }
+}
+
+impl std::ops::Neg for Complex {
+    type Output = Self;
+    #[inline]
+    fn neg(self) -> Self {
+        Self {
+            re: -self.re,
+            im: -self.im,
+        }
+    }
+}
+
+impl From<f64> for Complex {
+    #[inline]
+    fn from(re: f64) -> Self {
+        Self { re, im: 0.0 }
+    }
+}
+
+impl From<(f64, f64)> for Complex {
+    #[inline]
+    fn from((re, im): (f64, f64)) -> Self {
+        Self { re, im }
     }
 }
 
@@ -881,6 +1111,10 @@ fn rk4_step(
 /// - `n`: number of integration steps.
 ///
 /// Returns the final state vector `y(t_end)`.
+///
+/// # Errors
+///
+/// Returns [`HisabError::ZeroSteps`] if `n` is zero.
 #[must_use = "contains the final state vector or an error"]
 pub fn rk4(
     f: impl Fn(f64, &[f64]) -> Vec<f64>,
@@ -909,6 +1143,10 @@ pub fn rk4(
 /// Fourth-order Runge-Kutta with full trajectory output.
 ///
 /// Same as [`rk4`] but returns all intermediate states as `Vec<(t, y)>`.
+///
+/// # Errors
+///
+/// Returns [`HisabError::ZeroSteps`] if `n` is zero.
 #[must_use = "contains the full trajectory or an error"]
 pub fn rk4_trajectory(
     f: impl Fn(f64, &[f64]) -> Vec<f64>,
@@ -1852,5 +2090,158 @@ mod tests {
         .unwrap();
         // After 20 seconds of damping, amplitude should be small
         assert!(y[0].abs() < 0.5);
+    }
+
+    #[test]
+    fn complex_div() {
+        let a = Complex::new(4.0, 2.0);
+        let b = Complex::new(1.0, 1.0);
+        let c = a / b;
+        assert!(approx_eq(c.re, 3.0));
+        assert!(approx_eq(c.im, -1.0));
+    }
+
+    #[test]
+    fn complex_div_scalar() {
+        let a = Complex::new(6.0, 4.0);
+        let c = a / 2.0;
+        assert!(approx_eq(c.re, 3.0));
+        assert!(approx_eq(c.im, 2.0));
+    }
+
+    #[test]
+    fn complex_neg() {
+        let a = Complex::new(3.0, -4.0);
+        let b = -a;
+        assert!(approx_eq(b.re, -3.0));
+        assert!(approx_eq(b.im, 4.0));
+    }
+
+    #[test]
+    fn complex_from_f64() {
+        let c: Complex = 5.0.into();
+        assert!(approx_eq(c.re, 5.0));
+        assert!(approx_eq(c.im, 0.0));
+    }
+
+    #[test]
+    fn complex_from_tuple() {
+        let c: Complex = (3.0, 4.0).into();
+        assert!(approx_eq(c.re, 3.0));
+        assert!(approx_eq(c.im, 4.0));
+    }
+
+    #[test]
+    fn complex_serde_roundtrip() {
+        let c = Complex::new(1.5, -2.5);
+        let json = serde_json::to_string(&c).unwrap();
+        let c2: Complex = serde_json::from_str(&json).unwrap();
+        assert_eq!(c, c2);
+    }
+
+    // --- Matrix helpers ---
+
+    #[test]
+    fn determinant_2x2() {
+        let a = vec![vec![3.0, 8.0], vec![4.0, 6.0]];
+        let det = matrix_determinant(&a).unwrap();
+        assert!(approx_eq(det, -14.0));
+    }
+
+    #[test]
+    fn determinant_3x3() {
+        let a = vec![
+            vec![6.0, 1.0, 1.0],
+            vec![4.0, -2.0, 5.0],
+            vec![2.0, 8.0, 7.0],
+        ];
+        let det = matrix_determinant(&a).unwrap();
+        assert!((det - (-306.0)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn determinant_identity() {
+        let a = vec![
+            vec![1.0, 0.0, 0.0],
+            vec![0.0, 1.0, 0.0],
+            vec![0.0, 0.0, 1.0],
+        ];
+        let det = matrix_determinant(&a).unwrap();
+        assert!(approx_eq(det, 1.0));
+    }
+
+    #[test]
+    fn determinant_singular() {
+        let a = vec![vec![1.0, 2.0], vec![2.0, 4.0]];
+        let det = matrix_determinant(&a).unwrap();
+        assert!(approx_eq(det, 0.0));
+    }
+
+    #[test]
+    fn determinant_empty() {
+        let a: Vec<Vec<f64>> = vec![];
+        assert!(matrix_determinant(&a).is_err());
+    }
+
+    #[test]
+    fn trace_3x3() {
+        let a = vec![
+            vec![1.0, 2.0, 3.0],
+            vec![4.0, 5.0, 6.0],
+            vec![7.0, 8.0, 9.0],
+        ];
+        let tr = matrix_trace(&a).unwrap();
+        assert!(approx_eq(tr, 15.0));
+    }
+
+    #[test]
+    fn trace_identity() {
+        let a = vec![vec![1.0, 0.0], vec![0.0, 1.0]];
+        assert!(approx_eq(matrix_trace(&a).unwrap(), 2.0));
+    }
+
+    #[test]
+    fn trace_empty() {
+        let a: Vec<Vec<f64>> = vec![];
+        assert!(matrix_trace(&a).is_err());
+    }
+
+    #[test]
+    fn multiply_2x2() {
+        let a = vec![vec![1.0, 2.0], vec![3.0, 4.0]];
+        let b = vec![vec![5.0, 6.0], vec![7.0, 8.0]];
+        let c = matrix_multiply(&a, &b).unwrap();
+        assert!(approx_eq(c[0][0], 19.0));
+        assert!(approx_eq(c[0][1], 22.0));
+        assert!(approx_eq(c[1][0], 43.0));
+        assert!(approx_eq(c[1][1], 50.0));
+    }
+
+    #[test]
+    fn multiply_non_square() {
+        // 2x3 * 3x2 = 2x2
+        let a = vec![vec![1.0, 2.0, 3.0], vec![4.0, 5.0, 6.0]];
+        let b = vec![vec![7.0, 8.0], vec![9.0, 10.0], vec![11.0, 12.0]];
+        let c = matrix_multiply(&a, &b).unwrap();
+        assert_eq!(c.len(), 2);
+        assert_eq!(c[0].len(), 2);
+        assert!(approx_eq(c[0][0], 58.0));
+        assert!(approx_eq(c[1][1], 154.0));
+    }
+
+    #[test]
+    fn multiply_dimension_mismatch() {
+        let a = vec![vec![1.0, 2.0]];
+        let b = vec![vec![1.0], vec![2.0], vec![3.0]];
+        assert!(matrix_multiply(&a, &b).is_err());
+    }
+
+    #[test]
+    fn multiply_identity() {
+        let a = vec![vec![1.0, 0.0], vec![0.0, 1.0]];
+        let b = vec![vec![3.0, 4.0], vec![5.0, 6.0]];
+        let c = matrix_multiply(&a, &b).unwrap();
+        assert!(approx_eq(c[0][0], 3.0));
+        assert!(approx_eq(c[1][1], 6.0));
     }
 }
