@@ -1,8 +1,8 @@
-//! Numerical methods: root finding, linear solvers, decompositions, FFT, and ODE solvers.
+//! Numerical methods: root finding, linear solvers, decompositions, FFT, DST/DCT, and ODE solvers.
 //!
 //! Provides Newton-Raphson, bisection, Gaussian elimination, LU/Cholesky/QR
 //! decompositions, least-squares fitting, eigenvalue computation (power iteration),
-//! Cooley-Tukey FFT/IFFT, and Runge-Kutta (RK4) ODE integration.
+//! Cooley-Tukey FFT/IFFT, DST-I/IDST-I, DCT-II/IDCT, and Runge-Kutta (RK4) ODE integration.
 
 use crate::HisabError;
 
@@ -691,6 +691,116 @@ pub fn ifft(data: &mut [Complex]) {
     for d in data.iter_mut() {
         *d = d.conj() * scale;
     }
+}
+
+// ---------------------------------------------------------------------------
+// Discrete Sine / Cosine Transforms
+// ---------------------------------------------------------------------------
+
+/// Discrete Sine Transform Type-I (DST-I).
+///
+/// Computes `X[k] = Σ x[n] · sin(π·(n+1)·(k+1) / (N+1))` for `k = 0..N-1`.
+///
+/// Used for wall-bounded Poisson solvers where the solution vanishes at both
+/// boundaries (Dirichlet conditions).
+///
+/// # Errors
+///
+/// Returns [`HisabError::InvalidInput`] if `data` is empty.
+pub fn dst(data: &[f64]) -> Result<Vec<f64>, HisabError> {
+    let n = data.len();
+    if n == 0 {
+        return Err(HisabError::InvalidInput(
+            "DST requires non-empty input".into(),
+        ));
+    }
+    let np1 = (n + 1) as f64;
+    let mut out = Vec::with_capacity(n);
+    for k in 0..n {
+        let mut sum = 0.0;
+        for (i, &x) in data.iter().enumerate() {
+            sum += x * (std::f64::consts::PI * (i + 1) as f64 * (k + 1) as f64 / np1).sin();
+        }
+        out.push(sum);
+    }
+    Ok(out)
+}
+
+/// Inverse Discrete Sine Transform Type-I (IDST-I).
+///
+/// DST-I is its own inverse up to a scale factor of `2 / (N+1)`.
+///
+/// # Errors
+///
+/// Returns [`HisabError::InvalidInput`] if `data` is empty.
+pub fn idst(data: &[f64]) -> Result<Vec<f64>, HisabError> {
+    let n = data.len();
+    let mut out = dst(data)?;
+    let scale = 2.0 / (n + 1) as f64;
+    for v in &mut out {
+        *v *= scale;
+    }
+    Ok(out)
+}
+
+/// Discrete Cosine Transform Type-II (DCT-II).
+///
+/// Computes `X[k] = Σ x[n] · cos(π·(2n+1)·k / (2N))` for `k = 0..N-1`.
+///
+/// Used for Neumann boundary conditions where the derivative vanishes at
+/// boundaries. Also the basis of JPEG compression.
+///
+/// # Errors
+///
+/// Returns [`HisabError::InvalidInput`] if `data` is empty.
+pub fn dct(data: &[f64]) -> Result<Vec<f64>, HisabError> {
+    let n = data.len();
+    if n == 0 {
+        return Err(HisabError::InvalidInput(
+            "DCT requires non-empty input".into(),
+        ));
+    }
+    let two_n = 2.0 * n as f64;
+    let mut out = Vec::with_capacity(n);
+    for k in 0..n {
+        let mut sum = 0.0;
+        for (i, &x) in data.iter().enumerate() {
+            sum += x * (std::f64::consts::PI * (2.0 * i as f64 + 1.0) * k as f64 / two_n).cos();
+        }
+        out.push(sum);
+    }
+    Ok(out)
+}
+
+/// Inverse Discrete Cosine Transform (IDCT / DCT-III).
+///
+/// Inverts `dct()`: `x[n] = X[0]/N + (2/N)·Σ_{k=1}^{N-1} X[k]·cos(π·k·(2n+1)/(2N))`.
+///
+/// # Errors
+///
+/// Returns [`HisabError::InvalidInput`] if `data` is empty.
+pub fn idct(data: &[f64]) -> Result<Vec<f64>, HisabError> {
+    let n = data.len();
+    if n == 0 {
+        return Err(HisabError::InvalidInput(
+            "IDCT requires non-empty input".into(),
+        ));
+    }
+    let two_n = 2.0 * n as f64;
+    let inv_n = 1.0 / n as f64;
+    let dc = data[0] * inv_n;
+    let scale = 2.0 * inv_n;
+    let mut out = Vec::with_capacity(n);
+    for i in 0..n {
+        let mut sum = dc;
+        for (k, &x) in data.iter().enumerate().skip(1) {
+            sum += scale
+                * x
+                * (std::f64::consts::PI * k as f64 * (2.0 * i as f64 + 1.0) / two_n).cos();
+        }
+        out.push(sum);
+    }
+    Ok(out)
 }
 
 // ---------------------------------------------------------------------------
@@ -1519,6 +1629,100 @@ mod tests {
     fn fft_non_power_of_two_panics() {
         let mut data = vec![Complex::default(); 3];
         fft(&mut data);
+    }
+
+    // --- V1.0b: DST / DCT ---
+
+    #[test]
+    fn dst_idst_roundtrip() {
+        let data = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        let transformed = dst(&data).unwrap();
+        let recovered = idst(&transformed).unwrap();
+        for i in 0..data.len() {
+            assert!((recovered[i] - data[i]).abs() < 1e-10);
+        }
+    }
+
+    #[test]
+    fn dst_known_values() {
+        // DST-I of [1, 1, 1] with N=3 => sin(π*k*(n+1)/4)
+        // X[0] = sin(π/4) + sin(π*2/4) + sin(π*3/4) = √2/2 + 1 + √2/2 = 1+√2
+        let data = vec![1.0, 1.0, 1.0];
+        let result = dst(&data).unwrap();
+        let expected_0 = 1.0 + std::f64::consts::SQRT_2;
+        assert!((result[0] - expected_0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn dst_single_element() {
+        // DST-I of [x] with N=1: X[0] = x * sin(π/2) = x
+        let result = dst(&[7.0]).unwrap();
+        assert!((result[0] - 7.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn dst_empty_error() {
+        assert!(dst(&[]).is_err());
+    }
+
+    #[test]
+    fn idst_empty_error() {
+        assert!(idst(&[]).is_err());
+    }
+
+    #[test]
+    fn dct_idct_roundtrip() {
+        let data = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        let transformed = dct(&data).unwrap();
+        let recovered = idct(&transformed).unwrap();
+        for i in 0..data.len() {
+            assert!((recovered[i] - data[i]).abs() < 1e-10);
+        }
+    }
+
+    #[test]
+    fn dct_dc_component() {
+        // DCT-II k=0: X[0] = Σ x[n] * cos(0) = sum of all values
+        let data = vec![1.0, 2.0, 3.0, 4.0];
+        let result = dct(&data).unwrap();
+        assert!((result[0] - 10.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn dct_single_element() {
+        let result = dct(&[5.0]).unwrap();
+        assert!((result[0] - 5.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn dct_empty_error() {
+        assert!(dct(&[]).is_err());
+    }
+
+    #[test]
+    fn idct_empty_error() {
+        assert!(idct(&[]).is_err());
+    }
+
+    #[test]
+    fn dct_idct_roundtrip_large() {
+        // Larger input to exercise more terms
+        let data: Vec<f64> = (0..16).map(|i| (i as f64 * 0.3).sin()).collect();
+        let transformed = dct(&data).unwrap();
+        let recovered = idct(&transformed).unwrap();
+        for i in 0..data.len() {
+            assert!((recovered[i] - data[i]).abs() < 1e-10);
+        }
+    }
+
+    #[test]
+    fn dst_idst_roundtrip_large() {
+        let data: Vec<f64> = (0..16).map(|i| (i as f64 * 0.7).cos()).collect();
+        let transformed = dst(&data).unwrap();
+        let recovered = idst(&transformed).unwrap();
+        for i in 0..data.len() {
+            assert!((recovered[i] - data[i]).abs() < 1e-10);
+        }
     }
 
     // --- V0.4c: RK4 ODE solver ---

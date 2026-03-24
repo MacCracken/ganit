@@ -592,6 +592,32 @@ fn bench_v04b(c: &mut Criterion) {
         })
     });
 
+    group.bench_function("dst_64", |b| {
+        let data: Vec<f64> = (0..64).map(|i| (i as f64 * 0.1).sin()).collect();
+        b.iter(|| hisab::num::dst(black_box(&data)))
+    });
+
+    group.bench_function("dct_64", |b| {
+        let data: Vec<f64> = (0..64).map(|i| (i as f64 * 0.1).sin()).collect();
+        b.iter(|| hisab::num::dct(black_box(&data)))
+    });
+
+    group.bench_function("dst_idst_256", |b| {
+        let data: Vec<f64> = (0..256).map(|i| (i as f64 * 0.05).cos()).collect();
+        b.iter(|| {
+            let t = hisab::num::dst(black_box(&data)).unwrap();
+            hisab::num::idst(black_box(&t))
+        })
+    });
+
+    group.bench_function("dct_idct_256", |b| {
+        let data: Vec<f64> = (0..256).map(|i| (i as f64 * 0.05).cos()).collect();
+        b.iter(|| {
+            let t = hisab::num::dct(black_box(&data)).unwrap();
+            hisab::num::idct(black_box(&t))
+        })
+    });
+
     group.finish();
 }
 

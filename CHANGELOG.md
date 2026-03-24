@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.24.3 (2026-03-24)
+
+### num — Discrete Sine/Cosine Transforms
+- `dst()` — Discrete Sine Transform Type-I (Dirichlet boundary conditions)
+- `idst()` — Inverse DST-I (self-inverse with `2/(N+1)` scaling)
+- `dct()` — Discrete Cosine Transform Type-II (Neumann boundary conditions)
+- `idct()` — Inverse DCT (DCT-III)
+- All return `Result` with error on empty input
+- 12 tests: roundtrips, known values, single-element, empty-input errors, large-N
+- 4 benchmarks: `dst_64`, `dct_64`, `dst_idst_256`, `dct_idct_256`
+
 ## 0.22.3 (2026-03-23)
 
 Initial release — 360 tests, 82 benchmarks.
