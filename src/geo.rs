@@ -1638,6 +1638,9 @@ impl SpatialHash {
 ///
 /// For fewer than 2 points, returns the input as-is. For collinear points,
 /// returns only the two endpoints.
+///
+/// **Note:** This function clones the input slice for sorting. For very large
+/// point sets, consider pre-sorting the points yourself.
 #[must_use]
 pub fn convex_hull_2d(points: &[glam::Vec2]) -> Vec<glam::Vec2> {
     let mut pts: Vec<glam::Vec2> = points.to_vec();
@@ -1764,9 +1767,13 @@ pub fn gjk_intersect(a: &dyn ConvexSupport, b: &dyn ConvexSupport) -> bool {
     // Initial direction: from center of A to center of B (approximated)
     let mut direction = glam::Vec2::new(1.0, 0.0);
 
-    let mut simplex: Vec<glam::Vec2> = Vec::with_capacity(3);
+    // Fixed-size simplex: GJK in 2D never exceeds 3 points.
+    let mut simplex = [glam::Vec2::ZERO; 3];
+    let mut simplex_len: usize = 0;
+
     let s = minkowski_support(a, b, direction);
-    simplex.push(s);
+    simplex[simplex_len] = s;
+    simplex_len += 1;
     direction = -s;
 
     for _ in 0..64 {
@@ -1776,10 +1783,11 @@ pub fn gjk_intersect(a: &dyn ConvexSupport, b: &dyn ConvexSupport) -> bool {
             return false; // No collision — didn't pass the origin
         }
 
-        simplex.push(new_point);
+        simplex[simplex_len] = new_point;
+        simplex_len += 1;
 
         // Check if simplex contains the origin
-        match simplex.len() {
+        match simplex_len {
             2 => {
                 // Line case
                 let b_pt = simplex[1];
@@ -1804,12 +1812,15 @@ pub fn gjk_intersect(a: &dyn ConvexSupport, b: &dyn ConvexSupport) -> bool {
                 let ca_perp = triple_cross_2d(cb, ca, ca);
 
                 if cb_perp.dot(co) > 0.0 {
-                    // Region outside CB
-                    simplex.remove(0); // Remove A
+                    // Region outside CB — remove A (index 0)
+                    simplex[0] = simplex[1];
+                    simplex[1] = simplex[2];
+                    simplex_len -= 1;
                     direction = cb_perp;
                 } else if ca_perp.dot(co) > 0.0 {
-                    // Region outside CA
-                    simplex.remove(1); // Remove B
+                    // Region outside CA — remove B (index 1)
+                    simplex[1] = simplex[2];
+                    simplex_len -= 1;
                     direction = ca_perp;
                 } else {
                     // Origin is inside the triangle
@@ -1853,7 +1864,9 @@ pub fn epa_penetration(
         return None;
     }
 
-    let mut polytope: Vec<glam::Vec2> = simplex.to_vec();
+    // Pre-allocate for typical EPA expansion (bounded by 64 iterations + initial 3).
+    let mut polytope: Vec<glam::Vec2> = Vec::with_capacity(32);
+    polytope.extend_from_slice(simplex);
 
     for _ in 0..64 {
         // Find the closest edge to the origin
@@ -1917,10 +1930,14 @@ pub fn epa_penetration(
 #[must_use]
 pub fn gjk_epa(a: &dyn ConvexSupport, b: &dyn ConvexSupport) -> Option<Penetration> {
     let mut direction = glam::Vec2::new(1.0, 0.0);
-    let mut simplex: Vec<glam::Vec2> = Vec::with_capacity(3);
+
+    // Fixed-size simplex: GJK in 2D never exceeds 3 points.
+    let mut simplex = [glam::Vec2::ZERO; 3];
+    let mut simplex_len: usize = 0;
 
     let s = minkowski_support(a, b, direction);
-    simplex.push(s);
+    simplex[simplex_len] = s;
+    simplex_len += 1;
     direction = -s;
 
     for _ in 0..64 {
@@ -1928,9 +1945,10 @@ pub fn gjk_epa(a: &dyn ConvexSupport, b: &dyn ConvexSupport) -> Option<Penetrati
         if new_point.dot(direction) < 0.0 {
             return None;
         }
-        simplex.push(new_point);
+        simplex[simplex_len] = new_point;
+        simplex_len += 1;
 
-        match simplex.len() {
+        match simplex_len {
             2 => {
                 let b_pt = simplex[1];
                 let a_pt = simplex[0];
@@ -1954,14 +1972,19 @@ pub fn gjk_epa(a: &dyn ConvexSupport, b: &dyn ConvexSupport) -> Option<Penetrati
                 let ca_perp = triple_cross_2d(cb, ca, ca);
 
                 if cb_perp.dot(co) > 0.0 {
-                    simplex.remove(0);
+                    // Region outside CB — remove A (index 0)
+                    simplex[0] = simplex[1];
+                    simplex[1] = simplex[2];
+                    simplex_len -= 1;
                     direction = cb_perp;
                 } else if ca_perp.dot(co) > 0.0 {
-                    simplex.remove(1);
+                    // Region outside CA — remove B (index 1)
+                    simplex[1] = simplex[2];
+                    simplex_len -= 1;
                     direction = ca_perp;
                 } else {
-                    // Contains origin — run EPA
-                    return epa_penetration(a, b, &simplex);
+                    // Contains origin — run EPA with slice of the fixed array
+                    return epa_penetration(a, b, &simplex[..simplex_len]);
                 }
             }
             _ => unreachable!(),

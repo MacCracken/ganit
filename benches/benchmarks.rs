@@ -629,17 +629,40 @@ fn bench_v04c(c: &mut Criterion) {
     let mut group = c.benchmark_group("v04c");
 
     group.bench_function("rk4_exp_100_steps", |b| {
-        b.iter(|| hisab::num::rk4(|_t, y| vec![y[0]], 0.0, black_box(&[1.0]), 1.0, 100))
+        b.iter(|| {
+            hisab::num::rk4(
+                |_t, y, out: &mut [f64]| {
+                    out[0] = y[0];
+                },
+                0.0,
+                black_box(&[1.0]),
+                1.0,
+                100,
+            )
+        })
     });
 
     group.bench_function("rk4_exp_1000_steps", |b| {
-        b.iter(|| hisab::num::rk4(|_t, y| vec![y[0]], 0.0, black_box(&[1.0]), 1.0, 1000))
+        b.iter(|| {
+            hisab::num::rk4(
+                |_t, y, out: &mut [f64]| {
+                    out[0] = y[0];
+                },
+                0.0,
+                black_box(&[1.0]),
+                1.0,
+                1000,
+            )
+        })
     });
 
     group.bench_function("rk4_oscillator_1000", |b| {
         b.iter(|| {
             hisab::num::rk4(
-                |_t, y| vec![y[1], -y[0]],
+                |_t, y, out: &mut [f64]| {
+                    out[0] = y[1];
+                    out[1] = -y[0];
+                },
                 0.0,
                 black_box(&[1.0, 0.0]),
                 std::f64::consts::PI,

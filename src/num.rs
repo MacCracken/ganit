@@ -241,6 +241,67 @@ pub fn lu_decompose(a: &[Vec<f64>]) -> Result<(Vec<Vec<f64>>, Vec<usize>), Hisab
     Ok((lu, pivot))
 }
 
+/// LU decomposition with partial pivoting, modifying the matrix in place.
+///
+/// Same as [`lu_decompose`] but overwrites `a` with the combined L/U factors
+/// instead of cloning. Use this when the original matrix is no longer needed.
+///
+/// # Errors
+///
+/// Returns [`HisabError::InvalidInput`] if the matrix is empty or not square.
+/// Returns [`HisabError::SingularPivot`] if a zero pivot is encountered.
+#[must_use = "returns the pivot permutation needed for solving"]
+#[allow(clippy::needless_range_loop)]
+pub fn lu_decompose_in_place(a: &mut [Vec<f64>]) -> Result<Vec<usize>, HisabError> {
+    let n = a.len();
+    if n == 0 {
+        return Err(HisabError::InvalidInput("empty matrix".into()));
+    }
+    for row in a.iter() {
+        if row.len() != n {
+            return Err(HisabError::InvalidInput(format!(
+                "expected square {}x{}, got row length {}",
+                n,
+                n,
+                row.len()
+            )));
+        }
+    }
+
+    let mut pivot: Vec<usize> = (0..n).collect();
+
+    for col in 0..n {
+        let mut max_row = col;
+        let mut max_val = a[col][col].abs();
+        for row in (col + 1)..n {
+            let val = a[row][col].abs();
+            if val > max_val {
+                max_val = val;
+                max_row = row;
+            }
+        }
+        if max_val < crate::EPSILON_F64 {
+            return Err(HisabError::SingularPivot);
+        }
+        if max_row != col {
+            a.swap(col, max_row);
+            pivot.swap(col, max_row);
+        }
+
+        let diag = a[col][col];
+        for row in (col + 1)..n {
+            a[row][col] /= diag;
+            let factor = a[row][col];
+            for j in (col + 1)..n {
+                let val = a[col][j];
+                a[row][j] -= factor * val;
+            }
+        }
+    }
+
+    Ok(pivot)
+}
+
 /// Solve `A * x = b` using a pre-computed LU decomposition.
 ///
 /// # Errors
@@ -437,6 +498,56 @@ pub fn qr_decompose(a: &[Vec<f64>]) -> Result<(Vec<Vec<f64>>, Vec<Vec<f64>>), Hi
     }
 
     Ok((q, r))
+}
+
+/// QR decomposition using modified Gram-Schmidt, modifying columns in place.
+///
+/// Same as [`qr_decompose`] but overwrites `a` with the Q factor instead of
+/// cloning. Returns only R. Use this when the original matrix is no longer needed.
+///
+/// Input is column-major: `a[j]` is the j-th column vector.
+///
+/// # Errors
+///
+/// Returns [`HisabError::InvalidInput`] if the matrix is empty, underdetermined,
+/// or has linearly dependent columns.
+#[must_use = "returns the R factor needed for solving"]
+#[allow(clippy::needless_range_loop)]
+pub fn qr_decompose_in_place(a: &mut [Vec<f64>]) -> Result<Vec<Vec<f64>>, HisabError> {
+    let n = a.len();
+    if n == 0 {
+        return Err(HisabError::InvalidInput("empty matrix".into()));
+    }
+    let m = a[0].len();
+    if m < n {
+        return Err(HisabError::InvalidInput(
+            "QR requires m >= n (more rows than columns)".into(),
+        ));
+    }
+
+    let mut r = vec![vec![0.0; n]; n];
+
+    for j in 0..n {
+        for i in 0..j {
+            let dot: f64 = (0..m).map(|k| a[i][k] * a[j][k]).sum();
+            r[j][i] = dot;
+            for k in 0..m {
+                a[j][k] -= dot * a[i][k];
+            }
+        }
+        let norm: f64 = (0..m).map(|k| a[j][k] * a[j][k]).sum::<f64>().sqrt();
+        if norm < crate::EPSILON_F64 {
+            return Err(HisabError::InvalidInput(
+                "columns are linearly dependent".into(),
+            ));
+        }
+        r[j][j] = norm;
+        for k in 0..m {
+            a[j][k] /= norm;
+        }
+    }
+
+    Ok(r)
 }
 
 // ---------------------------------------------------------------------------
@@ -1068,31 +1179,38 @@ pub fn idct(data: &[f64]) -> Result<Vec<f64>, HisabError> {
 // ---------------------------------------------------------------------------
 
 /// Perform one RK4 step in-place, reusing scratch buffers.
-#[allow(clippy::needless_range_loop)]
+///
+/// All k1–k4 and tmp buffers are allocated by the caller and reused across steps,
+/// eliminating per-step heap allocations.
+#[allow(clippy::needless_range_loop, clippy::too_many_arguments)]
 fn rk4_step(
-    f: &impl Fn(f64, &[f64]) -> Vec<f64>,
+    f: &impl Fn(f64, &[f64], &mut [f64]),
     t: f64,
     h: f64,
     y: &mut [f64],
+    k1: &mut [f64],
+    k2: &mut [f64],
+    k3: &mut [f64],
+    k4: &mut [f64],
     tmp: &mut [f64],
     dim: usize,
 ) {
-    let k1 = f(t, y);
+    f(t, y, k1);
 
     for i in 0..dim {
         tmp[i] = y[i] + 0.5 * h * k1[i];
     }
-    let k2 = f(t + 0.5 * h, tmp);
+    f(t + 0.5 * h, tmp, k2);
 
     for i in 0..dim {
         tmp[i] = y[i] + 0.5 * h * k2[i];
     }
-    let k3 = f(t + 0.5 * h, tmp);
+    f(t + 0.5 * h, tmp, k3);
 
     for i in 0..dim {
         tmp[i] = y[i] + h * k3[i];
     }
-    let k4 = f(t + h, tmp);
+    f(t + h, tmp, k4);
 
     let h6 = h / 6.0;
     for i in 0..dim {
@@ -1104,7 +1222,8 @@ fn rk4_step(
 ///
 /// Solves `dy/dt = f(t, y)` from `t0` to `t_end` with `n` steps.
 ///
-/// - `f`: the derivative function `f(t, &y) -> dy/dt` (returns a Vec of same length as `y`).
+/// - `f`: the derivative function `f(t, &y, &mut dy_dt)` that writes derivatives into the
+///   provided output buffer, eliminating per-step heap allocations.
 /// - `t0`: initial time.
 /// - `y0`: initial state vector.
 /// - `t_end`: final time.
@@ -1117,7 +1236,7 @@ fn rk4_step(
 /// Returns [`HisabError::ZeroSteps`] if `n` is zero.
 #[must_use = "contains the final state vector or an error"]
 pub fn rk4(
-    f: impl Fn(f64, &[f64]) -> Vec<f64>,
+    f: impl Fn(f64, &[f64], &mut [f64]),
     t0: f64,
     y0: &[f64],
     t_end: f64,
@@ -1130,10 +1249,16 @@ pub fn rk4(
     let h = (t_end - t0) / n as f64;
     let mut t = t0;
     let mut y = y0.to_vec();
+    let mut k1 = vec![0.0; dim];
+    let mut k2 = vec![0.0; dim];
+    let mut k3 = vec![0.0; dim];
+    let mut k4 = vec![0.0; dim];
     let mut tmp = vec![0.0; dim];
 
     for _ in 0..n {
-        rk4_step(&f, t, h, &mut y, &mut tmp, dim);
+        rk4_step(
+            &f, t, h, &mut y, &mut k1, &mut k2, &mut k3, &mut k4, &mut tmp, dim,
+        );
         t += h;
     }
 
@@ -1149,7 +1274,7 @@ pub fn rk4(
 /// Returns [`HisabError::ZeroSteps`] if `n` is zero.
 #[must_use = "contains the full trajectory or an error"]
 pub fn rk4_trajectory(
-    f: impl Fn(f64, &[f64]) -> Vec<f64>,
+    f: impl Fn(f64, &[f64], &mut [f64]),
     t0: f64,
     y0: &[f64],
     t_end: f64,
@@ -1162,12 +1287,18 @@ pub fn rk4_trajectory(
     let h = (t_end - t0) / n as f64;
     let mut t = t0;
     let mut y = y0.to_vec();
+    let mut k1 = vec![0.0; dim];
+    let mut k2 = vec![0.0; dim];
+    let mut k3 = vec![0.0; dim];
+    let mut k4 = vec![0.0; dim];
     let mut tmp = vec![0.0; dim];
     let mut trajectory = Vec::with_capacity(n + 1);
     trajectory.push((t, y.clone()));
 
     for _ in 0..n {
-        rk4_step(&f, t, h, &mut y, &mut tmp, dim);
+        rk4_step(
+            &f, t, h, &mut y, &mut k1, &mut k2, &mut k3, &mut k4, &mut tmp, dim,
+        );
         t += h;
         trajectory.push((t, y.clone()));
     }
@@ -2004,7 +2135,16 @@ mod tests {
     fn rk4_exponential_growth() {
         // dy/dt = y, y(0) = 1 => y(t) = e^t
         // At t=1, y should be e ≈ 2.71828
-        let y = rk4(|_t, y| vec![y[0]], 0.0, &[1.0], 1.0, 1000).unwrap();
+        let y = rk4(
+            |_t, y, out: &mut [f64]| {
+                out[0] = y[0];
+            },
+            0.0,
+            &[1.0],
+            1.0,
+            1000,
+        )
+        .unwrap();
         assert!((y[0] - std::f64::consts::E).abs() < 1e-8);
     }
 
@@ -2012,7 +2152,16 @@ mod tests {
     fn rk4_linear_ode() {
         // dy/dt = 2, y(0) = 0 => y(t) = 2t
         // At t=5, y = 10
-        let y = rk4(|_t, _y| vec![2.0], 0.0, &[0.0], 5.0, 100).unwrap();
+        let y = rk4(
+            |_t, _y, out: &mut [f64]| {
+                out[0] = 2.0;
+            },
+            0.0,
+            &[0.0],
+            5.0,
+            100,
+        )
+        .unwrap();
         assert!(approx_eq(y[0], 10.0));
     }
 
@@ -2022,7 +2171,10 @@ mod tests {
         // x(0)=1, v(0)=0 => x(t) = cos(t), v(t) = -sin(t)
         // At t=pi, x ≈ -1, v ≈ 0
         let y = rk4(
-            |_t, y| vec![y[1], -y[0]],
+            |_t, y, out: &mut [f64]| {
+                out[0] = y[1];
+                out[1] = -y[0];
+            },
             0.0,
             &[1.0, 0.0],
             std::f64::consts::PI,
@@ -2037,7 +2189,16 @@ mod tests {
     fn rk4_quadratic_exact() {
         // dy/dt = 2t, y(0) = 0 => y(t) = t^2
         // RK4 is exact for polynomials up to degree 4
-        let y = rk4(|t, _y| vec![2.0 * t], 0.0, &[0.0], 3.0, 10).unwrap();
+        let y = rk4(
+            |t, _y, out: &mut [f64]| {
+                out[0] = 2.0 * t;
+            },
+            0.0,
+            &[0.0],
+            3.0,
+            10,
+        )
+        .unwrap();
         assert!((y[0] - 9.0).abs() < 1e-10);
     }
 
@@ -2047,7 +2208,10 @@ mod tests {
         // x(0)=1, y(0)=0 => x(t)=cos(t), y(t)=sin(t)
         // At t=pi/2: x≈0, y≈1
         let y = rk4(
-            |_t, y| vec![-y[1], y[0]],
+            |_t, y, out: &mut [f64]| {
+                out[0] = -y[1];
+                out[1] = y[0];
+            },
             0.0,
             &[1.0, 0.0],
             std::f64::consts::FRAC_PI_2,
@@ -2060,7 +2224,16 @@ mod tests {
 
     #[test]
     fn rk4_trajectory_length() {
-        let traj = rk4_trajectory(|_t, y| vec![y[0]], 0.0, &[1.0], 1.0, 100).unwrap();
+        let traj = rk4_trajectory(
+            |_t, y, out: &mut [f64]| {
+                out[0] = y[0];
+            },
+            0.0,
+            &[1.0],
+            1.0,
+            100,
+        )
+        .unwrap();
         assert_eq!(traj.len(), 101); // n+1 points
         assert!(approx_eq(traj[0].0, 0.0));
         assert!((traj[100].0 - 1.0).abs() < 1e-10);
@@ -2069,8 +2242,11 @@ mod tests {
     #[test]
     fn rk4_trajectory_matches_final() {
         // Trajectory endpoint should match rk4 result
-        let final_state = rk4(|_t, y| vec![y[0]], 0.0, &[1.0], 1.0, 100).unwrap();
-        let traj = rk4_trajectory(|_t, y| vec![y[0]], 0.0, &[1.0], 1.0, 100).unwrap();
+        let f = |_t: f64, y: &[f64], out: &mut [f64]| {
+            out[0] = y[0];
+        };
+        let final_state = rk4(f, 0.0, &[1.0], 1.0, 100).unwrap();
+        let traj = rk4_trajectory(f, 0.0, &[1.0], 1.0, 100).unwrap();
         let traj_final = &traj[100].1;
         assert!((final_state[0] - traj_final[0]).abs() < 1e-12);
     }
@@ -2081,7 +2257,10 @@ mod tests {
         // System: dx/dt = v, dv/dt = -x - 0.1*v
         // Should decay toward zero
         let y = rk4(
-            |_t, y| vec![y[1], -y[0] - 0.1 * y[1]],
+            |_t, y, out: &mut [f64]| {
+                out[0] = y[1];
+                out[1] = -y[0] - 0.1 * y[1];
+            },
             0.0,
             &[1.0, 0.0],
             20.0,
@@ -2243,5 +2422,44 @@ mod tests {
         let c = matrix_multiply(&a, &b).unwrap();
         assert!(approx_eq(c[0][0], 3.0));
         assert!(approx_eq(c[1][1], 6.0));
+    }
+
+    #[test]
+    fn lu_in_place_2x2() {
+        let mut a = vec![vec![2.0, 1.0], vec![1.0, 3.0]];
+        let pivot = lu_decompose_in_place(&mut a).unwrap();
+        // Solve using the in-place LU
+        let x = lu_solve(&a, &pivot, &[5.0, 10.0]).unwrap();
+        assert!(approx_eq(x[0], 1.0));
+        assert!(approx_eq(x[1], 3.0));
+    }
+
+    #[test]
+    fn lu_in_place_singular() {
+        let mut a = vec![vec![1.0, 2.0], vec![2.0, 4.0]];
+        assert!(lu_decompose_in_place(&mut a).is_err());
+    }
+
+    #[test]
+    fn qr_in_place_reconstruct() {
+        let original = vec![
+            vec![1.0, 4.0, 7.0],
+            vec![2.0, 5.0, 8.0],
+            vec![3.0, 6.0, 10.0],
+        ];
+        let mut a = original.clone();
+        let r = qr_decompose_in_place(&mut a).unwrap();
+        // a now contains Q. Verify Q is orthonormal
+        let n = a.len();
+        let m = a[0].len();
+        for i in 0..n {
+            for j in 0..n {
+                let dot: f64 = (0..m).map(|k| a[i][k] * a[j][k]).sum();
+                let expected = if i == j { 1.0 } else { 0.0 };
+                assert!((dot - expected).abs() < 1e-10);
+            }
+        }
+        drop(r);
+        drop(original);
     }
 }

@@ -33,11 +33,21 @@
 ### Quality
 - `#[must_use]` on all ~90 pure public functions/methods
 - `#[inline]` on 14 hot-path functions
+- `EPSILON_F32` (1e-7), `EPSILON_F64` (1e-12) constants; all tolerance checks normalized
+- `# Errors` doc sections on all Result-returning public functions
+- `cargo doc --all-features` zero warnings
 - Removed duplicate `Result<T>` type alias
 - License identifier: `GPL-3.0` → `GPL-3.0-only`
 
+### Performance
+- `rk4`/`rk4_trajectory`: closure refactored to `f(t, y, out: &mut [f64])` — 4 allocs/step → 0
+- GJK: `Vec` simplex → fixed `[Vec2; 3]` array (zero heap allocation)
+- EPA: pre-allocated polytope (`Vec::with_capacity(32)`)
+- `lu_decompose_in_place()` — zero-clone LU decomposition
+- `qr_decompose_in_place()` — zero-clone QR decomposition
+
 ### Stats
-- 394 tests, 82 benchmarks, zero clippy warnings
+- 408 tests, 82 benchmarks, zero clippy warnings
 
 ## 0.22.3 (2026-03-22)
 
