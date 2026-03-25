@@ -11,10 +11,8 @@ use std::ops;
 /// All operations maintain the invariant `lo <= hi`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Interval {
-    /// Lower bound.
-    pub lo: f64,
-    /// Upper bound.
-    pub hi: f64,
+    lo: f64,
+    hi: f64,
 }
 
 impl Interval {
@@ -34,6 +32,20 @@ impl Interval {
     #[inline]
     pub fn point(x: f64) -> Self {
         Self { lo: x, hi: x }
+    }
+
+    /// Lower bound.
+    #[must_use]
+    #[inline]
+    pub fn lo(self) -> f64 {
+        self.lo
+    }
+
+    /// Upper bound.
+    #[must_use]
+    #[inline]
+    pub fn hi(self) -> f64 {
+        self.hi
     }
 
     /// Width of the interval.
@@ -240,8 +252,8 @@ mod tests {
         let a = Interval::new(1.0, 3.0);
         let b = Interval::new(2.0, 4.0);
         let r = a + b;
-        assert!(approx(r.lo, 3.0));
-        assert!(approx(r.hi, 7.0));
+        assert!(approx(r.lo(), 3.0));
+        assert!(approx(r.hi(), 7.0));
     }
 
     #[test]
@@ -249,8 +261,8 @@ mod tests {
         let a = Interval::new(1.0, 3.0);
         let b = Interval::new(2.0, 4.0);
         let r = a - b;
-        assert!(approx(r.lo, -3.0));
-        assert!(approx(r.hi, 1.0));
+        assert!(approx(r.lo(), -3.0));
+        assert!(approx(r.hi(), 1.0));
     }
 
     #[test]
@@ -258,8 +270,8 @@ mod tests {
         let a = Interval::new(-2.0, 3.0);
         let b = Interval::new(1.0, 4.0);
         let r = a * b;
-        assert!(approx(r.lo, -8.0));
-        assert!(approx(r.hi, 12.0));
+        assert!(approx(r.lo(), -8.0));
+        assert!(approx(r.hi(), 12.0));
     }
 
     #[test]
@@ -267,8 +279,8 @@ mod tests {
         let a = Interval::new(1.0, 4.0);
         let b = Interval::new(2.0, 8.0);
         let r = a / b;
-        assert!(approx(r.lo, 0.125));
-        assert!(approx(r.hi, 2.0));
+        assert!(approx(r.lo(), 0.125));
+        assert!(approx(r.hi(), 2.0));
     }
 
     #[test]
@@ -276,8 +288,8 @@ mod tests {
         let a = Interval::new(1.0, 2.0);
         let b = Interval::new(-1.0, 1.0);
         let r = a / b;
-        assert!(r.lo.is_infinite());
-        assert!(r.hi.is_infinite());
+        assert!(r.lo().is_infinite());
+        assert!(r.hi().is_infinite());
     }
 
     #[test]
@@ -302,8 +314,8 @@ mod tests {
         let a = Interval::new(1.0, 5.0);
         let b = Interval::new(3.0, 7.0);
         let r = a.intersect(b).unwrap();
-        assert!(approx(r.lo, 3.0));
-        assert!(approx(r.hi, 5.0));
+        assert!(approx(r.lo(), 3.0));
+        assert!(approx(r.hi(), 5.0));
 
         let c = Interval::new(6.0, 7.0);
         assert!(a.intersect(c).is_none());
@@ -314,24 +326,24 @@ mod tests {
         let a = Interval::new(1.0, 3.0);
         let b = Interval::new(5.0, 7.0);
         let r = a.hull(b);
-        assert!(approx(r.lo, 1.0));
-        assert!(approx(r.hi, 7.0));
+        assert!(approx(r.lo(), 1.0));
+        assert!(approx(r.hi(), 7.0));
     }
 
     #[test]
     fn interval_neg() {
         let i = Interval::new(2.0, 5.0);
         let r = -i;
-        assert!(approx(r.lo, -5.0));
-        assert!(approx(r.hi, -2.0));
+        assert!(approx(r.lo(), -5.0));
+        assert!(approx(r.hi(), -2.0));
     }
 
     #[test]
     fn interval_abs() {
         let i = Interval::new(-3.0, 5.0);
         let r = i.abs();
-        assert!(approx(r.lo, 0.0));
-        assert!(approx(r.hi, 5.0));
+        assert!(approx(r.lo(), 0.0));
+        assert!(approx(r.hi(), 5.0));
 
         let neg = Interval::new(-5.0, -2.0);
         let r2 = neg.abs();
@@ -343,16 +355,16 @@ mod tests {
     fn interval_sqr() {
         let i = Interval::new(-3.0, 2.0);
         let r = i.sqr();
-        assert!(approx(r.lo, 0.0));
-        assert!(approx(r.hi, 9.0));
+        assert!(approx(r.lo(), 0.0));
+        assert!(approx(r.hi(), 9.0));
     }
 
     #[test]
     fn interval_sqrt() {
         let i = Interval::new(4.0, 16.0);
         let r = i.sqrt();
-        assert!(approx(r.lo, 2.0));
-        assert!(approx(r.hi, 4.0));
+        assert!(approx(r.lo(), 2.0));
+        assert!(approx(r.hi(), 4.0));
     }
 
     #[test]
@@ -371,8 +383,8 @@ mod tests {
     #[test]
     fn interval_from_f64() {
         let i: Interval = 5.0.into();
-        assert!(approx(i.lo, 5.0));
-        assert!(approx(i.hi, 5.0));
+        assert!(approx(i.lo(), 5.0));
+        assert!(approx(i.hi(), 5.0));
     }
 
     #[test]
@@ -387,7 +399,7 @@ mod tests {
     #[test]
     fn interval_swaps_bounds() {
         let i = Interval::new(5.0, 1.0);
-        assert!(approx(i.lo, 1.0));
-        assert!(approx(i.hi, 5.0));
+        assert!(approx(i.lo(), 1.0));
+        assert!(approx(i.hi(), 5.0));
     }
 }

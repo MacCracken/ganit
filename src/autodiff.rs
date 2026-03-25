@@ -194,6 +194,17 @@ impl ops::Add<f64> for Dual {
     }
 }
 
+impl ops::Sub<f64> for Dual {
+    type Output = Self;
+    #[inline]
+    fn sub(self, rhs: f64) -> Self {
+        Self {
+            val: self.val - rhs,
+            deriv: self.deriv,
+        }
+    }
+}
+
 impl ops::Mul<f64> for Dual {
     type Output = Self;
     #[inline]
@@ -201,6 +212,39 @@ impl ops::Mul<f64> for Dual {
         Self {
             val: self.val * rhs,
             deriv: self.deriv * rhs,
+        }
+    }
+}
+
+impl ops::Div<f64> for Dual {
+    type Output = Self;
+    #[inline]
+    fn div(self, rhs: f64) -> Self {
+        Self {
+            val: self.val / rhs,
+            deriv: self.deriv / rhs,
+        }
+    }
+}
+
+impl ops::Add<Dual> for f64 {
+    type Output = Dual;
+    #[inline]
+    fn add(self, rhs: Dual) -> Dual {
+        Dual {
+            val: self + rhs.val,
+            deriv: rhs.deriv,
+        }
+    }
+}
+
+impl ops::Mul<Dual> for f64 {
+    type Output = Dual;
+    #[inline]
+    fn mul(self, rhs: Dual) -> Dual {
+        Dual {
+            val: self * rhs.val,
+            deriv: self * rhs.deriv,
         }
     }
 }
@@ -343,5 +387,33 @@ mod tests {
         let r2 = x * 2.0;
         assert!(approx(r2.val, 6.0));
         assert!(approx(r2.deriv, 2.0));
+    }
+
+    #[test]
+    fn dual_sub_scalar() {
+        let x = Dual::var(5.0);
+        let r = x - 3.0;
+        assert!(approx(r.val, 2.0));
+        assert!(approx(r.deriv, 1.0));
+    }
+
+    #[test]
+    fn dual_div_scalar() {
+        let x = Dual::var(6.0);
+        let r = x / 3.0;
+        assert!(approx(r.val, 2.0));
+        assert!(approx(r.deriv, 1.0 / 3.0));
+    }
+
+    #[test]
+    fn dual_reverse_scalar_ops() {
+        let x = Dual::var(3.0);
+        let r = 2.0 * x;
+        assert!(approx(r.val, 6.0));
+        assert!(approx(r.deriv, 2.0));
+
+        let r2 = 10.0 + x;
+        assert!(approx(r2.val, 13.0));
+        assert!(approx(r2.deriv, 1.0));
     }
 }

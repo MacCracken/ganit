@@ -6,6 +6,16 @@
 use std::collections::HashMap;
 use std::fmt;
 
+/// Check if a float is effectively zero.
+fn is_zero(x: f64) -> bool {
+    x.abs() < 1e-15
+}
+
+/// Check if a float is effectively one.
+fn is_one(x: f64) -> bool {
+    (x - 1.0).abs() < 1e-15
+}
+
 /// A symbolic mathematical expression.
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
@@ -149,8 +159,8 @@ impl Expr {
                 let a = a.simplify();
                 let b = b.simplify();
                 match (&a, &b) {
-                    (Expr::Const(0.0), _) => b,
-                    (_, Expr::Const(0.0)) => a,
+                    (Expr::Const(x), _) if is_zero(*x) => b,
+                    (_, Expr::Const(x)) if is_zero(*x) => a,
                     (Expr::Const(x), Expr::Const(y)) => Expr::Const(x + y),
                     _ => Expr::Add(Box::new(a), Box::new(b)),
                 }
@@ -159,9 +169,9 @@ impl Expr {
                 let a = a.simplify();
                 let b = b.simplify();
                 match (&a, &b) {
-                    (Expr::Const(0.0), _) | (_, Expr::Const(0.0)) => Expr::Const(0.0),
-                    (Expr::Const(1.0), _) => b,
-                    (_, Expr::Const(1.0)) => a,
+                    (Expr::Const(x), _) | (_, Expr::Const(x)) if is_zero(*x) => Expr::Const(0.0),
+                    (Expr::Const(x), _) if is_one(*x) => b,
+                    (_, Expr::Const(x)) if is_one(*x) => a,
                     (Expr::Const(x), Expr::Const(y)) => Expr::Const(x * y),
                     _ => Expr::Mul(Box::new(a), Box::new(b)),
                 }
@@ -170,8 +180,8 @@ impl Expr {
                 let base = base.simplify();
                 let exp = exp.simplify();
                 match (&base, &exp) {
-                    (_, Expr::Const(0.0)) => Expr::Const(1.0),
-                    (_, Expr::Const(1.0)) => base,
+                    (_, Expr::Const(x)) if is_zero(*x) => Expr::Const(1.0),
+                    (_, Expr::Const(x)) if is_one(*x) => base,
                     (Expr::Const(x), Expr::Const(y)) => Expr::Const(x.powf(*y)),
                     _ => Expr::Pow(Box::new(base), Box::new(exp)),
                 }
@@ -179,6 +189,7 @@ impl Expr {
             Expr::Neg(a) => {
                 let a = a.simplify();
                 match &a {
+                    Expr::Const(x) if is_zero(*x) => Expr::Const(0.0),
                     Expr::Const(x) => Expr::Const(-x),
                     Expr::Neg(inner) => inner.simplify(),
                     _ => Expr::Neg(Box::new(a)),
