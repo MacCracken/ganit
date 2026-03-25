@@ -475,6 +475,312 @@ pub fn ease_in_out_smooth(t: f32) -> f32 {
     t * t * t * (t * (t * 6.0 - 15.0) + 10.0)
 }
 
+// ---------------------------------------------------------------------------
+// Advanced integration
+// ---------------------------------------------------------------------------
+
+/// Adaptive Simpson's rule for numerical integration.
+///
+/// Recursively subdivides `[a, b]` until the error estimate is below `tol`.
+/// Uses Richardson extrapolation to estimate the error.
+///
+/// # Errors
+///
+/// Returns [`HisabError::InvalidInterval`] if `a >= b`.
+/// Returns [`HisabError::NoConvergence`] if maximum recursion depth (50) is exceeded.
+#[must_use = "returns the computed integral or an error"]
+pub fn integral_adaptive_simpson(
+    f: impl Fn(f64) -> f64,
+    a: f64,
+    b: f64,
+    tol: f64,
+) -> Result<f64, HisabError> {
+    if a >= b {
+        return Err(HisabError::InvalidInterval);
+    }
+    let fa = f(a);
+    let fb = f(b);
+    let mid = (a + b) * 0.5;
+    let fmid = f(mid);
+    let whole = (b - a) / 6.0 * (fa + 4.0 * fmid + fb);
+    adaptive_simpson_recursive(&f, a, b, fa, fb, fmid, whole, tol, 50)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn adaptive_simpson_recursive(
+    f: &impl Fn(f64) -> f64,
+    a: f64,
+    b: f64,
+    fa: f64,
+    fb: f64,
+    fmid: f64,
+    whole: f64,
+    tol: f64,
+    depth: usize,
+) -> Result<f64, HisabError> {
+    if depth == 0 {
+        return Err(HisabError::NoConvergence(50));
+    }
+
+    let mid = (a + b) * 0.5;
+    let left_mid = (a + mid) * 0.5;
+    let right_mid = (mid + b) * 0.5;
+    let flm = f(left_mid);
+    let frm = f(right_mid);
+
+    let h = (b - a) * 0.5;
+    let left = h / 6.0 * (fa + 4.0 * flm + fmid);
+    let right = h / 6.0 * (fmid + 4.0 * frm + fb);
+    let refined = left + right;
+
+    // Richardson extrapolation error estimate
+    let error = (refined - whole) / 15.0;
+
+    if error.abs() < tol {
+        return Ok(refined + error);
+    }
+
+    let left_result =
+        adaptive_simpson_recursive(f, a, mid, fa, fmid, flm, left, tol * 0.5, depth - 1)?;
+    let right_result =
+        adaptive_simpson_recursive(f, mid, b, fmid, fb, frm, right, tol * 0.5, depth - 1)?;
+    Ok(left_result + right_result)
+}
+
+/// Monte Carlo integration over an N-dimensional hyperrectangle.
+///
+/// Estimates `∫∫...∫ f(x) dx` over the region defined by `bounds`,
+/// where `bounds[i] = (lower_i, upper_i)`.
+///
+/// Uses a simple pseudo-random LCG for deterministic reproducibility
+/// (seeded from dimension count and sample count).
+///
+/// Returns `(estimate, standard_error)`.
+///
+/// # Errors
+///
+/// Returns [`HisabError::InvalidInput`] if `bounds` is empty or `n_samples` is zero.
+/// Returns [`HisabError::InvalidInterval`] if any bound has `lower >= upper`.
+#[must_use = "returns the estimated integral and standard error or an error"]
+pub fn integral_monte_carlo(
+    f: impl Fn(&[f64]) -> f64,
+    bounds: &[(f64, f64)],
+    n_samples: usize,
+) -> Result<(f64, f64), HisabError> {
+    let dim = bounds.len();
+    if dim == 0 {
+        return Err(HisabError::InvalidInput("empty bounds".into()));
+    }
+    if n_samples == 0 {
+        return Err(HisabError::ZeroSteps);
+    }
+
+    // Compute volume of the hyperrectangle
+    let mut volume = 1.0;
+    for &(lo, hi) in bounds {
+        if lo >= hi {
+            return Err(HisabError::InvalidInterval);
+        }
+        volume *= hi - lo;
+    }
+
+    // Simple LCG for deterministic pseudo-random numbers
+    let mut rng_state: u64 = 6364136223846793005_u64
+        .wrapping_mul(dim as u64)
+        .wrapping_add(n_samples as u64);
+    let lcg_next = |state: &mut u64| -> f64 {
+        *state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        // Map to [0, 1)
+        (*state >> 11) as f64 / (1u64 << 53) as f64
+    };
+
+    let mut x = vec![0.0; dim];
+    let mut sum = 0.0;
+    let mut sum_sq = 0.0;
+
+    for _ in 0..n_samples {
+        for (d, &(lo, hi)) in bounds.iter().enumerate() {
+            x[d] = lo + (hi - lo) * lcg_next(&mut rng_state);
+        }
+        let val = f(&x);
+        sum += val;
+        sum_sq += val * val;
+    }
+
+    let n = n_samples as f64;
+    let mean = sum / n;
+    let variance = (sum_sq / n - mean * mean).max(0.0);
+    let std_error = (variance / n).sqrt() * volume;
+    let estimate = mean * volume;
+
+    Ok((estimate, std_error))
+}
+
+// ---------------------------------------------------------------------------
+// Multivariable calculus
+// ---------------------------------------------------------------------------
+
+/// Partial derivative of a multivariate function with respect to variable `var`.
+///
+/// Uses central difference: `∂f/∂x_var ≈ (f(x + h·e_var) - f(x - h·e_var)) / (2h)`.
+///
+/// - `f`: function from ℝⁿ → ℝ.
+/// - `x`: point at which to evaluate.
+/// - `var`: index of the variable to differentiate with respect to.
+/// - `h`: step size.
+///
+/// # Errors
+///
+/// Returns [`HisabError::OutOfRange`] if `var >= x.len()`.
+#[must_use = "returns the computed partial derivative or an error"]
+#[inline]
+pub fn partial_derivative(
+    f: impl Fn(&[f64]) -> f64,
+    x: &[f64],
+    var: usize,
+    h: f64,
+) -> Result<f64, HisabError> {
+    if var >= x.len() {
+        return Err(HisabError::OutOfRange(format!(
+            "var index {var} >= dimension {}",
+            x.len()
+        )));
+    }
+    let mut x_plus = x.to_vec();
+    let mut x_minus = x.to_vec();
+    x_plus[var] += h;
+    x_minus[var] -= h;
+    Ok((f(&x_plus) - f(&x_minus)) / (2.0 * h))
+}
+
+/// Gradient of a scalar function f: ℝⁿ → ℝ.
+///
+/// Returns the vector of partial derivatives `[∂f/∂x₀, ∂f/∂x₁, ...]`.
+///
+/// # Errors
+///
+/// Returns [`HisabError::InvalidInput`] if `x` is empty.
+#[must_use = "returns the gradient vector or an error"]
+pub fn gradient(f: impl Fn(&[f64]) -> f64, x: &[f64], h: f64) -> Result<Vec<f64>, HisabError> {
+    let n = x.len();
+    if n == 0 {
+        return Err(HisabError::InvalidInput("empty input".into()));
+    }
+    let mut grad = Vec::with_capacity(n);
+    let mut x_buf = x.to_vec();
+    for i in 0..n {
+        x_buf[i] = x[i] + h;
+        let f_plus = f(&x_buf);
+        x_buf[i] = x[i] - h;
+        let f_minus = f(&x_buf);
+        x_buf[i] = x[i]; // restore
+        grad.push((f_plus - f_minus) / (2.0 * h));
+    }
+    Ok(grad)
+}
+
+/// Jacobian matrix of a vector function f: ℝⁿ → ℝᵐ.
+///
+/// Returns an `m × n` matrix (row-major) where `J[i][j] = ∂fᵢ/∂xⱼ`.
+///
+/// - `fs`: vector of scalar functions, each ℝⁿ → ℝ.
+/// - `x`: point at which to evaluate.
+/// - `h`: step size for finite differences.
+///
+/// # Errors
+///
+/// Returns [`HisabError::InvalidInput`] if `fs` or `x` is empty.
+#[must_use = "returns the Jacobian matrix or an error"]
+#[allow(clippy::type_complexity)]
+pub fn jacobian(
+    fs: &[&dyn Fn(&[f64]) -> f64],
+    x: &[f64],
+    h: f64,
+) -> Result<Vec<Vec<f64>>, HisabError> {
+    let m = fs.len();
+    let n = x.len();
+    if m == 0 || n == 0 {
+        return Err(HisabError::InvalidInput("empty input".into()));
+    }
+
+    let mut jac = vec![vec![0.0; n]; m];
+    let mut x_buf = x.to_vec();
+
+    for j in 0..n {
+        x_buf[j] = x[j] + h;
+        let f_plus: Vec<f64> = fs.iter().map(|fi| fi(&x_buf)).collect();
+        x_buf[j] = x[j] - h;
+        let f_minus: Vec<f64> = fs.iter().map(|fi| fi(&x_buf)).collect();
+        x_buf[j] = x[j]; // restore
+        let inv_2h = 1.0 / (2.0 * h);
+        for i in 0..m {
+            jac[i][j] = (f_plus[i] - f_minus[i]) * inv_2h;
+        }
+    }
+
+    Ok(jac)
+}
+
+/// Hessian matrix of a scalar function f: ℝⁿ → ℝ.
+///
+/// Returns an `n × n` symmetric matrix where `H[i][j] = ∂²f/∂xᵢ∂xⱼ`.
+///
+/// Uses second-order central differences.
+///
+/// # Errors
+///
+/// Returns [`HisabError::InvalidInput`] if `x` is empty.
+#[must_use = "returns the Hessian matrix or an error"]
+pub fn hessian(f: impl Fn(&[f64]) -> f64, x: &[f64], h: f64) -> Result<Vec<Vec<f64>>, HisabError> {
+    let n = x.len();
+    if n == 0 {
+        return Err(HisabError::InvalidInput("empty input".into()));
+    }
+
+    let mut hess = vec![vec![0.0; n]; n];
+    let mut x_buf = x.to_vec();
+    let f0 = f(x);
+    let h2 = h * h;
+
+    // Diagonal: ∂²f/∂xᵢ² ≈ (f(x+heᵢ) - 2f(x) + f(x-heᵢ)) / h²
+    for i in 0..n {
+        x_buf[i] = x[i] + h;
+        let fp = f(&x_buf);
+        x_buf[i] = x[i] - h;
+        let fm = f(&x_buf);
+        x_buf[i] = x[i];
+        hess[i][i] = (fp - 2.0 * f0 + fm) / h2;
+    }
+
+    // Off-diagonal: ∂²f/∂xᵢ∂xⱼ ≈ (f(x+heᵢ+heⱼ) - f(x+heᵢ-heⱼ) - f(x-heᵢ+heⱼ) + f(x-heᵢ-heⱼ)) / (4h²)
+    let inv_4h2 = 1.0 / (4.0 * h2);
+    for i in 0..n {
+        for j in (i + 1)..n {
+            x_buf[i] = x[i] + h;
+            x_buf[j] = x[j] + h;
+            let fpp = f(&x_buf);
+            x_buf[j] = x[j] - h;
+            let fpm = f(&x_buf);
+            x_buf[i] = x[i] - h;
+            let fmm = f(&x_buf);
+            x_buf[j] = x[j] + h;
+            let fmp = f(&x_buf);
+
+            // Restore
+            x_buf[i] = x[i];
+            x_buf[j] = x[j];
+
+            let val = (fpp - fpm - fmp + fmm) * inv_4h2;
+            hess[i][j] = val;
+            hess[j][i] = val;
+        }
+    }
+
+    Ok(hess)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1015,5 +1321,170 @@ mod tests {
             let sum = ease_in_out_smooth(t) + ease_in_out_smooth(1.0 - t);
             assert!(approx_eq_f32(sum, 1.0));
         }
+    }
+
+    // --- Adaptive Simpson tests ---
+
+    #[test]
+    fn adaptive_simpson_quadratic() {
+        // ∫₀¹ x² dx = 1/3
+        let result = integral_adaptive_simpson(|x| x * x, 0.0, 1.0, 1e-10).unwrap();
+        assert!((result - 1.0 / 3.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn adaptive_simpson_sin() {
+        // ∫₀^π sin(x) dx = 2
+        let result = integral_adaptive_simpson(f64::sin, 0.0, std::f64::consts::PI, 1e-10).unwrap();
+        assert!((result - 2.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn adaptive_simpson_high_accuracy() {
+        // ∫₀¹ e^x dx = e - 1
+        let result = integral_adaptive_simpson(f64::exp, 0.0, 1.0, 1e-12).unwrap();
+        assert!((result - (std::f64::consts::E - 1.0)).abs() < 1e-11);
+    }
+
+    #[test]
+    fn adaptive_simpson_invalid_interval() {
+        assert!(integral_adaptive_simpson(|x| x, 1.0, 0.0, 1e-6).is_err());
+    }
+
+    // --- Monte Carlo integration tests ---
+
+    #[test]
+    fn monte_carlo_constant() {
+        // ∫₀¹ 1 dx = 1
+        let (est, _err) = integral_monte_carlo(|_| 1.0, &[(0.0, 1.0)], 10000).unwrap();
+        assert!((est - 1.0).abs() < 0.05);
+    }
+
+    #[test]
+    fn monte_carlo_linear() {
+        // ∫₀¹ x dx = 0.5
+        let (est, _err) = integral_monte_carlo(|x| x[0], &[(0.0, 1.0)], 50000).unwrap();
+        assert!((est - 0.5).abs() < 0.05);
+    }
+
+    #[test]
+    fn monte_carlo_2d() {
+        // ∫₀¹ ∫₀¹ (x+y) dx dy = 1
+        let (est, _err) =
+            integral_monte_carlo(|x| x[0] + x[1], &[(0.0, 1.0), (0.0, 1.0)], 50000).unwrap();
+        assert!((est - 1.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn monte_carlo_empty_bounds() {
+        assert!(integral_monte_carlo(|_| 1.0, &[], 100).is_err());
+    }
+
+    #[test]
+    fn monte_carlo_zero_samples() {
+        assert!(integral_monte_carlo(|_| 1.0, &[(0.0, 1.0)], 0).is_err());
+    }
+
+    #[test]
+    fn monte_carlo_invalid_bounds() {
+        assert!(integral_monte_carlo(|_| 1.0, &[(1.0, 0.0)], 100).is_err());
+    }
+
+    // --- Multivariable calculus tests ---
+
+    #[test]
+    fn partial_derivative_linear() {
+        let f = |x: &[f64]| 3.0 * x[0] + 2.0 * x[1];
+        let x = [1.0, 1.0];
+        let dfx = partial_derivative(f, &x, 0, 1e-7).unwrap();
+        let dfy = partial_derivative(f, &x, 1, 1e-7).unwrap();
+        assert!(approx_eq_f64(dfx, 3.0));
+        assert!(approx_eq_f64(dfy, 2.0));
+    }
+
+    #[test]
+    fn partial_derivative_quadratic() {
+        let f = |x: &[f64]| x[0] * x[0] * x[1];
+        let x = [3.0, 2.0];
+        let dfx = partial_derivative(f, &x, 0, 1e-5).unwrap();
+        let dfy = partial_derivative(f, &x, 1, 1e-5).unwrap();
+        assert!((dfx - 12.0).abs() < 1e-4);
+        assert!((dfy - 9.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn partial_derivative_out_of_range() {
+        let f = |x: &[f64]| x[0];
+        assert!(partial_derivative(f, &[1.0], 5, 1e-7).is_err());
+    }
+
+    #[test]
+    fn gradient_quadratic() {
+        let f = |x: &[f64]| x[0] * x[0] + 2.0 * x[1] * x[1] + 3.0 * x[2] * x[2];
+        let x = [1.0, 2.0, 3.0];
+        let g = gradient(f, &x, 1e-5).unwrap();
+        assert!((g[0] - 2.0).abs() < 1e-4);
+        assert!((g[1] - 8.0).abs() < 1e-4);
+        assert!((g[2] - 18.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn gradient_empty_errors() {
+        let f = |_: &[f64]| 0.0;
+        assert!(gradient(f, &[], 1e-7).is_err());
+    }
+
+    #[test]
+    #[allow(clippy::type_complexity)]
+    fn jacobian_linear_map() {
+        let f1: &dyn Fn(&[f64]) -> f64 = &|x: &[f64]| 2.0 * x[0] + x[1];
+        let f2: &dyn Fn(&[f64]) -> f64 = &|x: &[f64]| x[0] - 3.0 * x[1];
+        let fs: Vec<&dyn Fn(&[f64]) -> f64> = vec![f1, f2];
+        let x = [1.0, 1.0];
+        let j = jacobian(&fs, &x, 1e-7).unwrap();
+        assert!((j[0][0] - 2.0).abs() < 1e-4);
+        assert!((j[0][1] - 1.0).abs() < 1e-4);
+        assert!((j[1][0] - 1.0).abs() < 1e-4);
+        assert!((j[1][1] - (-3.0)).abs() < 1e-4);
+    }
+
+    #[test]
+    #[allow(clippy::type_complexity)]
+    fn jacobian_empty_errors() {
+        let fs: Vec<&dyn Fn(&[f64]) -> f64> = vec![];
+        assert!(jacobian(&fs, &[1.0], 1e-7).is_err());
+    }
+
+    #[test]
+    fn hessian_quadratic() {
+        let f = |x: &[f64]| x[0] * x[0] + 3.0 * x[0] * x[1] + 2.0 * x[1] * x[1];
+        let x = [1.0, 1.0];
+        let h = hessian(f, &x, 1e-4).unwrap();
+        assert!((h[0][0] - 2.0).abs() < 1e-3);
+        assert!((h[0][1] - 3.0).abs() < 1e-3);
+        assert!((h[1][0] - 3.0).abs() < 1e-3);
+        assert!((h[1][1] - 4.0).abs() < 1e-3);
+    }
+
+    #[test]
+    #[allow(clippy::needless_range_loop)]
+    fn hessian_symmetric() {
+        let f = |x: &[f64]| x[0] * x[0] * x[1] + x[1] * x[1] * x[2] + x[0] * x[2];
+        let x = [2.0, 3.0, 4.0];
+        let h = hessian(f, &x, 1e-4).unwrap();
+        for i in 0..3 {
+            for j in 0..3 {
+                assert!(
+                    (h[i][j] - h[j][i]).abs() < 1e-3,
+                    "Hessian not symmetric at [{i}][{j}]"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn hessian_empty_errors() {
+        let f = |_: &[f64]| 0.0;
+        assert!(hessian(f, &[], 1e-7).is_err());
     }
 }

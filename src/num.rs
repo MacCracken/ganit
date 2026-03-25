@@ -1307,6 +1307,683 @@ pub fn rk4_trajectory(
     Ok(trajectory)
 }
 
+// ---------------------------------------------------------------------------
+// Matrix rank, condition number, inverse, pseudo-inverse
+// ---------------------------------------------------------------------------
+
+/// Compute the numerical rank of a matrix via SVD.
+///
+/// Counts singular values greater than `tol`. If `tol` is `None`, uses
+/// `max(m, n) * EPSILON_F64 * σ_max` as the default threshold.
+///
+/// # Errors
+///
+/// Returns errors from [`svd`] if the matrix is invalid.
+#[must_use = "returns the computed rank or an error"]
+pub fn matrix_rank(a: &[Vec<f64>], tol: Option<f64>) -> Result<usize, HisabError> {
+    let result = svd(a)?;
+    let threshold = match tol {
+        Some(t) => t,
+        None => {
+            let m = a.len();
+            let n = a[0].len();
+            let sigma_max = result.sigma.first().copied().unwrap_or(0.0);
+            m.max(n) as f64 * crate::EPSILON_F64 * sigma_max
+        }
+    };
+    Ok(result.sigma.iter().filter(|&&s| s > threshold).count())
+}
+
+/// Compute the condition number of a matrix (ratio of largest to smallest singular value).
+///
+/// A large condition number indicates an ill-conditioned matrix.
+/// Returns `f64::INFINITY` if the matrix is singular (smallest σ ≈ 0).
+///
+/// # Errors
+///
+/// Returns errors from [`svd`] if the matrix is invalid.
+#[must_use = "returns the computed condition number or an error"]
+pub fn condition_number(a: &[Vec<f64>]) -> Result<f64, HisabError> {
+    let result = svd(a)?;
+    let sigma_max = result.sigma.first().copied().unwrap_or(0.0);
+    let sigma_min = result.sigma.last().copied().unwrap_or(0.0);
+    if sigma_min < crate::EPSILON_F64 {
+        Ok(f64::INFINITY)
+    } else {
+        Ok(sigma_max / sigma_min)
+    }
+}
+
+/// Compute the inverse of a square matrix via LU decomposition.
+///
+/// Returns the `n × n` inverse matrix (row-major).
+///
+/// # Errors
+///
+/// Returns [`HisabError::InvalidInput`] if the matrix is empty or not square.
+/// Returns [`HisabError::SingularPivot`] if the matrix is singular.
+#[must_use = "returns the inverse matrix or an error"]
+#[allow(clippy::needless_range_loop)]
+pub fn matrix_inverse(a: &[Vec<f64>]) -> Result<Vec<Vec<f64>>, HisabError> {
+    let n = a.len();
+    if n == 0 {
+        return Err(HisabError::InvalidInput("empty matrix".into()));
+    }
+    for row in a {
+        if row.len() != n {
+            return Err(HisabError::InvalidInput(format!(
+                "expected square {}x{}, got row length {}",
+                n,
+                n,
+                row.len()
+            )));
+        }
+    }
+
+    let (lu, pivot) = lu_decompose(a)?;
+
+    // Solve for each column of the identity, reusing the buffer
+    let mut inv = vec![vec![0.0; n]; n];
+    let mut e = vec![0.0; n];
+    for col in 0..n {
+        e.fill(0.0);
+        e[col] = 1.0;
+        let x = lu_solve(&lu, &pivot, &e)?;
+        for row in 0..n {
+            inv[row][col] = x[row];
+        }
+    }
+
+    Ok(inv)
+}
+
+/// Compute the Moore-Penrose pseudo-inverse of a matrix via SVD.
+///
+/// For an `m × n` matrix `A`, returns the `n × m` pseudo-inverse `A⁺`
+/// such that `A · A⁺ · A ≈ A`.
+///
+/// Singular values below `tol` are treated as zero. If `tol` is `None`,
+/// uses `max(m, n) * EPSILON_F64 * σ_max`.
+///
+/// # Errors
+///
+/// Returns errors from [`svd`] if the matrix is invalid.
+#[must_use = "returns the pseudo-inverse matrix or an error"]
+#[allow(clippy::needless_range_loop)]
+pub fn pseudo_inverse(a: &[Vec<f64>], tol: Option<f64>) -> Result<Vec<Vec<f64>>, HisabError> {
+    let m = a.len();
+    if m == 0 {
+        return Err(HisabError::InvalidInput("empty matrix".into()));
+    }
+    let n = a[0].len();
+
+    let result = svd(a)?;
+    let threshold = match tol {
+        Some(t) => t,
+        None => {
+            let sigma_max = result.sigma.first().copied().unwrap_or(0.0);
+            m.max(n) as f64 * crate::EPSILON_F64 * sigma_max
+        }
+    };
+
+    // A⁺ = V · Σ⁺ · Uᵀ  (n × m)
+    // Σ⁺[i] = 1/σ[i] if σ[i] > tol, else 0
+    let k = result.sigma.len();
+
+    // Precompute reciprocals of significant singular values
+    let sigma_inv: Vec<f64> = result
+        .sigma
+        .iter()
+        .map(|&s| if s > threshold { 1.0 / s } else { 0.0 })
+        .collect();
+
+    let mut pinv = vec![vec![0.0; m]; n];
+
+    for i in 0..n {
+        for j in 0..m {
+            let mut val = 0.0;
+            for s in 0..k {
+                val += result.vt[s][i] * sigma_inv[s] * result.u[s][j];
+            }
+            pinv[i][j] = val;
+        }
+    }
+
+    Ok(pinv)
+}
+
+// ---------------------------------------------------------------------------
+// Sparse matrix (CSR format)
+// ---------------------------------------------------------------------------
+
+/// A sparse matrix in Compressed Sparse Row (CSR) format.
+///
+/// Stores only non-zero elements. Efficient for sparse matrix-vector multiply
+/// and row-based access patterns.
+///
+/// - `values`: non-zero entries, row by row.
+/// - `col_indices`: column index of each value.
+/// - `row_offsets`: `row_offsets[i]` is the index into `values` where row `i` starts.
+///   Length is `nrows + 1`; `row_offsets[nrows]` equals `values.len()`.
+#[derive(Debug, Clone, PartialEq)]
+#[must_use]
+pub struct CsrMatrix {
+    /// Number of rows.
+    pub nrows: usize,
+    /// Number of columns.
+    pub ncols: usize,
+    /// Non-zero values, row by row.
+    values: Vec<f64>,
+    /// Column index for each value.
+    col_indices: Vec<usize>,
+    /// Row offset pointers (length = nrows + 1).
+    row_offsets: Vec<usize>,
+}
+
+impl CsrMatrix {
+    /// Create a CSR matrix from raw components.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`HisabError::InvalidInput`] if the components are inconsistent.
+    pub fn new(
+        nrows: usize,
+        ncols: usize,
+        values: Vec<f64>,
+        col_indices: Vec<usize>,
+        row_offsets: Vec<usize>,
+    ) -> Result<Self, HisabError> {
+        if row_offsets.len() != nrows + 1 {
+            return Err(HisabError::InvalidInput(format!(
+                "row_offsets length {} != nrows + 1 ({})",
+                row_offsets.len(),
+                nrows + 1
+            )));
+        }
+        if values.len() != col_indices.len() {
+            return Err(HisabError::InvalidInput(
+                "values and col_indices must have equal length".into(),
+            ));
+        }
+        if row_offsets[nrows] != values.len() {
+            return Err(HisabError::InvalidInput(
+                "row_offsets[nrows] must equal values.len()".into(),
+            ));
+        }
+        // Validate monotonically non-decreasing row_offsets
+        for w in row_offsets.windows(2) {
+            if w[0] > w[1] {
+                return Err(HisabError::InvalidInput(
+                    "row_offsets must be monotonically non-decreasing".into(),
+                ));
+            }
+        }
+        // Validate column indices: in range and sorted within each row
+        for row in 0..nrows {
+            let start = row_offsets[row];
+            let end = row_offsets[row + 1];
+            for idx in start..end {
+                if col_indices[idx] >= ncols {
+                    return Err(HisabError::InvalidInput(format!(
+                        "column index {} >= ncols {ncols}",
+                        col_indices[idx]
+                    )));
+                }
+                if idx > start && col_indices[idx] <= col_indices[idx - 1] {
+                    return Err(HisabError::InvalidInput(
+                        "column indices must be strictly sorted within each row".into(),
+                    ));
+                }
+            }
+        }
+        Ok(Self {
+            nrows,
+            ncols,
+            values,
+            col_indices,
+            row_offsets,
+        })
+    }
+
+    /// Create a CSR matrix from a dense row-major matrix, dropping zeros.
+    pub fn from_dense(a: &[Vec<f64>]) -> Self {
+        let nrows = a.len();
+        let ncols = if nrows > 0 { a[0].len() } else { 0 };
+        let mut values = Vec::new();
+        let mut col_indices = Vec::new();
+        let mut row_offsets = Vec::with_capacity(nrows + 1);
+        row_offsets.push(0);
+
+        for row in a {
+            for (j, &v) in row.iter().enumerate() {
+                if v.abs() > crate::EPSILON_F64 {
+                    values.push(v);
+                    col_indices.push(j);
+                }
+            }
+            row_offsets.push(values.len());
+        }
+
+        Self {
+            nrows,
+            ncols,
+            values,
+            col_indices,
+            row_offsets,
+        }
+    }
+
+    /// Convert to a dense row-major matrix.
+    #[must_use]
+    pub fn to_dense(&self) -> Vec<Vec<f64>> {
+        let mut a = vec![vec![0.0; self.ncols]; self.nrows];
+        for (i, row) in a.iter_mut().enumerate() {
+            for idx in self.row_offsets[i]..self.row_offsets[i + 1] {
+                row[self.col_indices[idx]] = self.values[idx];
+            }
+        }
+        a
+    }
+
+    /// Number of non-zero entries.
+    #[must_use]
+    #[inline]
+    pub fn nnz(&self) -> usize {
+        self.values.len()
+    }
+
+    /// Sparse matrix-vector multiply: `y = A * x`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`HisabError::InvalidInput`] if `x.len() != ncols`.
+    #[must_use = "returns the product vector or an error"]
+    #[inline]
+    pub fn spmv(&self, x: &[f64]) -> Result<Vec<f64>, HisabError> {
+        if x.len() != self.ncols {
+            return Err(HisabError::InvalidInput(format!(
+                "x length {} != ncols {}",
+                x.len(),
+                self.ncols
+            )));
+        }
+        let mut y = vec![0.0; self.nrows];
+        for (i, yi) in y.iter_mut().enumerate() {
+            let mut sum = 0.0;
+            for idx in self.row_offsets[i]..self.row_offsets[i + 1] {
+                sum += self.values[idx] * x[self.col_indices[idx]];
+            }
+            *yi = sum;
+        }
+        Ok(y)
+    }
+
+    /// Add two CSR matrices of the same dimensions.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`HisabError::InvalidInput`] if dimensions don't match.
+    pub fn add(&self, other: &CsrMatrix) -> Result<CsrMatrix, HisabError> {
+        if self.nrows != other.nrows || self.ncols != other.ncols {
+            return Err(HisabError::InvalidInput(format!(
+                "dimension mismatch: {}x{} vs {}x{}",
+                self.nrows, self.ncols, other.nrows, other.ncols
+            )));
+        }
+
+        let mut values = Vec::new();
+        let mut col_indices = Vec::new();
+        let mut row_offsets = Vec::with_capacity(self.nrows + 1);
+        row_offsets.push(0);
+
+        for i in 0..self.nrows {
+            // Merge two sorted row segments
+            let mut a_idx = self.row_offsets[i];
+            let a_end = self.row_offsets[i + 1];
+            let mut b_idx = other.row_offsets[i];
+            let b_end = other.row_offsets[i + 1];
+
+            while a_idx < a_end && b_idx < b_end {
+                let a_col = self.col_indices[a_idx];
+                let b_col = other.col_indices[b_idx];
+                match a_col.cmp(&b_col) {
+                    std::cmp::Ordering::Less => {
+                        values.push(self.values[a_idx]);
+                        col_indices.push(a_col);
+                        a_idx += 1;
+                    }
+                    std::cmp::Ordering::Greater => {
+                        values.push(other.values[b_idx]);
+                        col_indices.push(b_col);
+                        b_idx += 1;
+                    }
+                    std::cmp::Ordering::Equal => {
+                        let sum = self.values[a_idx] + other.values[b_idx];
+                        if sum.abs() > crate::EPSILON_F64 {
+                            values.push(sum);
+                            col_indices.push(a_col);
+                        }
+                        a_idx += 1;
+                        b_idx += 1;
+                    }
+                }
+            }
+            while a_idx < a_end {
+                values.push(self.values[a_idx]);
+                col_indices.push(self.col_indices[a_idx]);
+                a_idx += 1;
+            }
+            while b_idx < b_end {
+                values.push(other.values[b_idx]);
+                col_indices.push(other.col_indices[b_idx]);
+                b_idx += 1;
+            }
+            row_offsets.push(values.len());
+        }
+
+        Ok(CsrMatrix {
+            nrows: self.nrows,
+            ncols: self.ncols,
+            values,
+            col_indices,
+            row_offsets,
+        })
+    }
+
+    /// Transpose this matrix, returning a new CSR matrix.
+    pub fn transpose(&self) -> CsrMatrix {
+        let mut row_counts = vec![0usize; self.ncols];
+        for &c in &self.col_indices {
+            row_counts[c] += 1;
+        }
+
+        let mut new_offsets = Vec::with_capacity(self.ncols + 1);
+        new_offsets.push(0);
+        for &count in &row_counts {
+            new_offsets.push(new_offsets.last().unwrap() + count);
+        }
+
+        let mut new_values = vec![0.0; self.nnz()];
+        let mut new_col_indices = vec![0usize; self.nnz()];
+        let mut cursor = new_offsets[..self.ncols].to_vec();
+
+        for i in 0..self.nrows {
+            for idx in self.row_offsets[i]..self.row_offsets[i + 1] {
+                let col = self.col_indices[idx];
+                let dest = cursor[col];
+                new_values[dest] = self.values[idx];
+                new_col_indices[dest] = i;
+                cursor[col] += 1;
+            }
+        }
+
+        CsrMatrix {
+            nrows: self.ncols,
+            ncols: self.nrows,
+            values: new_values,
+            col_indices: new_col_indices,
+            row_offsets: new_offsets,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SVD (Singular Value Decomposition)
+// ---------------------------------------------------------------------------
+
+/// Singular Value Decomposition result.
+///
+/// For an `m × n` matrix `A`, produces `A = U · diag(σ) · Vᵀ` where:
+/// - `U` is `m × m` orthogonal (stored column-major: `u[col][row]`)
+/// - `sigma` contains the singular values in descending order
+/// - `vt` is `n × n` orthogonal transpose (stored row-major: `vt[row][col]`)
+#[derive(Debug, Clone)]
+#[must_use]
+pub struct Svd {
+    /// Left singular vectors (column-major: `u[col][row]`).
+    pub u: Vec<Vec<f64>>,
+    /// Singular values in descending order.
+    pub sigma: Vec<f64>,
+    /// Right singular vectors transposed (row-major: `vt[row][col]`).
+    pub vt: Vec<Vec<f64>>,
+}
+
+/// Compute the Singular Value Decomposition of an `m × n` matrix.
+///
+/// Input is row-major: `a[i]` is the i-th row with `n` columns.
+/// Uses one-sided Jacobi rotations for simplicity and numerical stability.
+///
+/// Returns [`Svd`] containing `U`, `sigma`, and `Vᵀ`.
+///
+/// # Errors
+///
+/// Returns [`HisabError::InvalidInput`] if the matrix is empty or rows have
+/// inconsistent lengths.
+/// Returns [`HisabError::NoConvergence`] if the iterative process does not
+/// converge within the maximum number of sweeps.
+#[must_use = "contains the SVD factors or an error"]
+#[allow(clippy::needless_range_loop)]
+pub fn svd(a: &[Vec<f64>]) -> Result<Svd, HisabError> {
+    let m = a.len();
+    if m == 0 {
+        return Err(HisabError::InvalidInput("empty matrix".into()));
+    }
+    let n = a[0].len();
+    if n == 0 {
+        return Err(HisabError::InvalidInput("empty matrix".into()));
+    }
+    for row in a {
+        if row.len() != n {
+            return Err(HisabError::InvalidInput("inconsistent row lengths".into()));
+        }
+    }
+
+    // For wide matrices (m < n), compute SVD of Aᵀ and swap U ↔ V.
+    let transposed = m < n;
+    let (work_m, work_n, work): (usize, usize, Vec<Vec<f64>>) = if transposed {
+        // Transpose: work[j] = column j of A = row j of Aᵀ
+        let mut t = vec![vec![0.0; m]; n];
+        for i in 0..m {
+            for j in 0..n {
+                t[j][i] = a[i][j];
+            }
+        }
+        (n, m, t)
+    } else {
+        (m, n, a.to_vec())
+    };
+
+    let result = svd_tall(&work, work_m, work_n)?;
+
+    if transposed {
+        // Swap: U of Aᵀ becomes V of A, and vice versa
+        // Vᵀ of Aᵀ rows become U columns of A
+        // U columns of Aᵀ become Vᵀ rows of A
+        let mut vt = vec![vec![0.0; n]; n];
+        for i in 0..n {
+            for j in 0..n {
+                // U of Aᵀ has columns of length work_m=n
+                if i < result.u.len() {
+                    vt[i][j] = result.u[i][j];
+                }
+            }
+        }
+        // U of A from Vᵀ of Aᵀ: u_col[row] = vt_row[col] transposed
+        let mut u: Vec<Vec<f64>> = Vec::with_capacity(m);
+        for i in 0..result.vt.len() {
+            u.push(result.vt[i].clone());
+        }
+        // Extend U to m×m if needed
+        extend_orthonormal_basis(&mut u, m);
+        Ok(Svd {
+            u,
+            sigma: result.sigma,
+            vt,
+        })
+    } else {
+        Ok(result)
+    }
+}
+
+/// Extend a set of orthonormal columns to span ℝᵐ using Gram-Schmidt.
+#[allow(clippy::needless_range_loop)]
+fn extend_orthonormal_basis(u: &mut Vec<Vec<f64>>, m: usize) {
+    for i in 0..m {
+        if u.len() >= m {
+            break;
+        }
+        let mut candidate = vec![0.0; m];
+        candidate[i] = 1.0;
+        for col in u.iter() {
+            let dot: f64 = (0..m).map(|k| col[k] * candidate[k]).sum();
+            for k in 0..m {
+                candidate[k] -= dot * col[k];
+            }
+        }
+        let norm: f64 = candidate.iter().map(|x| x * x).sum::<f64>().sqrt();
+        if norm > crate::EPSILON_F64 {
+            let inv = 1.0 / norm;
+            for x in &mut candidate {
+                *x *= inv;
+            }
+            u.push(candidate);
+        }
+    }
+}
+
+/// Internal SVD for tall/square matrices (m >= n) using one-sided Jacobi.
+#[allow(clippy::needless_range_loop)]
+fn svd_tall(a: &[Vec<f64>], m: usize, n: usize) -> Result<Svd, HisabError> {
+    // B = Aᵀ stored as n columns of length m.
+    let mut b: Vec<Vec<f64>> = vec![vec![0.0; m]; n];
+    for i in 0..m {
+        for j in 0..n {
+            b[j][i] = a[i][j];
+        }
+    }
+
+    // V accumulates right rotations (n×n identity, column-major).
+    let mut v: Vec<Vec<f64>> = vec![vec![0.0; n]; n];
+    for i in 0..n {
+        v[i][i] = 1.0;
+    }
+
+    // One-sided Jacobi: rotate pairs of columns of B until orthogonal.
+    let max_sweeps = 100 * n.max(m);
+    let tol = crate::EPSILON_F64 * crate::EPSILON_F64;
+
+    for sweep in 0..max_sweeps {
+        let mut converged = true;
+
+        for p in 0..n {
+            for q in (p + 1)..n {
+                let mut app = 0.0;
+                let mut aqq = 0.0;
+                let mut apq = 0.0;
+                for k in 0..m {
+                    app += b[p][k] * b[p][k];
+                    aqq += b[q][k] * b[q][k];
+                    apq += b[p][k] * b[q][k];
+                }
+
+                if apq.abs() <= tol * (app * aqq).sqrt() {
+                    continue;
+                }
+                converged = false;
+
+                let tau = (aqq - app) / (2.0 * apq);
+                let t = if tau >= 0.0 {
+                    1.0 / (tau + (1.0 + tau * tau).sqrt())
+                } else {
+                    -1.0 / (-tau + (1.0 + tau * tau).sqrt())
+                };
+                let cos = 1.0 / (1.0 + t * t).sqrt();
+                let sin = t * cos;
+
+                for k in 0..m {
+                    let bp = b[p][k];
+                    let bq = b[q][k];
+                    b[p][k] = cos * bp - sin * bq;
+                    b[q][k] = sin * bp + cos * bq;
+                }
+
+                for k in 0..n {
+                    let vp = v[p][k];
+                    let vq = v[q][k];
+                    v[p][k] = cos * vp - sin * vq;
+                    v[q][k] = sin * vp + cos * vq;
+                }
+            }
+        }
+
+        if converged {
+            break;
+        }
+
+        if sweep == max_sweeps - 1 {
+            return Err(HisabError::NoConvergence(max_sweeps));
+        }
+    }
+
+    // Extract singular values and normalize columns of B → U.
+    let mut sigma = Vec::with_capacity(n);
+    let mut u: Vec<Vec<f64>> = Vec::with_capacity(m);
+
+    for j in 0..n {
+        let norm: f64 = b[j].iter().map(|x| x * x).sum::<f64>().sqrt();
+        sigma.push(norm);
+        if norm > crate::EPSILON_F64 {
+            let inv = 1.0 / norm;
+            u.push(b[j].iter().map(|x| x * inv).collect());
+        } else {
+            u.push(b[j].clone());
+        }
+    }
+
+    // Extend U to m×m with orthogonal complement (Gram-Schmidt).
+    if m > n {
+        extend_orthonormal_basis(&mut u, m);
+    }
+
+    // Sort by descending singular value.
+    let mut order: Vec<usize> = (0..sigma.len()).collect();
+    order.sort_unstable_by(|&a, &b| {
+        sigma[b]
+            .partial_cmp(&sigma[a])
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    let sorted_sigma: Vec<f64> = order.iter().map(|&i| sigma[i]).collect();
+
+    let sorted_u: Vec<Vec<f64>> = if u.len() <= sigma.len() {
+        order.iter().map(|&i| u[i].clone()).collect()
+    } else {
+        let mut su: Vec<Vec<f64>> = order.iter().map(|&i| u[i].clone()).collect();
+        for i in sigma.len()..u.len() {
+            su.push(u[i].clone());
+        }
+        su
+    };
+
+    let mut vt = vec![vec![0.0; n]; n];
+    for row_idx in 0..n {
+        let src_col = if row_idx < order.len() {
+            order[row_idx]
+        } else {
+            row_idx
+        };
+        for col_idx in 0..n {
+            vt[row_idx][col_idx] = v[src_col][col_idx];
+        }
+    }
+
+    Ok(Svd {
+        u: sorted_u,
+        sigma: sorted_sigma,
+        vt,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2462,5 +3139,409 @@ mod tests {
         }
         drop(r);
         drop(original);
+    }
+
+    // --- SVD tests ---
+
+    /// Helper: reconstruct A from SVD and check ||A - U·diag(σ)·Vᵀ|| < tol.
+    #[allow(clippy::needless_range_loop)]
+    fn svd_check_reconstruction(a: &[Vec<f64>], tol: f64) {
+        let result = svd(a).unwrap();
+        let m = a.len();
+        let n = a[0].len();
+        let k = result.sigma.len();
+
+        for i in 0..m {
+            for j in 0..n {
+                let mut val = 0.0;
+                for s in 0..k {
+                    val += result.u[s][i] * result.sigma[s] * result.vt[s][j];
+                }
+                assert!(
+                    (val - a[i][j]).abs() < tol,
+                    "SVD reconstruction failed at [{i}][{j}]: got {val}, expected {}",
+                    a[i][j]
+                );
+            }
+        }
+    }
+
+    // --- CSR sparse matrix tests ---
+
+    #[test]
+    fn csr_from_dense_roundtrip() {
+        let a = vec![
+            vec![1.0, 0.0, 0.0],
+            vec![0.0, 2.0, 3.0],
+            vec![4.0, 0.0, 5.0],
+        ];
+        let csr = CsrMatrix::from_dense(&a);
+        assert_eq!(csr.nrows, 3);
+        assert_eq!(csr.ncols, 3);
+        assert_eq!(csr.nnz(), 5);
+        let dense = csr.to_dense();
+        for i in 0..3 {
+            for j in 0..3 {
+                assert!(approx_eq(dense[i][j], a[i][j]));
+            }
+        }
+    }
+
+    #[test]
+    fn csr_spmv() {
+        let a = vec![vec![1.0, 0.0, 2.0], vec![0.0, 3.0, 0.0]];
+        let csr = CsrMatrix::from_dense(&a);
+        let x = [1.0, 2.0, 3.0];
+        let y = csr.spmv(&x).unwrap();
+        assert!(approx_eq(y[0], 7.0)); // 1*1 + 0*2 + 2*3
+        assert!(approx_eq(y[1], 6.0)); // 0*1 + 3*2 + 0*3
+    }
+
+    #[test]
+    fn csr_spmv_wrong_length() {
+        let csr = CsrMatrix::from_dense(&[vec![1.0, 2.0]]);
+        assert!(csr.spmv(&[1.0]).is_err());
+    }
+
+    #[test]
+    fn csr_add() {
+        let a = CsrMatrix::from_dense(&[vec![1.0, 0.0], vec![0.0, 2.0]]);
+        let b = CsrMatrix::from_dense(&[vec![0.0, 3.0], vec![4.0, 0.0]]);
+        let c = a.add(&b).unwrap();
+        let dense = c.to_dense();
+        assert!(approx_eq(dense[0][0], 1.0));
+        assert!(approx_eq(dense[0][1], 3.0));
+        assert!(approx_eq(dense[1][0], 4.0));
+        assert!(approx_eq(dense[1][1], 2.0));
+    }
+
+    #[test]
+    fn csr_add_cancellation() {
+        let a = CsrMatrix::from_dense(&[vec![1.0, 2.0]]);
+        let b = CsrMatrix::from_dense(&[vec![-1.0, -2.0]]);
+        let c = a.add(&b).unwrap();
+        assert_eq!(c.nnz(), 0);
+    }
+
+    #[test]
+    fn csr_add_dimension_mismatch() {
+        let a = CsrMatrix::from_dense(&[vec![1.0, 2.0]]);
+        let b = CsrMatrix::from_dense(&[vec![1.0], vec![2.0]]);
+        assert!(a.add(&b).is_err());
+    }
+
+    #[test]
+    fn csr_transpose() {
+        let a = vec![vec![1.0, 0.0, 2.0], vec![0.0, 3.0, 0.0]];
+        let csr = CsrMatrix::from_dense(&a);
+        let ct = csr.transpose();
+        assert_eq!(ct.nrows, 3);
+        assert_eq!(ct.ncols, 2);
+        let dense = ct.to_dense();
+        // Transposed: [[1,0],[0,3],[2,0]]
+        assert!(approx_eq(dense[0][0], 1.0));
+        assert!(approx_eq(dense[1][1], 3.0));
+        assert!(approx_eq(dense[2][0], 2.0));
+        assert!(approx_eq(dense[0][1], 0.0));
+    }
+
+    #[test]
+    fn csr_empty() {
+        let a: Vec<Vec<f64>> = vec![vec![0.0; 3]; 2];
+        let csr = CsrMatrix::from_dense(&a);
+        assert_eq!(csr.nnz(), 0);
+        assert_eq!(csr.nrows, 2);
+        assert_eq!(csr.ncols, 3);
+    }
+
+    #[test]
+    fn csr_new_validation() {
+        // Wrong row_offsets length
+        assert!(CsrMatrix::new(2, 2, vec![1.0], vec![0], vec![0, 1]).is_err());
+        // col_index out of bounds
+        assert!(CsrMatrix::new(1, 2, vec![1.0], vec![5], vec![0, 1]).is_err());
+        // Non-monotonic row_offsets
+        assert!(CsrMatrix::new(2, 2, vec![1.0, 2.0], vec![0, 1], vec![0, 2, 1]).is_err());
+        // Unsorted column indices within a row
+        assert!(CsrMatrix::new(1, 3, vec![1.0, 2.0], vec![2, 0], vec![0, 2]).is_err());
+        // Valid matrix should succeed
+        assert!(CsrMatrix::new(1, 3, vec![1.0, 2.0], vec![0, 2], vec![0, 2]).is_ok());
+    }
+
+    // --- Matrix rank, condition number, inverse, pseudo-inverse tests ---
+
+    #[test]
+    fn matrix_rank_full() {
+        let a = vec![
+            vec![1.0, 0.0, 0.0],
+            vec![0.0, 2.0, 0.0],
+            vec![0.0, 0.0, 3.0],
+        ];
+        assert_eq!(matrix_rank(&a, None).unwrap(), 3);
+    }
+
+    #[test]
+    fn matrix_rank_deficient() {
+        let a = vec![vec![1.0, 2.0], vec![2.0, 4.0]];
+        assert_eq!(matrix_rank(&a, None).unwrap(), 1);
+    }
+
+    #[test]
+    fn matrix_rank_zero() {
+        let a = vec![vec![0.0, 0.0], vec![0.0, 0.0]];
+        assert_eq!(matrix_rank(&a, None).unwrap(), 0);
+    }
+
+    #[test]
+    fn condition_number_identity() {
+        let a = vec![vec![1.0, 0.0], vec![0.0, 1.0]];
+        let cond = condition_number(&a).unwrap();
+        assert!(approx_eq(cond, 1.0));
+    }
+
+    #[test]
+    fn condition_number_singular() {
+        let a = vec![vec![1.0, 2.0], vec![2.0, 4.0]];
+        let cond = condition_number(&a).unwrap();
+        assert!(cond.is_infinite());
+    }
+
+    #[test]
+    fn condition_number_well_conditioned() {
+        let a = vec![
+            vec![2.0, 0.0, 0.0],
+            vec![0.0, 3.0, 0.0],
+            vec![0.0, 0.0, 4.0],
+        ];
+        let cond = condition_number(&a).unwrap();
+        assert!(approx_eq(cond, 2.0)); // 4/2
+    }
+
+    #[test]
+    fn matrix_inverse_identity() {
+        let a = vec![vec![1.0, 0.0], vec![0.0, 1.0]];
+        let inv = matrix_inverse(&a).unwrap();
+        assert!(approx_eq(inv[0][0], 1.0));
+        assert!(approx_eq(inv[0][1], 0.0));
+        assert!(approx_eq(inv[1][0], 0.0));
+        assert!(approx_eq(inv[1][1], 1.0));
+    }
+
+    #[test]
+    #[allow(clippy::needless_range_loop)]
+    fn matrix_inverse_2x2() {
+        let a = vec![vec![4.0, 7.0], vec![2.0, 6.0]];
+        let inv = matrix_inverse(&a).unwrap();
+        // A * A^-1 should be identity
+        let prod = matrix_multiply(&a, &inv).unwrap();
+        for i in 0..2 {
+            for j in 0..2 {
+                let expected = if i == j { 1.0 } else { 0.0 };
+                assert!((prod[i][j] - expected).abs() < 1e-10);
+            }
+        }
+    }
+
+    #[test]
+    fn matrix_inverse_singular_errors() {
+        let a = vec![vec![1.0, 2.0], vec![2.0, 4.0]];
+        assert!(matrix_inverse(&a).is_err());
+    }
+
+    #[test]
+    #[allow(clippy::needless_range_loop)]
+    fn pseudo_inverse_square() {
+        let a = vec![vec![1.0, 0.0], vec![0.0, 2.0]];
+        let pinv = pseudo_inverse(&a, None).unwrap();
+        // For non-singular square matrix, pseudo-inverse = inverse
+        assert!(approx_eq(pinv[0][0], 1.0));
+        assert!(approx_eq(pinv[1][1], 0.5));
+    }
+
+    #[test]
+    #[allow(clippy::needless_range_loop)]
+    fn pseudo_inverse_tall() {
+        // A is 3×2, A⁺ should be 2×3
+        let a = vec![vec![1.0, 0.0], vec![0.0, 1.0], vec![0.0, 0.0]];
+        let pinv = pseudo_inverse(&a, None).unwrap();
+        assert_eq!(pinv.len(), 2); // n rows
+        assert_eq!(pinv[0].len(), 3); // m cols
+        // A⁺ · A should be identity (2×2)
+        let prod = matrix_multiply(&pinv, &a).unwrap();
+        for i in 0..2 {
+            for j in 0..2 {
+                let expected = if i == j { 1.0 } else { 0.0 };
+                assert!((prod[i][j] - expected).abs() < 1e-10);
+            }
+        }
+    }
+
+    #[test]
+    #[allow(clippy::needless_range_loop)]
+    fn pseudo_inverse_rank_deficient() {
+        // Rank-1: A = [[1,2],[2,4]]
+        let a = vec![vec![1.0, 2.0], vec![2.0, 4.0]];
+        let pinv = pseudo_inverse(&a, None).unwrap();
+        // A · A⁺ · A ≈ A
+        let aa_pinv = matrix_multiply(&a, &pinv).unwrap();
+        let result = matrix_multiply(&aa_pinv, &a).unwrap();
+        for i in 0..2 {
+            for j in 0..2 {
+                assert!(
+                    (result[i][j] - a[i][j]).abs() < 1e-8,
+                    "A·A⁺·A ≠ A at [{i}][{j}]"
+                );
+            }
+        }
+    }
+
+    // --- SVD tests ---
+
+    #[test]
+    fn svd_identity_2x2() {
+        let a = vec![vec![1.0, 0.0], vec![0.0, 1.0]];
+        let result = svd(&a).unwrap();
+        assert!(approx_eq(result.sigma[0], 1.0));
+        assert!(approx_eq(result.sigma[1], 1.0));
+        svd_check_reconstruction(&a, 1e-10);
+    }
+
+    #[test]
+    fn svd_diagonal_3x3() {
+        let a = vec![
+            vec![3.0, 0.0, 0.0],
+            vec![0.0, 5.0, 0.0],
+            vec![0.0, 0.0, 2.0],
+        ];
+        let result = svd(&a).unwrap();
+        // Singular values should be sorted descending: 5, 3, 2
+        assert!(approx_eq(result.sigma[0], 5.0));
+        assert!(approx_eq(result.sigma[1], 3.0));
+        assert!(approx_eq(result.sigma[2], 2.0));
+        svd_check_reconstruction(&a, 1e-10);
+    }
+
+    #[test]
+    fn svd_rank_1() {
+        // Rank-1 matrix: [[1,2],[2,4]]
+        let a = vec![vec![1.0, 2.0], vec![2.0, 4.0]];
+        let result = svd(&a).unwrap();
+        assert!(result.sigma[0] > 1.0);
+        assert!(result.sigma[1] < 1e-10);
+        svd_check_reconstruction(&a, 1e-10);
+    }
+
+    #[test]
+    fn svd_tall_matrix() {
+        // 3×2 matrix
+        let a = vec![vec![1.0, 2.0], vec![3.0, 4.0], vec![5.0, 6.0]];
+        let result = svd(&a).unwrap();
+        assert_eq!(result.sigma.len(), 2);
+        assert!(result.sigma[0] > result.sigma[1]);
+        svd_check_reconstruction(&a, 1e-10);
+    }
+
+    #[test]
+    fn svd_wide_matrix() {
+        // 2×3 matrix
+        let a = vec![vec![1.0, 2.0, 3.0], vec![4.0, 5.0, 6.0]];
+        let result = svd(&a).unwrap();
+        assert_eq!(result.sigma.len(), 2);
+        svd_check_reconstruction(&a, 1e-10);
+    }
+
+    #[test]
+    fn svd_symmetric_positive_definite() {
+        let a = vec![
+            vec![4.0, 2.0, 1.0],
+            vec![2.0, 5.0, 3.0],
+            vec![1.0, 3.0, 6.0],
+        ];
+        let result = svd(&a).unwrap();
+        // All singular values should be positive for SPD
+        for &s in &result.sigma {
+            assert!(s > 0.0);
+        }
+        svd_check_reconstruction(&a, 1e-9);
+    }
+
+    #[test]
+    fn svd_orthogonality_u() {
+        let a = vec![vec![1.0, 2.0], vec![3.0, 4.0], vec![5.0, 6.0]];
+        let result = svd(&a).unwrap();
+        let m = a.len();
+        let ncols = result.u.len().min(m);
+        for i in 0..ncols {
+            for j in 0..ncols {
+                let dot: f64 = (0..m).map(|k| result.u[i][k] * result.u[j][k]).sum();
+                let expected = if i == j { 1.0 } else { 0.0 };
+                assert!(
+                    (dot - expected).abs() < 1e-10,
+                    "U orthogonality failed at ({i},{j}): dot={dot}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn svd_orthogonality_vt() {
+        let a = vec![vec![1.0, 2.0, 3.0], vec![4.0, 5.0, 6.0]];
+        let result = svd(&a).unwrap();
+        let n = a[0].len();
+        for i in 0..n {
+            for j in 0..n {
+                let dot: f64 = (0..n).map(|k| result.vt[i][k] * result.vt[j][k]).sum();
+                let expected = if i == j { 1.0 } else { 0.0 };
+                assert!(
+                    (dot - expected).abs() < 1e-10,
+                    "Vᵀ orthogonality failed at ({i},{j}): dot={dot}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn svd_1x1() {
+        let a = vec![vec![7.0]];
+        let result = svd(&a).unwrap();
+        assert!(approx_eq(result.sigma[0], 7.0));
+    }
+
+    #[test]
+    fn svd_zero_matrix() {
+        let a = vec![vec![0.0, 0.0], vec![0.0, 0.0]];
+        let result = svd(&a).unwrap();
+        for &s in &result.sigma {
+            assert!(s < 1e-10);
+        }
+    }
+
+    #[test]
+    fn svd_empty_errors() {
+        let a: Vec<Vec<f64>> = vec![];
+        assert!(svd(&a).is_err());
+    }
+
+    #[test]
+    fn svd_singular_values_descending() {
+        let a = vec![
+            vec![1.0, 0.0, 0.0],
+            vec![0.0, 0.5, 0.0],
+            vec![0.0, 0.0, 10.0],
+        ];
+        let result = svd(&a).unwrap();
+        for w in result.sigma.windows(2) {
+            assert!(w[0] >= w[1]);
+        }
+    }
+
+    #[test]
+    fn svd_negative_values() {
+        let a = vec![vec![-3.0, 1.0], vec![2.0, -4.0]];
+        let result = svd(&a).unwrap();
+        for &s in &result.sigma {
+            assert!(s >= 0.0);
+        }
+        svd_check_reconstruction(&a, 1e-10);
     }
 }

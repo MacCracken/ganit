@@ -62,18 +62,19 @@ Post-1.0 releases follow standard semver.
 - License `GPL-3.0` → `GPL-3.0-only`, removed duplicate Result alias
 - 408 tests, 82 benchmarks
 
+### 0.25.3 — Extended Linear Algebra + Multivariable Calculus (2026-03-25)
+- SVD (one-sided Jacobi, m×n), Svd struct
+- matrix_rank, condition_number, matrix_inverse (LU), pseudo_inverse (SVD)
+- CsrMatrix: CSR sparse format with from_dense, to_dense, spmv, add, transpose
+- partial_derivative, gradient, jacobian, hessian (finite differences)
+- integral_adaptive_simpson (recursive Richardson), integral_monte_carlo (N-D LCG)
+- P(-1) audit: Plane::from_point_normal → Result, NaN-safe Segment::direction/Triangle::unit_normal
+- GJK deduplication, matrix_determinant in-place optimization
+- 466 tests, 89 benchmarks
+
 ---
 
 ## Upcoming Milestones
-
-### 0.25.3 — Extended Linear Algebra + Multivariable Calculus (2026-03-25)
-**Focus:** Complete numerical toolkit, extend calc to N-D.
-
-- [ ] SVD (Singular Value Decomposition)
-- [ ] Matrix rank, condition number, inverse (via LU), pseudo-inverse
-- [ ] Sparse matrix support (CSR format)
-- [ ] `partial_derivative()`, `gradient()`, `jacobian()`, `hessian()`
-- [ ] `integral_monte_carlo()`, `integral_adaptive_simpson()`
 
 ### 0.26.3 — Optimization Solvers + 3D Collision (2026-03-26)
 **Focus:** Iterative solvers and 3D geometry.

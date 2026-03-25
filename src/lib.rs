@@ -72,7 +72,7 @@ pub use geo::{
 };
 
 #[cfg(feature = "num")]
-pub use num::Complex;
+pub use num::{Complex, CsrMatrix, Svd};
 
 #[cfg(feature = "ai")]
 pub use ai::DaimonClient;

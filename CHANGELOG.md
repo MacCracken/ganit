@@ -1,5 +1,44 @@
 # Changelog
 
+## 0.25.3 (2026-03-25)
+
+### num — Singular Value Decomposition
+- `svd()` — one-sided Jacobi SVD for m×n matrices, returns U, σ, Vᵀ
+- `Svd` struct with `u`, `sigma`, `vt` fields
+
+### num — Matrix utilities (built on SVD + LU)
+- `matrix_rank()` — numerical rank via singular value thresholding
+- `condition_number()` — ratio σ_max/σ_min
+- `matrix_inverse()` — full inverse via LU decomposition
+- `pseudo_inverse()` — Moore-Penrose pseudo-inverse via SVD
+
+### num — Sparse matrices (CSR)
+- `CsrMatrix` — Compressed Sparse Row format
+- `from_dense()`, `to_dense()`, `spmv()`, `add()`, `transpose()`
+- `nnz()`, `new()` with full validation
+
+### calc — Multivariable calculus
+- `partial_derivative()` — central difference on single variable
+- `gradient()` — full gradient vector ∇f
+- `jacobian()` — m×n Jacobian matrix of vector-valued function
+- `hessian()` — n×n Hessian matrix of scalar function
+
+### calc — Advanced integration
+- `integral_adaptive_simpson()` — recursive adaptive Simpson with Richardson extrapolation
+- `integral_monte_carlo()` — N-dimensional Monte Carlo integration with deterministic LCG
+
+### geo — Edge-case hardening (from P(-1) audit)
+- `Plane::from_point_normal()` now returns `Result` (rejects zero-length normals)
+- `Segment::direction()` returns fallback instead of NaN on zero-length segments
+- `Triangle::unit_normal()` returns fallback instead of NaN on degenerate triangles
+
+### Performance
+- `matrix_determinant()` uses `lu_decompose_in_place` (avoids double allocation)
+- GJK: deduplicated `gjk_intersect`/`gjk_epa` via shared `gjk_core()` (~60 lines removed)
+
+### Stats
+- 466 tests, 89 benchmarks, zero clippy warnings
+
 ## 0.24.3 (2026-03-24)
 
 ### num — Discrete Sine/Cosine Transforms

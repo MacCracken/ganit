@@ -928,6 +928,74 @@ fn bench_v05c(c: &mut Criterion) {
     group.finish();
 }
 
+// ---------------------------------------------------------------------------
+// v06: SVD + Extended Linear Algebra
+// ---------------------------------------------------------------------------
+
+fn bench_v06(c: &mut Criterion) {
+    let mut group = c.benchmark_group("v06");
+
+    group.bench_function("svd_3x3", |b| {
+        let a = vec![
+            vec![1.0, 2.0, 3.0],
+            vec![4.0, 5.0, 6.0],
+            vec![7.0, 8.0, 10.0],
+        ];
+        b.iter(|| hisab::num::svd(black_box(&a)))
+    });
+
+    group.bench_function("svd_5x5", |b| {
+        let a = vec![
+            vec![2.0, 1.0, 0.0, 3.0, 1.0],
+            vec![1.0, 4.0, 2.0, 0.0, 1.0],
+            vec![0.0, 2.0, 3.0, 1.0, 2.0],
+            vec![3.0, 0.0, 1.0, 5.0, 0.0],
+            vec![1.0, 1.0, 2.0, 0.0, 4.0],
+        ];
+        b.iter(|| hisab::num::svd(black_box(&a)))
+    });
+
+    group.bench_function("matrix_inverse_3x3", |b| {
+        let a = vec![
+            vec![1.0, 2.0, 3.0],
+            vec![0.0, 4.0, 5.0],
+            vec![1.0, 0.0, 6.0],
+        ];
+        b.iter(|| hisab::num::matrix_inverse(black_box(&a)))
+    });
+
+    group.bench_function("pseudo_inverse_3x2", |b| {
+        let a = vec![vec![1.0, 2.0], vec![3.0, 4.0], vec![5.0, 6.0]];
+        b.iter(|| hisab::num::pseudo_inverse(black_box(&a), None))
+    });
+
+    group.bench_function("csr_spmv_100x100", |b| {
+        // Sparse identity-like: ~10% fill
+        let mut dense = vec![vec![0.0; 100]; 100];
+        for i in 0..100 {
+            dense[i][i] = 1.0;
+            if i + 1 < 100 {
+                dense[i][i + 1] = 0.5;
+            }
+        }
+        let csr = hisab::CsrMatrix::from_dense(&dense);
+        let x: Vec<f64> = (0..100).map(|i| i as f64).collect();
+        b.iter(|| csr.spmv(black_box(&x)))
+    });
+
+    group.bench_function("svd_4x2_tall", |b| {
+        let a = vec![
+            vec![1.0, 2.0],
+            vec![3.0, 4.0],
+            vec![5.0, 6.0],
+            vec![7.0, 8.0],
+        ];
+        b.iter(|| hisab::num::svd(black_box(&a)))
+    });
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_transforms,
@@ -943,5 +1011,6 @@ criterion_group!(
     bench_v05a,
     bench_v05b,
     bench_v05c,
+    bench_v06,
 );
 criterion_main!(benches);
