@@ -73,14 +73,22 @@ pub struct Plane {
 
 impl Plane {
     /// Create a plane from a point on the plane and a normal.
-    #[must_use]
+    ///
+    /// # Errors
+    /// Returns [`crate::HisabError::InvalidInput`] if `normal` is zero-length.
     #[inline]
-    pub fn from_point_normal(point: Vec3, normal: Vec3) -> Self {
-        let n = normal.normalize();
-        Self {
+    pub fn from_point_normal(point: Vec3, normal: Vec3) -> Result<Self, crate::HisabError> {
+        let len_sq = normal.length_squared();
+        if len_sq < crate::EPSILON_F32 {
+            return Err(crate::HisabError::InvalidInput(
+                "plane normal must be non-zero".into(),
+            ));
+        }
+        let n = normal * len_sq.sqrt().recip();
+        Ok(Self {
             normal: n,
             distance: n.dot(point),
-        }
+        })
     }
 
     /// Signed distance from a point to the plane.
@@ -343,10 +351,17 @@ impl Triangle {
     }
 
     /// Normalized face normal.
+    ///
+    /// Returns [`Vec3::Y`] for degenerate triangles (collinear/coincident vertices).
     #[must_use]
     #[inline]
     pub fn unit_normal(&self) -> Vec3 {
-        self.normal().normalize()
+        let n = self.normal();
+        let len_sq = n.length_squared();
+        if len_sq < crate::EPSILON_F32 {
+            return Vec3::Y; // Degenerate — arbitrary fallback
+        }
+        n * len_sq.sqrt().recip()
     }
 
     /// Area of the triangle.
@@ -456,10 +471,17 @@ impl Segment {
     }
 
     /// Normalized direction from start to end.
+    ///
+    /// Returns [`Vec3::X`] for degenerate (zero-length) segments.
     #[must_use]
     #[inline]
     pub fn direction(&self) -> Vec3 {
-        (self.end - self.start).normalize()
+        let d = self.end - self.start;
+        let len_sq = d.length_squared();
+        if len_sq < crate::EPSILON_F32 {
+            return Vec3::X; // Degenerate — arbitrary fallback
+        }
+        d * len_sq.sqrt().recip()
     }
 
     /// Closest point on this segment to the given point.
@@ -1759,15 +1781,26 @@ fn triple_cross_2d(a: glam::Vec2, b: glam::Vec2, c: glam::Vec2) -> glam::Vec2 {
     b * ca - a * cb
 }
 
-/// GJK collision test between two convex shapes (2D).
-///
-/// Returns `true` if the shapes overlap. Uses the simplex-based GJK algorithm.
-#[must_use]
-pub fn gjk_intersect(a: &dyn ConvexSupport, b: &dyn ConvexSupport) -> bool {
-    // Initial direction: from center of A to center of B (approximated)
-    let mut direction = glam::Vec2::new(1.0, 0.0);
+/// GJK simplex evolution result.
+enum GjkResult {
+    /// No intersection found.
+    NoIntersection,
+    /// Intersection confirmed — simplex contains origin.
+    Intersection([glam::Vec2; 3], usize),
+}
 
-    // Fixed-size simplex: GJK in 2D never exceeds 3 points.
+/// Core GJK loop shared by `gjk_intersect` and `gjk_epa`.
+///
+/// Returns the final simplex if the origin is contained, or `NoIntersection`.
+/// When the line-case direction degenerates, `on_line_degenerate` controls
+/// the fallback: `true` returns early as intersecting, `false` picks a
+/// perpendicular direction and keeps going (needed for EPA).
+fn gjk_core(
+    a: &dyn ConvexSupport,
+    b: &dyn ConvexSupport,
+    early_intersect_on_line: bool,
+) -> GjkResult {
+    let mut direction = glam::Vec2::new(1.0, 0.0);
     let mut simplex = [glam::Vec2::ZERO; 3];
     let mut simplex_len: usize = 0;
 
@@ -1778,29 +1811,28 @@ pub fn gjk_intersect(a: &dyn ConvexSupport, b: &dyn ConvexSupport) -> bool {
 
     for _ in 0..64 {
         let new_point = minkowski_support(a, b, direction);
-
         if new_point.dot(direction) < 0.0 {
-            return false; // No collision — didn't pass the origin
+            return GjkResult::NoIntersection;
         }
-
         simplex[simplex_len] = new_point;
         simplex_len += 1;
 
-        // Check if simplex contains the origin
         match simplex_len {
             2 => {
-                // Line case
                 let b_pt = simplex[1];
                 let a_pt = simplex[0];
                 let ab = a_pt - b_pt;
                 let ao = -b_pt;
                 direction = triple_cross_2d(ab, ao, ab);
                 if direction.length_squared() < crate::EPSILON_F32 {
-                    return true; // Origin is on the line segment
+                    if early_intersect_on_line {
+                        return GjkResult::Intersection(simplex, simplex_len);
+                    }
+                    // Need third point — pick perpendicular
+                    direction = glam::Vec2::new(-ab.y, ab.x);
                 }
             }
             3 => {
-                // Triangle case
                 let c = simplex[2];
                 let b_pt = simplex[1];
                 let a_pt = simplex[0];
@@ -1812,26 +1844,31 @@ pub fn gjk_intersect(a: &dyn ConvexSupport, b: &dyn ConvexSupport) -> bool {
                 let ca_perp = triple_cross_2d(cb, ca, ca);
 
                 if cb_perp.dot(co) > 0.0 {
-                    // Region outside CB — remove A (index 0)
                     simplex[0] = simplex[1];
                     simplex[1] = simplex[2];
                     simplex_len -= 1;
                     direction = cb_perp;
                 } else if ca_perp.dot(co) > 0.0 {
-                    // Region outside CA — remove B (index 1)
                     simplex[1] = simplex[2];
                     simplex_len -= 1;
                     direction = ca_perp;
                 } else {
-                    // Origin is inside the triangle
-                    return true;
+                    return GjkResult::Intersection(simplex, simplex_len);
                 }
             }
             _ => unreachable!(),
         }
     }
 
-    false // Max iterations
+    GjkResult::NoIntersection
+}
+
+/// GJK collision test between two convex shapes (2D).
+///
+/// Returns `true` if the shapes overlap. Uses the simplex-based GJK algorithm.
+#[must_use]
+pub fn gjk_intersect(a: &dyn ConvexSupport, b: &dyn ConvexSupport) -> bool {
+    matches!(gjk_core(a, b, true), GjkResult::Intersection(..))
 }
 
 // ---------------------------------------------------------------------------
@@ -1929,69 +1966,10 @@ pub fn epa_penetration(
 /// the separation normal and depth.
 #[must_use]
 pub fn gjk_epa(a: &dyn ConvexSupport, b: &dyn ConvexSupport) -> Option<Penetration> {
-    let mut direction = glam::Vec2::new(1.0, 0.0);
-
-    // Fixed-size simplex: GJK in 2D never exceeds 3 points.
-    let mut simplex = [glam::Vec2::ZERO; 3];
-    let mut simplex_len: usize = 0;
-
-    let s = minkowski_support(a, b, direction);
-    simplex[simplex_len] = s;
-    simplex_len += 1;
-    direction = -s;
-
-    for _ in 0..64 {
-        let new_point = minkowski_support(a, b, direction);
-        if new_point.dot(direction) < 0.0 {
-            return None;
-        }
-        simplex[simplex_len] = new_point;
-        simplex_len += 1;
-
-        match simplex_len {
-            2 => {
-                let b_pt = simplex[1];
-                let a_pt = simplex[0];
-                let ab = a_pt - b_pt;
-                let ao = -b_pt;
-                direction = triple_cross_2d(ab, ao, ab);
-                if direction.length_squared() < crate::EPSILON_F32 {
-                    // Degenerate — origin on line, need third point
-                    direction = glam::Vec2::new(-ab.y, ab.x);
-                }
-            }
-            3 => {
-                let c = simplex[2];
-                let b_pt = simplex[1];
-                let a_pt = simplex[0];
-                let cb = b_pt - c;
-                let ca = a_pt - c;
-                let co = -c;
-
-                let cb_perp = triple_cross_2d(ca, cb, cb);
-                let ca_perp = triple_cross_2d(cb, ca, ca);
-
-                if cb_perp.dot(co) > 0.0 {
-                    // Region outside CB — remove A (index 0)
-                    simplex[0] = simplex[1];
-                    simplex[1] = simplex[2];
-                    simplex_len -= 1;
-                    direction = cb_perp;
-                } else if ca_perp.dot(co) > 0.0 {
-                    // Region outside CA — remove B (index 1)
-                    simplex[1] = simplex[2];
-                    simplex_len -= 1;
-                    direction = ca_perp;
-                } else {
-                    // Contains origin — run EPA with slice of the fixed array
-                    return epa_penetration(a, b, &simplex[..simplex_len]);
-                }
-            }
-            _ => unreachable!(),
-        }
+    match gjk_core(a, b, false) {
+        GjkResult::NoIntersection => None,
+        GjkResult::Intersection(simplex, len) => epa_penetration(a, b, &simplex[..len]),
     }
-
-    None
 }
 
 #[cfg(test)]
@@ -2017,7 +1995,7 @@ mod tests {
 
     #[test]
     fn plane_from_point_normal() {
-        let p = Plane::from_point_normal(Vec3::new(0.0, 1.0, 0.0), Vec3::Y);
+        let p = Plane::from_point_normal(Vec3::new(0.0, 1.0, 0.0), Vec3::Y).unwrap();
         assert!(approx_eq(p.distance, 1.0));
         assert!(approx_eq(p.signed_distance(Vec3::new(0.0, 2.0, 0.0)), 1.0));
         assert!(approx_eq(p.signed_distance(Vec3::new(0.0, 0.0, 0.0)), -1.0));
@@ -2058,7 +2036,7 @@ mod tests {
     #[test]
     fn ray_plane_intersection() {
         let r = Ray::new(Vec3::ZERO, Vec3::Y).unwrap();
-        let p = Plane::from_point_normal(Vec3::new(0.0, 5.0, 0.0), Vec3::Y);
+        let p = Plane::from_point_normal(Vec3::new(0.0, 5.0, 0.0), Vec3::Y).unwrap();
         let t = ray_plane(&r, &p).unwrap();
         assert!(approx_eq(t, 5.0));
     }
@@ -2066,7 +2044,7 @@ mod tests {
     #[test]
     fn ray_plane_parallel_no_hit() {
         let r = Ray::new(Vec3::ZERO, Vec3::X).unwrap();
-        let p = Plane::from_point_normal(Vec3::new(0.0, 5.0, 0.0), Vec3::Y);
+        let p = Plane::from_point_normal(Vec3::new(0.0, 5.0, 0.0), Vec3::Y).unwrap();
         assert!(ray_plane(&r, &p).is_none());
     }
 
@@ -2141,14 +2119,14 @@ mod tests {
 
     #[test]
     fn plane_signed_distance_on_plane() {
-        let p = Plane::from_point_normal(Vec3::ZERO, Vec3::Y);
+        let p = Plane::from_point_normal(Vec3::ZERO, Vec3::Y).unwrap();
         assert!(approx_eq(p.signed_distance(Vec3::new(5.0, 0.0, -3.0)), 0.0));
     }
 
     #[test]
     fn plane_non_axis_normal() {
         let normal = Vec3::new(1.0, 1.0, 0.0);
-        let p = Plane::from_point_normal(Vec3::ZERO, normal);
+        let p = Plane::from_point_normal(Vec3::ZERO, normal).unwrap();
         assert!(approx_eq(p.normal.length(), 1.0));
         assert!(approx_eq(p.distance, 0.0));
     }
@@ -2193,7 +2171,7 @@ mod tests {
     #[test]
     fn ray_plane_behind_origin() {
         let r = Ray::new(Vec3::new(0.0, 0.0, 5.0), Vec3::Z).unwrap();
-        let p = Plane::from_point_normal(Vec3::ZERO, Vec3::Z);
+        let p = Plane::from_point_normal(Vec3::ZERO, Vec3::Z).unwrap();
         assert!(ray_plane(&r, &p).is_none());
     }
 
@@ -2277,7 +2255,7 @@ mod tests {
     #[test]
     fn ray_plane_intersection_at_angle() {
         let r = Ray::new(Vec3::new(0.0, 5.0, 0.0), Vec3::new(0.0, -1.0, 1.0)).unwrap();
-        let p = Plane::from_point_normal(Vec3::ZERO, Vec3::Y);
+        let p = Plane::from_point_normal(Vec3::ZERO, Vec3::Y).unwrap();
         let t = ray_plane(&r, &p).unwrap();
         let hit = r.at(t);
         assert!(approx_eq(hit.y, 0.0));
@@ -2333,7 +2311,7 @@ mod tests {
 
     #[test]
     fn plane_signed_distance_both_sides() {
-        let p = Plane::from_point_normal(Vec3::new(0.0, 5.0, 0.0), Vec3::Y);
+        let p = Plane::from_point_normal(Vec3::new(0.0, 5.0, 0.0), Vec3::Y).unwrap();
         assert!(p.signed_distance(Vec3::new(0.0, 10.0, 0.0)) > 0.0);
         assert!(p.signed_distance(Vec3::new(0.0, 0.0, 0.0)) < 0.0);
         assert!(approx_eq(p.signed_distance(Vec3::new(0.0, 5.0, 0.0)), 0.0));
@@ -2542,8 +2520,8 @@ mod tests {
     // Plane-plane intersection tests
     #[test]
     fn plane_plane_intersection() {
-        let a = Plane::from_point_normal(Vec3::ZERO, Vec3::Y);
-        let b = Plane::from_point_normal(Vec3::ZERO, Vec3::X);
+        let a = Plane::from_point_normal(Vec3::ZERO, Vec3::Y).unwrap();
+        let b = Plane::from_point_normal(Vec3::ZERO, Vec3::X).unwrap();
         let line = plane_plane(&a, &b).unwrap();
         // Intersection should be along Z axis
         assert!(approx_eq(line.direction.z.abs(), 1.0));
@@ -2551,8 +2529,8 @@ mod tests {
 
     #[test]
     fn plane_plane_parallel() {
-        let a = Plane::from_point_normal(Vec3::ZERO, Vec3::Y);
-        let b = Plane::from_point_normal(Vec3::new(0.0, 5.0, 0.0), Vec3::Y);
+        let a = Plane::from_point_normal(Vec3::ZERO, Vec3::Y).unwrap();
+        let b = Plane::from_point_normal(Vec3::new(0.0, 5.0, 0.0), Vec3::Y).unwrap();
         assert!(plane_plane(&a, &b).is_none());
     }
 
@@ -2574,7 +2552,7 @@ mod tests {
 
     #[test]
     fn closest_on_plane() {
-        let p = Plane::from_point_normal(Vec3::ZERO, Vec3::Y);
+        let p = Plane::from_point_normal(Vec3::ZERO, Vec3::Y).unwrap();
         let cp = closest_point_on_plane(&p, Vec3::new(3.0, 7.0, -2.0));
         assert!(vec3_approx_eq(cp, Vec3::new(3.0, 0.0, -2.0)));
     }
@@ -2719,8 +2697,8 @@ mod tests {
 
     #[test]
     fn plane_plane_intersection_point_on_both() {
-        let a = Plane::from_point_normal(Vec3::ZERO, Vec3::Y);
-        let b = Plane::from_point_normal(Vec3::ZERO, Vec3::X);
+        let a = Plane::from_point_normal(Vec3::ZERO, Vec3::Y).unwrap();
+        let b = Plane::from_point_normal(Vec3::ZERO, Vec3::X).unwrap();
         let line = plane_plane(&a, &b).unwrap();
         // The origin should be close to the intersection line
         let cp = line.closest_point(Vec3::ZERO);
@@ -2788,7 +2766,7 @@ mod tests {
 
     #[test]
     fn closest_on_plane_already_on_plane() {
-        let p = Plane::from_point_normal(Vec3::ZERO, Vec3::Y);
+        let p = Plane::from_point_normal(Vec3::ZERO, Vec3::Y).unwrap();
         let point = Vec3::new(3.0, 0.0, -7.0);
         let cp = closest_point_on_plane(&p, point);
         assert!(vec3_approx_eq(cp, point));
@@ -3529,13 +3507,13 @@ mod tests {
 
     #[test]
     fn plane_display() {
-        let p = Plane::from_point_normal(Vec3::ZERO, Vec3::Y);
+        let p = Plane::from_point_normal(Vec3::ZERO, Vec3::Y).unwrap();
         assert_eq!(p.to_string(), "Plane(n=(0, 1, 0), d=0)");
     }
 
     #[test]
     fn plane_display_precision() {
-        let p = Plane::from_point_normal(Vec3::ZERO, Vec3::Y);
+        let p = Plane::from_point_normal(Vec3::ZERO, Vec3::Y).unwrap();
         assert_eq!(format!("{p:.2}"), "Plane(n=(0.00, 1.00, 0.00), d=0.00)");
     }
 
@@ -3593,5 +3571,37 @@ mod tests {
     fn rect_area_zero() {
         let r = Rect::new(glam::Vec2::ZERO, glam::Vec2::new(5.0, 0.0));
         assert!((r.area()).abs() < 1e-6);
+    }
+
+    // --- Audit: edge-case hardening ---
+
+    #[test]
+    fn plane_from_point_normal_zero_normal_errors() {
+        let result = Plane::from_point_normal(Vec3::ZERO, Vec3::ZERO);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn segment_direction_degenerate_no_nan() {
+        let s = Segment::new(Vec3::splat(5.0), Vec3::splat(5.0));
+        let d = s.direction();
+        assert!(!d.x.is_nan() && !d.y.is_nan() && !d.z.is_nan());
+        assert!(approx_eq(d.length(), 1.0));
+    }
+
+    #[test]
+    fn triangle_unit_normal_degenerate_no_nan() {
+        let t = Triangle::new(Vec3::ZERO, Vec3::ZERO, Vec3::ZERO);
+        let n = t.unit_normal();
+        assert!(!n.x.is_nan() && !n.y.is_nan() && !n.z.is_nan());
+        assert!(approx_eq(n.length(), 1.0));
+    }
+
+    #[test]
+    fn triangle_unit_normal_collinear_no_nan() {
+        let t = Triangle::new(Vec3::ZERO, Vec3::X, Vec3::new(2.0, 0.0, 0.0));
+        let n = t.unit_normal();
+        assert!(!n.x.is_nan() && !n.y.is_nan() && !n.z.is_nan());
+        assert!(approx_eq(n.length(), 1.0));
     }
 }

@@ -43,7 +43,7 @@ fn interpolated_ray_origin() {
 fn numerical_root_matches_geometry() {
     // Find the distance where a ray hits a plane using both geometry and root-finding.
     let ray = Ray::new(Vec3::ZERO, Vec3::Y).unwrap();
-    let plane = Plane::from_point_normal(Vec3::new(0.0, 7.0, 0.0), Vec3::Y);
+    let plane = Plane::from_point_normal(Vec3::new(0.0, 7.0, 0.0), Vec3::Y).unwrap();
 
     // Geometric method
     let geo_t = ray_plane(&ray, &plane).unwrap();

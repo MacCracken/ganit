@@ -89,7 +89,7 @@ fn bench_geo(c: &mut Criterion) {
 
     let ray = hisab::Ray::new(Vec3::new(0.0, 0.0, -10.0), Vec3::Z).unwrap();
     let sphere = hisab::Sphere::new(Vec3::ZERO, 1.0).unwrap();
-    let plane = hisab::Plane::from_point_normal(Vec3::new(0.0, 5.0, 0.0), Vec3::Y);
+    let plane = hisab::Plane::from_point_normal(Vec3::new(0.0, 5.0, 0.0), Vec3::Y).unwrap();
     let aabb = hisab::Aabb::new(Vec3::new(-1.0, -1.0, -1.0), Vec3::new(1.0, 1.0, 1.0));
 
     group.bench_function("ray_sphere_hit", |b| {
@@ -367,8 +367,8 @@ fn bench_v02(c: &mut Criterion) {
     });
 
     group.bench_function("plane_plane_intersection", |b| {
-        let a = hisab::Plane::from_point_normal(Vec3::ZERO, Vec3::Y);
-        let bb = hisab::Plane::from_point_normal(Vec3::ZERO, Vec3::X);
+        let a = hisab::Plane::from_point_normal(Vec3::ZERO, Vec3::Y).unwrap();
+        let bb = hisab::Plane::from_point_normal(Vec3::ZERO, Vec3::X).unwrap();
         b.iter(|| hisab::geo::plane_plane(black_box(&a), black_box(&bb)))
     });
 

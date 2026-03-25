@@ -577,16 +577,17 @@ pub fn matrix_determinant(a: &[Vec<f64>]) -> Result<f64, HisabError> {
             )));
         }
     }
-    // Use LU decomposition; det = product of U diagonal * sign from pivoting
-    match lu_decompose(a) {
-        Ok((lu, pivot)) => {
+    // Clone and decompose in place to avoid double allocation
+    let mut lu: Vec<Vec<f64>> = a.to_vec();
+    match lu_decompose_in_place(&mut lu) {
+        Ok(pivot) => {
             let mut det = 1.0;
             for (i, row) in lu.iter().enumerate().take(n) {
                 det *= row[i];
             }
             // Determine sign from permutation parity
-            let mut perm = pivot.to_vec();
             let mut sign = 1.0;
+            let mut perm = pivot;
             for i in 0..n {
                 while perm[i] != i {
                     let j = perm[i];
