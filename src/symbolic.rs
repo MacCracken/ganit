@@ -170,6 +170,38 @@ impl Expr {
         }
     }
 
+    /// Substitute a variable with another expression.
+    #[must_use]
+    pub fn substitute(&self, var: &str, replacement: &Expr) -> Expr {
+        match self {
+            Expr::Const(_) => self.clone(),
+            Expr::Var(name) => {
+                if name == var {
+                    replacement.clone()
+                } else {
+                    self.clone()
+                }
+            }
+            Expr::Add(a, b) => Expr::Add(
+                Box::new(a.substitute(var, replacement)),
+                Box::new(b.substitute(var, replacement)),
+            ),
+            Expr::Mul(a, b) => Expr::Mul(
+                Box::new(a.substitute(var, replacement)),
+                Box::new(b.substitute(var, replacement)),
+            ),
+            Expr::Pow(a, b) => Expr::Pow(
+                Box::new(a.substitute(var, replacement)),
+                Box::new(b.substitute(var, replacement)),
+            ),
+            Expr::Neg(a) => Expr::Neg(Box::new(a.substitute(var, replacement))),
+            Expr::Sin(a) => Expr::Sin(Box::new(a.substitute(var, replacement))),
+            Expr::Cos(a) => Expr::Cos(Box::new(a.substitute(var, replacement))),
+            Expr::Exp(a) => Expr::Exp(Box::new(a.substitute(var, replacement))),
+            Expr::Ln(a) => Expr::Ln(Box::new(a.substitute(var, replacement))),
+        }
+    }
+
     /// Simplify the expression using basic algebraic rules.
     #[must_use]
     pub fn simplify(&self) -> Expr {
@@ -384,6 +416,26 @@ mod tests {
     fn simplify_const_fold() {
         let e = Expr::Add(Box::new(c(2.0)), Box::new(c(3.0)));
         assert_eq!(e.simplify(), c(5.0));
+    }
+
+    #[test]
+    fn substitute_variable() {
+        // x² with x → (y+1) → (y+1)²
+        let expr = Expr::Pow(Box::new(var("x")), Box::new(c(2.0)));
+        let replacement = Expr::Add(Box::new(var("y")), Box::new(c(1.0)));
+        let subst = expr.substitute("x", &replacement);
+        let v = vars(&[("y", 2.0)]);
+        // (2+1)² = 9
+        assert!(approx(subst.evaluate(&v).unwrap(), 9.0));
+    }
+
+    #[test]
+    fn substitute_no_match() {
+        let expr = Expr::Mul(Box::new(c(3.0)), Box::new(var("x")));
+        let subst = expr.substitute("z", &c(999.0));
+        // No "z" in expression, should be unchanged
+        let v = vars(&[("x", 5.0)]);
+        assert!(approx(subst.evaluate(&v).unwrap(), 15.0));
     }
 
     #[test]

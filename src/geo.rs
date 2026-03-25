@@ -610,6 +610,20 @@ impl Frustum {
         }
         true
     }
+
+    /// Conservative check whether a sphere intersects the frustum.
+    ///
+    /// Returns `false` only if the sphere is fully outside at least one plane.
+    #[must_use]
+    #[inline]
+    pub fn contains_sphere(&self, sphere: &Sphere) -> bool {
+        for plane in &self.planes {
+            if plane.signed_distance(sphere.center) < -sphere.radius {
+                return false;
+            }
+        }
+        true
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -4591,5 +4605,32 @@ mod tests {
             assert!(pen1.depth > 0.0);
             assert!(pen2.depth > 0.0);
         }
+    }
+
+    // --- Frustum-sphere tests ---
+
+    #[test]
+    fn frustum_contains_sphere_inside() {
+        let proj = glam::Mat4::perspective_rh_gl(std::f32::consts::FRAC_PI_4, 1.0, 0.1, 100.0);
+        let frustum = Frustum::from_view_projection(proj);
+        let sphere = Sphere::new(Vec3::new(0.0, 0.0, -5.0), 1.0).unwrap();
+        assert!(frustum.contains_sphere(&sphere));
+    }
+
+    #[test]
+    fn frustum_rejects_sphere_behind() {
+        let proj = glam::Mat4::perspective_rh_gl(std::f32::consts::FRAC_PI_4, 1.0, 0.1, 100.0);
+        let frustum = Frustum::from_view_projection(proj);
+        let sphere = Sphere::new(Vec3::new(0.0, 0.0, 5.0), 1.0).unwrap();
+        assert!(!frustum.contains_sphere(&sphere));
+    }
+
+    #[test]
+    fn frustum_sphere_partially_inside() {
+        let proj = glam::Mat4::perspective_rh_gl(std::f32::consts::FRAC_PI_4, 1.0, 0.1, 100.0);
+        let frustum = Frustum::from_view_projection(proj);
+        // Sphere centered at near plane, large enough to straddle it
+        let sphere = Sphere::new(Vec3::new(0.0, 0.0, -0.1), 0.5).unwrap();
+        assert!(frustum.contains_sphere(&sphere));
     }
 }

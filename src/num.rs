@@ -1071,6 +1071,74 @@ pub fn ifft(data: &mut [Complex]) -> Result<(), HisabError> {
     Ok(())
 }
 
+/// In-place 2D FFT on a row-major grid of `rows × cols`.
+///
+/// Both `rows` and `cols` must be powers of two.
+///
+/// # Errors
+///
+/// Returns [`HisabError::InvalidInput`] if dimensions aren't powers of two
+/// or `data.len() != rows * cols`.
+#[must_use = "returns an error if dimensions are invalid"]
+pub fn fft_2d(data: &mut [Complex], rows: usize, cols: usize) -> Result<(), HisabError> {
+    if data.len() != rows * cols {
+        return Err(HisabError::InvalidInput(format!(
+            "data length {} != rows*cols {}",
+            data.len(),
+            rows * cols
+        )));
+    }
+    // FFT each row
+    for r in 0..rows {
+        let row = &mut data[r * cols..(r + 1) * cols];
+        fft(row)?;
+    }
+    // FFT each column (extract, transform, put back)
+    let mut col_buf = vec![Complex::new(0.0, 0.0); rows];
+    for c in 0..cols {
+        for r in 0..rows {
+            col_buf[r] = data[r * cols + c];
+        }
+        fft(&mut col_buf)?;
+        for r in 0..rows {
+            data[r * cols + c] = col_buf[r];
+        }
+    }
+    Ok(())
+}
+
+/// In-place 2D inverse FFT on a row-major grid.
+///
+/// # Errors
+///
+/// Returns [`HisabError::InvalidInput`] if dimensions aren't powers of two
+/// or `data.len() != rows * cols`.
+#[must_use = "returns an error if dimensions are invalid"]
+pub fn ifft_2d(data: &mut [Complex], rows: usize, cols: usize) -> Result<(), HisabError> {
+    if data.len() != rows * cols {
+        return Err(HisabError::InvalidInput(format!(
+            "data length {} != rows*cols {}",
+            data.len(),
+            rows * cols
+        )));
+    }
+    for r in 0..rows {
+        let row = &mut data[r * cols..(r + 1) * cols];
+        ifft(row)?;
+    }
+    let mut col_buf = vec![Complex::new(0.0, 0.0); rows];
+    for c in 0..cols {
+        for r in 0..rows {
+            col_buf[r] = data[r * cols + c];
+        }
+        ifft(&mut col_buf)?;
+        for r in 0..rows {
+            data[r * cols + c] = col_buf[r];
+        }
+    }
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Discrete Sine / Cosine Transforms
 // ---------------------------------------------------------------------------
@@ -1519,6 +1587,181 @@ pub fn dopri45(
     }
 
     Ok(trajectory)
+}
+
+// ---------------------------------------------------------------------------
+// Symplectic integrators
+// ---------------------------------------------------------------------------
+
+/// Symplectic Euler (semi-implicit Euler) integrator step.
+///
+/// Updates velocity first, then position — preserves phase-space volume.
+///
+/// - `acc_fn`: computes acceleration from `(t, position, &mut acceleration_out)`.
+/// - `pos`: current position vector (modified in place).
+/// - `vel`: current velocity vector (modified in place).
+/// - `t`: current time.
+/// - `dt`: time step.
+#[inline]
+pub fn symplectic_euler_step(
+    acc_fn: &impl Fn(f64, &[f64], &mut [f64]),
+    pos: &mut [f64],
+    vel: &mut [f64],
+    t: f64,
+    dt: f64,
+) {
+    let dim = pos.len();
+    let mut acc = vec![0.0; dim];
+    acc_fn(t, pos, &mut acc);
+    for i in 0..dim {
+        vel[i] += dt * acc[i];
+        pos[i] += dt * vel[i]; // uses updated velocity
+    }
+}
+
+/// Velocity Verlet (Störmer-Verlet) integrator step.
+///
+/// Second-order, symplectic, time-reversible. The standard for molecular
+/// dynamics and physics engines.
+///
+/// - `acc_fn`: computes acceleration from `(t, position, &mut acceleration_out)`.
+/// - `pos`: current position (modified in place).
+/// - `vel`: current velocity (modified in place).
+/// - `t`: current time.
+/// - `dt`: time step.
+/// - `acc_prev`: acceleration from the previous step (modified to current step's acceleration).
+#[inline]
+pub fn verlet_step(
+    acc_fn: &impl Fn(f64, &[f64], &mut [f64]),
+    pos: &mut [f64],
+    vel: &mut [f64],
+    t: f64,
+    dt: f64,
+    acc_prev: &mut [f64],
+) {
+    let dim = pos.len();
+    let half_dt = 0.5 * dt;
+
+    // Position: x(t+dt) = x(t) + v(t)*dt + 0.5*a(t)*dt²
+    for i in 0..dim {
+        pos[i] += vel[i] * dt + half_dt * dt * acc_prev[i];
+    }
+
+    // Acceleration at new position
+    let mut acc_new = vec![0.0; dim];
+    acc_fn(t + dt, pos, &mut acc_new);
+
+    // Velocity: v(t+dt) = v(t) + 0.5*(a(t) + a(t+dt))*dt
+    for i in 0..dim {
+        vel[i] += half_dt * (acc_prev[i] + acc_new[i]);
+    }
+    acc_prev[..dim].copy_from_slice(&acc_new[..dim]);
+}
+
+/// Leapfrog integrator step.
+///
+/// Equivalent to Verlet but stores velocity at half-steps.
+/// Second-order, symplectic.
+///
+/// - `acc_fn`: computes acceleration from `(t, position, &mut acceleration_out)`.
+/// - `pos`: current position (modified in place).
+/// - `vel_half`: velocity at t - dt/2 (modified to t + dt/2).
+/// - `t`: current time.
+/// - `dt`: time step.
+#[inline]
+pub fn leapfrog_step(
+    acc_fn: &impl Fn(f64, &[f64], &mut [f64]),
+    pos: &mut [f64],
+    vel_half: &mut [f64],
+    t: f64,
+    dt: f64,
+) {
+    let dim = pos.len();
+    let mut acc = vec![0.0; dim];
+    acc_fn(t, pos, &mut acc);
+
+    // Kick: v(t+dt/2) = v(t-dt/2) + a(t)*dt
+    for i in 0..dim {
+        vel_half[i] += dt * acc[i];
+    }
+    // Drift: x(t+dt) = x(t) + v(t+dt/2)*dt
+    for i in 0..dim {
+        pos[i] += dt * vel_half[i];
+    }
+}
+
+/// Run a symplectic Euler integration over a time span.
+///
+/// Returns `(final_position, final_velocity)`.
+///
+/// # Errors
+///
+/// Returns [`HisabError::ZeroSteps`] if `n` is zero.
+/// Returns [`HisabError::InvalidInput`] if `pos0` and `vel0` differ in length.
+#[must_use = "contains the final state or an error"]
+pub fn symplectic_euler(
+    acc_fn: impl Fn(f64, &[f64], &mut [f64]),
+    pos0: &[f64],
+    vel0: &[f64],
+    t0: f64,
+    t_end: f64,
+    n: usize,
+) -> Result<(Vec<f64>, Vec<f64>), HisabError> {
+    if n == 0 {
+        return Err(HisabError::ZeroSteps);
+    }
+    if pos0.len() != vel0.len() {
+        return Err(HisabError::InvalidInput(
+            "pos and vel must have equal length".into(),
+        ));
+    }
+    let dt = (t_end - t0) / n as f64;
+    let mut pos = pos0.to_vec();
+    let mut vel = vel0.to_vec();
+    let mut t = t0;
+    for _ in 0..n {
+        symplectic_euler_step(&acc_fn, &mut pos, &mut vel, t, dt);
+        t += dt;
+    }
+    Ok((pos, vel))
+}
+
+/// Run a velocity Verlet integration over a time span.
+///
+/// Returns `(final_position, final_velocity)`.
+///
+/// # Errors
+///
+/// Returns [`HisabError::ZeroSteps`] if `n` is zero.
+/// Returns [`HisabError::InvalidInput`] if `pos0` and `vel0` differ in length.
+#[must_use = "contains the final state or an error"]
+pub fn verlet(
+    acc_fn: impl Fn(f64, &[f64], &mut [f64]),
+    pos0: &[f64],
+    vel0: &[f64],
+    t0: f64,
+    t_end: f64,
+    n: usize,
+) -> Result<(Vec<f64>, Vec<f64>), HisabError> {
+    if n == 0 {
+        return Err(HisabError::ZeroSteps);
+    }
+    if pos0.len() != vel0.len() {
+        return Err(HisabError::InvalidInput(
+            "pos and vel must have equal length".into(),
+        ));
+    }
+    let dt = (t_end - t0) / n as f64;
+    let mut pos = pos0.to_vec();
+    let mut vel = vel0.to_vec();
+    let mut acc = vec![0.0; pos.len()];
+    acc_fn(t0, &pos, &mut acc);
+    let mut t = t0;
+    for _ in 0..n {
+        verlet_step(&acc_fn, &mut pos, &mut vel, t, dt, &mut acc);
+        t += dt;
+    }
+    Ok((pos, vel))
 }
 
 // ---------------------------------------------------------------------------
@@ -2170,6 +2413,64 @@ pub fn levenberg_marquardt(
 }
 
 // ---------------------------------------------------------------------------
+// PCG32 random number generator
+// ---------------------------------------------------------------------------
+
+/// A PCG32 (Permuted Congruential Generator) — fast, small-state, high-quality PRNG.
+///
+/// Deterministic and seedable — suitable for simulation replay.
+#[derive(Debug, Clone)]
+pub struct Pcg32 {
+    state: u64,
+    inc: u64,
+}
+
+impl Pcg32 {
+    /// Create a new PCG32 with the given seed and stream.
+    #[must_use]
+    pub fn new(seed: u64, stream: u64) -> Self {
+        let mut rng = Self {
+            state: 0,
+            inc: (stream << 1) | 1,
+        };
+        rng.next_u32();
+        rng.state = rng.state.wrapping_add(seed);
+        rng.next_u32();
+        rng
+    }
+
+    /// Generate the next u32 value.
+    #[inline]
+    pub fn next_u32(&mut self) -> u32 {
+        let old_state = self.state;
+        self.state = old_state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(self.inc);
+        let xor_shifted = (((old_state >> 18) ^ old_state) >> 27) as u32;
+        let rot = (old_state >> 59) as u32;
+        (xor_shifted >> rot) | (xor_shifted << (rot.wrapping_neg() & 31))
+    }
+
+    /// Generate a random f64 in [0, 1).
+    #[inline]
+    pub fn next_f64(&mut self) -> f64 {
+        (self.next_u32() as f64) / (u32::MAX as f64 + 1.0)
+    }
+
+    /// Generate a random f32 in [0, 1).
+    #[inline]
+    pub fn next_f32(&mut self) -> f32 {
+        (self.next_u32() as f32) / (u32::MAX as f32 + 1.0)
+    }
+
+    /// Generate a random f64 in [lo, hi).
+    #[inline]
+    pub fn next_f64_range(&mut self, lo: f64, hi: f64) -> f64 {
+        lo + (hi - lo) * self.next_f64()
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Sparse matrix (CSR format)
 // ---------------------------------------------------------------------------
 
@@ -2568,6 +2869,34 @@ fn extend_orthonormal_basis(u: &mut Vec<Vec<f64>>, m: usize) {
             u.push(candidate);
         }
     }
+}
+
+/// Truncated SVD — keep only the top `k` singular values and vectors.
+///
+/// Returns an [`Svd`] with `sigma` of length `k`, `u` with `k` columns,
+/// and `vt` with `k` rows.
+///
+/// # Errors
+///
+/// Returns [`HisabError::InvalidInput`] if `k` is zero or greater than `min(m, n)`.
+/// Returns errors from [`svd`] if the matrix is invalid.
+#[must_use = "contains the truncated SVD or an error"]
+pub fn truncated_svd(a: &[Vec<f64>], k: usize) -> Result<Svd, HisabError> {
+    if k == 0 {
+        return Err(HisabError::InvalidInput("k must be positive".into()));
+    }
+    let result = svd(a)?;
+    if k > result.sigma.len() {
+        return Err(HisabError::InvalidInput(format!(
+            "k={k} > number of singular values {}",
+            result.sigma.len()
+        )));
+    }
+    Ok(Svd {
+        u: result.u[..k].to_vec(),
+        sigma: result.sigma[..k].to_vec(),
+        vt: result.vt[..k].to_vec(),
+    })
 }
 
 /// Internal SVD for tall/square matrices (m >= n) using one-sided Jacobi.
@@ -4464,5 +4793,139 @@ mod tests {
     #[test]
     fn lbfgs_zero_m_errors() {
         assert!(lbfgs(|_| 0.0, |_| vec![0.0], &[0.0], 0, 1e-6, 10).is_err());
+    }
+
+    // --- Symplectic integrator tests ---
+
+    #[test]
+    fn symplectic_euler_harmonic() {
+        // Harmonic oscillator: a = -x. Energy should be roughly conserved.
+        let acc = |_t: f64, pos: &[f64], out: &mut [f64]| out[0] = -pos[0];
+        let (pos, vel) =
+            symplectic_euler(acc, &[1.0], &[0.0], 0.0, std::f64::consts::TAU, 10000).unwrap();
+        // After one period, should return near start
+        assert!((pos[0] - 1.0).abs() < 0.05);
+        // Energy: 0.5*(v² + x²) ≈ 0.5
+        let energy = 0.5 * (vel[0] * vel[0] + pos[0] * pos[0]);
+        assert!((energy - 0.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn verlet_harmonic_energy_conservation() {
+        // Verlet should conserve energy better than RK4 over long times
+        let acc = |_t: f64, pos: &[f64], out: &mut [f64]| out[0] = -pos[0];
+        let (pos, vel) = verlet(acc, &[1.0], &[0.0], 0.0, 62.83, 100000).unwrap();
+        // After 10 periods, energy should still be ~0.5
+        let energy = 0.5 * (vel[0] * vel[0] + pos[0] * pos[0]);
+        assert!(
+            (energy - 0.5).abs() < 0.01,
+            "energy drift: {energy} (expected 0.5)"
+        );
+    }
+
+    #[test]
+    fn verlet_zero_steps_error() {
+        let acc = |_: f64, _: &[f64], _: &mut [f64]| {};
+        assert!(verlet(acc, &[0.0], &[0.0], 0.0, 1.0, 0).is_err());
+    }
+
+    #[test]
+    fn symplectic_euler_mismatched_lengths() {
+        let acc = |_: f64, _: &[f64], _: &mut [f64]| {};
+        assert!(symplectic_euler(acc, &[0.0], &[0.0, 1.0], 0.0, 1.0, 10).is_err());
+    }
+
+    // --- PCG32 tests ---
+
+    #[test]
+    fn pcg32_deterministic() {
+        let mut a = Pcg32::new(42, 1);
+        let mut b = Pcg32::new(42, 1);
+        for _ in 0..100 {
+            assert_eq!(a.next_u32(), b.next_u32());
+        }
+    }
+
+    #[test]
+    fn pcg32_different_seeds() {
+        let mut a = Pcg32::new(1, 1);
+        let mut b = Pcg32::new(2, 1);
+        // Different seeds should produce different sequences
+        let mut same = true;
+        for _ in 0..10 {
+            if a.next_u32() != b.next_u32() {
+                same = false;
+                break;
+            }
+        }
+        assert!(!same);
+    }
+
+    #[test]
+    fn pcg32_f64_range() {
+        let mut rng = Pcg32::new(123, 456);
+        for _ in 0..1000 {
+            let v = rng.next_f64();
+            assert!((0.0..1.0).contains(&v));
+        }
+    }
+
+    #[test]
+    fn pcg32_range() {
+        let mut rng = Pcg32::new(99, 1);
+        for _ in 0..100 {
+            let v = rng.next_f64_range(5.0, 10.0);
+            assert!((5.0..10.0).contains(&v));
+        }
+    }
+
+    // --- 2D FFT tests ---
+
+    #[test]
+    fn fft_2d_roundtrip() {
+        let n = 4;
+        let mut data: Vec<Complex> = (0..(n * n)).map(|i| Complex::from_real(i as f64)).collect();
+        let original: Vec<Complex> = data.clone();
+        fft_2d(&mut data, n, n).unwrap();
+        ifft_2d(&mut data, n, n).unwrap();
+        for i in 0..data.len() {
+            assert!(
+                (data[i].re - original[i].re).abs() < 1e-8,
+                "2D FFT roundtrip failed at {i}"
+            );
+        }
+    }
+
+    #[test]
+    fn fft_2d_wrong_size() {
+        let mut data = vec![Complex::from_real(0.0); 6]; // 6 != 4*4
+        assert!(fft_2d(&mut data, 4, 4).is_err());
+    }
+
+    // --- Truncated SVD tests ---
+
+    #[test]
+    fn truncated_svd_basic() {
+        let a = vec![
+            vec![3.0, 0.0, 0.0],
+            vec![0.0, 5.0, 0.0],
+            vec![0.0, 0.0, 2.0],
+        ];
+        let result = truncated_svd(&a, 2).unwrap();
+        assert_eq!(result.sigma.len(), 2);
+        assert!(approx_eq(result.sigma[0], 5.0));
+        assert!(approx_eq(result.sigma[1], 3.0));
+    }
+
+    #[test]
+    fn truncated_svd_k_too_large() {
+        let a = vec![vec![1.0, 2.0], vec![3.0, 4.0]];
+        assert!(truncated_svd(&a, 5).is_err());
+    }
+
+    #[test]
+    fn truncated_svd_k_zero() {
+        let a = vec![vec![1.0]];
+        assert!(truncated_svd(&a, 0).is_err());
     }
 }

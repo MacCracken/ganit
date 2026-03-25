@@ -75,7 +75,7 @@ pub mod logging;
 // ---------------------------------------------------------------------------
 
 #[cfg(feature = "transforms")]
-pub use transforms::{Transform2D, Transform3D};
+pub use transforms::{EulerOrder, Transform2D, Transform3D};
 
 // f32 types
 #[cfg(feature = "transforms")]
@@ -93,7 +93,7 @@ pub use geo::{
 };
 
 #[cfg(feature = "num")]
-pub use num::{Complex, CsrMatrix, OptResult, Svd};
+pub use num::{Complex, CsrMatrix, OptResult, Pcg32, Svd};
 
 #[cfg(feature = "autodiff")]
 pub use autodiff::Dual;

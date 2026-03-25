@@ -1,5 +1,45 @@
 # Changelog
 
+## 1.0.1 (2026-03-25)
+
+### num — Symplectic integrators
+- `symplectic_euler()`, `symplectic_euler_step()` — semi-implicit Euler
+- `verlet()`, `verlet_step()` — velocity Störmer-Verlet
+- `leapfrog_step()` — kick-drift-kick leapfrog
+
+### num — PCG32 random number generator
+- `Pcg32` struct — fast, deterministic, seedable PRNG for simulation replay
+- `next_u32()`, `next_f64()`, `next_f32()`, `next_f64_range()`
+
+### num — 2D FFT + truncated SVD
+- `fft_2d()`, `ifft_2d()` — row-major 2D Fourier transforms
+- `truncated_svd()` — top-k singular values/vectors
+
+### transforms — Quaternion utilities
+- `quat_from_euler()`, `quat_to_euler()` with `EulerOrder` enum (6 rotation orders)
+- `quat_look_at()`, `look_at_rh()` — camera/direction construction
+
+### transforms — Screen-space + color
+- `world_to_screen()`, `screen_to_world_ray()` — 3D↔2D projection
+- `srgb_to_linear()`, `linear_to_srgb()`, vec3 variants — piecewise sRGB transfer
+
+### geo — Frustum-sphere test
+- `Frustum::contains_sphere()` — conservative sphere culling
+
+### calc — Spring dynamics + easing
+- `spring_step()` — analytical critically/under/over-damped spring solver
+- `cubic_bezier_ease()` — CSS cubic-bezier timing function via Newton-Raphson
+
+### calc — Noise functions
+- `perlin_2d()`, `perlin_3d()` — classic Perlin gradient noise
+- `fbm_2d()` — fractal Brownian motion with configurable octaves
+
+### symbolic — Substitution
+- `Expr::substitute()` — replace variables with sub-expressions
+
+### Stats
+- 654 tests (611 unit + 34 integration + 9 doc), zero clippy warnings
+
 ## 1.0.0 (2026-03-31)
 
 Stable release. All pre-1.0 milestones complete.

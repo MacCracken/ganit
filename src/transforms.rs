@@ -219,6 +219,197 @@ pub fn lerp_vec3(a: Vec3, b: Vec3, t: f32) -> Vec3 {
     a + (b - a) * t
 }
 
+// ---------------------------------------------------------------------------
+// Quaternion utilities
+// ---------------------------------------------------------------------------
+
+/// Euler rotation order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum EulerOrder {
+    /// X → Y → Z (roll, pitch, yaw)
+    XYZ,
+    /// X → Z → Y
+    XZY,
+    /// Y → X → Z
+    YXZ,
+    /// Y → Z → X
+    YZX,
+    /// Z → X → Y
+    ZXY,
+    /// Z → Y → X
+    ZYX,
+}
+
+/// Create a quaternion from Euler angles (in radians) with the given rotation order.
+#[must_use]
+#[inline]
+pub fn quat_from_euler(x: f32, y: f32, z: f32, order: EulerOrder) -> Quat {
+    match order {
+        EulerOrder::XYZ => Quat::from_euler(glam::EulerRot::XYZ, x, y, z),
+        EulerOrder::XZY => Quat::from_euler(glam::EulerRot::XZY, x, z, y),
+        EulerOrder::YXZ => Quat::from_euler(glam::EulerRot::YXZ, y, x, z),
+        EulerOrder::YZX => Quat::from_euler(glam::EulerRot::YZX, y, z, x),
+        EulerOrder::ZXY => Quat::from_euler(glam::EulerRot::ZXY, z, x, y),
+        EulerOrder::ZYX => Quat::from_euler(glam::EulerRot::ZYX, z, y, x),
+    }
+}
+
+/// Extract Euler angles (in radians) from a quaternion with the given rotation order.
+///
+/// Returns `(x, y, z)` angles. Subject to gimbal lock at ±90° on the middle axis.
+#[must_use]
+#[inline]
+pub fn quat_to_euler(q: Quat, order: EulerOrder) -> (f32, f32, f32) {
+    match order {
+        EulerOrder::XYZ => {
+            let (x, y, z) = q.to_euler(glam::EulerRot::XYZ);
+            (x, y, z)
+        }
+        EulerOrder::XZY => {
+            let (x, z, y) = q.to_euler(glam::EulerRot::XZY);
+            (x, y, z)
+        }
+        EulerOrder::YXZ => {
+            let (y, x, z) = q.to_euler(glam::EulerRot::YXZ);
+            (x, y, z)
+        }
+        EulerOrder::YZX => {
+            let (y, z, x) = q.to_euler(glam::EulerRot::YZX);
+            (x, y, z)
+        }
+        EulerOrder::ZXY => {
+            let (z, x, y) = q.to_euler(glam::EulerRot::ZXY);
+            (x, y, z)
+        }
+        EulerOrder::ZYX => {
+            let (z, y, x) = q.to_euler(glam::EulerRot::ZYX);
+            (x, y, z)
+        }
+    }
+}
+
+/// Construct a quaternion that rotates `forward` to look at the given direction.
+///
+/// `forward` is the desired look direction (will be normalized).
+/// `up` is the world up vector (typically `Vec3::Y`).
+#[must_use]
+#[inline]
+pub fn quat_look_at(forward: Vec3, up: Vec3) -> Quat {
+    let f = forward.normalize();
+    let r = up.cross(f).normalize();
+    let u = f.cross(r);
+    Quat::from_mat3(&Mat3::from_cols(r, u, f))
+}
+
+/// Construct a right-handed view matrix (camera look-at).
+#[must_use]
+#[inline]
+pub fn look_at_rh(eye: Vec3, target: Vec3, up: Vec3) -> Mat4 {
+    Mat4::look_at_rh(eye, target, up)
+}
+
+// ---------------------------------------------------------------------------
+// Screen-space projection
+// ---------------------------------------------------------------------------
+
+/// Project a 3D world point to 2D screen coordinates.
+///
+/// `mvp` is the combined model-view-projection matrix.
+/// Returns `(screen_x, screen_y, depth)` where depth is in [0, 1] (near to far).
+#[must_use]
+#[inline]
+pub fn world_to_screen(
+    point: Vec3,
+    mvp: Mat4,
+    viewport_width: f32,
+    viewport_height: f32,
+) -> (f32, f32, f32) {
+    let clip = mvp * glam::Vec4::new(point.x, point.y, point.z, 1.0);
+    let ndc = Vec3::new(clip.x / clip.w, clip.y / clip.w, clip.z / clip.w);
+    let screen_x = (ndc.x * 0.5 + 0.5) * viewport_width;
+    let screen_y = (1.0 - (ndc.y * 0.5 + 0.5)) * viewport_height; // Y flipped
+    let depth = ndc.z * 0.5 + 0.5;
+    (screen_x, screen_y, depth)
+}
+
+/// Unproject a 2D screen point to a 3D world-space ray.
+///
+/// Returns `(origin, direction)` where origin is on the near plane.
+#[must_use]
+#[inline]
+pub fn screen_to_world_ray(
+    screen_x: f32,
+    screen_y: f32,
+    inverse_vp: Mat4,
+    viewport_width: f32,
+    viewport_height: f32,
+) -> (Vec3, Vec3) {
+    let ndc_x = (screen_x / viewport_width) * 2.0 - 1.0;
+    let ndc_y = 1.0 - (screen_y / viewport_height) * 2.0;
+
+    let near = inverse_vp * glam::Vec4::new(ndc_x, ndc_y, -1.0, 1.0);
+    let far = inverse_vp * glam::Vec4::new(ndc_x, ndc_y, 1.0, 1.0);
+
+    let near_pt = Vec3::new(near.x / near.w, near.y / near.w, near.z / near.w);
+    let far_pt = Vec3::new(far.x / far.w, far.y / far.w, far.z / far.w);
+
+    let dir = (far_pt - near_pt).normalize();
+    (near_pt, dir)
+}
+
+// ---------------------------------------------------------------------------
+// Color space conversions
+// ---------------------------------------------------------------------------
+
+/// Convert a single sRGB component to linear.
+///
+/// Uses the official piecewise sRGB transfer function.
+#[must_use]
+#[inline]
+pub fn srgb_to_linear(c: f32) -> f32 {
+    if c <= 0.04045 {
+        c / 12.92
+    } else {
+        ((c + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+/// Convert a single linear component to sRGB.
+///
+/// Uses the official piecewise sRGB transfer function.
+#[must_use]
+#[inline]
+pub fn linear_to_srgb(c: f32) -> f32 {
+    if c <= 0.0031308 {
+        c * 12.92
+    } else {
+        1.055 * c.powf(1.0 / 2.4) - 0.055
+    }
+}
+
+/// Convert an sRGB color (Vec3, components in [0,1]) to linear.
+#[must_use]
+#[inline]
+pub fn srgb_to_linear_vec3(color: Vec3) -> Vec3 {
+    Vec3::new(
+        srgb_to_linear(color.x),
+        srgb_to_linear(color.y),
+        srgb_to_linear(color.z),
+    )
+}
+
+/// Convert a linear color (Vec3) to sRGB.
+#[must_use]
+#[inline]
+pub fn linear_to_srgb_vec3(color: Vec3) -> Vec3 {
+    Vec3::new(
+        linear_to_srgb(color.x),
+        linear_to_srgb(color.y),
+        linear_to_srgb(color.z),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -660,5 +851,92 @@ mod tests {
         let recovered = inv * transformed;
         assert!(approx_eq(recovered.x, original.x));
         assert!(approx_eq(recovered.y, original.y));
+    }
+
+    // --- Quaternion utilities ---
+
+    #[test]
+    fn euler_roundtrip_xyz() {
+        let (x, y, z) = (0.3, 0.5, 0.7);
+        let q = quat_from_euler(x, y, z, EulerOrder::XYZ);
+        let (rx, ry, rz) = quat_to_euler(q, EulerOrder::XYZ);
+        assert!(approx_eq(rx, x));
+        assert!(approx_eq(ry, y));
+        assert!(approx_eq(rz, z));
+    }
+
+    #[test]
+    fn euler_roundtrip_zyx() {
+        let (x, y, z) = (0.1, -0.2, 0.4);
+        let q = quat_from_euler(x, y, z, EulerOrder::ZYX);
+        let (rx, ry, rz) = quat_to_euler(q, EulerOrder::ZYX);
+        assert!(approx_eq(rx, x));
+        assert!(approx_eq(ry, y));
+        assert!(approx_eq(rz, z));
+    }
+
+    #[test]
+    fn quat_look_at_forward_z() {
+        let q = quat_look_at(Vec3::Z, Vec3::Y);
+        let forward = q * Vec3::Z;
+        assert!(vec3_approx_eq(forward, Vec3::Z));
+    }
+
+    #[test]
+    fn look_at_rh_basic() {
+        let m = look_at_rh(Vec3::new(0.0, 0.0, 5.0), Vec3::ZERO, Vec3::Y);
+        // Camera at (0,0,5) looking at origin — origin should map to (0,0,-5) in view space
+        let p = m * glam::Vec4::new(0.0, 0.0, 0.0, 1.0);
+        assert!(approx_eq(p.z, -5.0));
+    }
+
+    // --- Screen projection ---
+
+    #[test]
+    fn world_to_screen_center() {
+        let proj = projection_perspective(FRAC_PI_4, 1.0, 0.1, 100.0);
+        let (sx, sy, _) = world_to_screen(Vec3::new(0.0, 0.0, -5.0), proj, 800.0, 600.0);
+        // Center of screen
+        assert!((sx - 400.0).abs() < 1.0);
+        assert!((sy - 300.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn screen_to_world_ray_center() {
+        let proj = projection_perspective(FRAC_PI_4, 1.0, 0.1, 100.0);
+        let inv = proj.inverse();
+        let (_, dir) = screen_to_world_ray(400.0, 300.0, inv, 800.0, 600.0);
+        // Center ray should point down -Z
+        assert!(dir.z < -0.9);
+    }
+
+    // --- sRGB conversions ---
+
+    #[test]
+    fn srgb_linear_roundtrip() {
+        for i in 0..=10 {
+            let c = i as f32 / 10.0;
+            let linear = srgb_to_linear(c);
+            let back = linear_to_srgb(linear);
+            assert!(
+                (back - c).abs() < 1e-4,
+                "roundtrip failed for {c}: got {back}"
+            );
+        }
+    }
+
+    #[test]
+    fn srgb_endpoints() {
+        assert!(approx_eq(srgb_to_linear(0.0), 0.0));
+        assert!(approx_eq(srgb_to_linear(1.0), 1.0));
+        assert!(approx_eq(linear_to_srgb(0.0), 0.0));
+        assert!(approx_eq(linear_to_srgb(1.0), 1.0));
+    }
+
+    #[test]
+    fn srgb_midpoint_gamma() {
+        // sRGB 0.5 → linear should be ~0.214
+        let l = srgb_to_linear(0.5);
+        assert!(l > 0.2 && l < 0.23);
     }
 }
