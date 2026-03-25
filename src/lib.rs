@@ -12,7 +12,11 @@
 //! | `transforms` | yes | 2D/3D transforms, projections, slerp, lerp, glam re-exports |
 //! | `geo` | yes | Primitives, intersections, BVH, k-d tree, quadtree, octree, spatial hash, GJK/EPA |
 //! | `calc` | yes | Differentiation, integration, Bezier 2D/3D, splines, easing, Gauss-Legendre |
-//! | `num` | yes | Root finding, LU/Cholesky/QR, eigenvalues, FFT, RK4 ODE solver |
+//! | `num` | yes | Root finding, LU/Cholesky/QR/SVD, FFT, optimization, ODE solvers |
+//! | `autodiff` | no | Forward-mode automatic differentiation (dual numbers) |
+//! | `interval` | no | Interval arithmetic for verified numerics |
+//! | `symbolic` | no | Symbolic expression tree with differentiation and simplification |
+//! | `tensor` | no | N-dimensional dense tensor type |
 //! | `ai` | no | Daimon/hoosh AI client (requires network deps) |
 //! | `logging` | no | Structured logging via tracing-subscriber |
 //! | `full` | — | Enables all features |
@@ -44,6 +48,18 @@ pub mod calc;
 #[cfg(feature = "num")]
 pub mod num;
 
+#[cfg(feature = "autodiff")]
+pub mod autodiff;
+
+#[cfg(feature = "interval")]
+pub mod interval;
+
+#[cfg(feature = "symbolic")]
+pub mod symbolic;
+
+#[cfg(feature = "tensor")]
+pub mod tensor;
+
 #[cfg(feature = "ai")]
 pub mod ai;
 
@@ -74,6 +90,18 @@ pub use geo::{
 
 #[cfg(feature = "num")]
 pub use num::{Complex, CsrMatrix, OptResult, Svd};
+
+#[cfg(feature = "autodiff")]
+pub use autodiff::Dual;
+
+#[cfg(feature = "interval")]
+pub use interval::Interval;
+
+#[cfg(feature = "symbolic")]
+pub use symbolic::Expr;
+
+#[cfg(feature = "tensor")]
+pub use tensor::Tensor;
 
 #[cfg(feature = "ai")]
 pub use ai::DaimonClient;

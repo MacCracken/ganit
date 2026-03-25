@@ -81,17 +81,16 @@ Post-1.0 releases follow standard semver.
 - Sphere/Obb/Capsule implement ConvexSupport3D for 3D collision
 - 504 tests
 
+### 0.27.3 — Autodiff, Interval, Symbolic, Tensor (2026-03-27)
+- autodiff: Dual type, forward-mode AD, sin/cos/tan/exp/ln/sqrt/powf/abs
+- interval: Interval type, verified arithmetic, contains/overlaps/intersect/hull
+- symbolic: Expr tree, evaluate, differentiate, simplify (constant folding, identity rules)
+- tensor: N-D Tensor, zeros/ones, get/set, reshape, add/sub/scale, matmul, transpose
+- 578 tests
+
 ---
 
 ## Upcoming Milestones
-
-### 0.27.3 — Autodiff, Interval, Symbolic, Tensor (2026-03-27)
-**Focus:** Advanced math modules (feature-gated).
-
-- [ ] Forward-mode automatic differentiation (dual numbers) — `autodiff`
-- [ ] Interval arithmetic for verified numerics — `interval`
-- [ ] Symbolic algebra primitives (simplify, expand, factor, differentiate) — `symbolic`
-- [ ] N-dimensional tensor type for ML interop — `tensor`
 
 ### 0.28.3 — GPU, Parallelism, Pre-publish Polish (2026-03-28)
 **Focus:** Acceleration + final quality pass.

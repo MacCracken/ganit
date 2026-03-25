@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.27.3 (2026-03-27)
+
+### autodiff — Forward-mode automatic differentiation (new module)
+- `Dual` type with val/deriv, `var()`, `constant()`
+- Arithmetic: Add, Sub, Mul, Div, Neg, scalar ops
+- Transcendentals: sin, cos, tan, exp, ln, sqrt, powf, abs
+- Feature-gated: `autodiff`
+
+### interval — Interval arithmetic (new module)
+- `Interval` type with lo/hi bounds
+- Arithmetic: Add, Sub, Mul, Div, Neg
+- Operations: contains, overlaps, intersect, hull, width, midpoint, abs, sqr, sqrt
+- Feature-gated: `interval`
+
+### symbolic — Symbolic algebra (new module)
+- `Expr` enum: Const, Var, Add, Mul, Pow, Neg, Sin, Cos, Exp, Ln
+- `evaluate(vars)`, `differentiate(var)`, `simplify()`
+- Simplification: 0+x, 1*x, x^0, x^1, double-neg, constant folding
+- Feature-gated: `symbolic`
+
+### tensor — N-dimensional tensor (new module)
+- `Tensor` type with shape/data, zeros, ones
+- get/set, reshape, add, sub, scale, matmul (2D), transpose (2D)
+- Feature-gated: `tensor`
+
+### Stats
+- 578 tests, zero clippy warnings
+
 ## 0.26.3 (2026-03-26)
 
 ### num — Optimization solvers
