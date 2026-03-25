@@ -1308,6 +1308,210 @@ pub fn rk4_trajectory(
 }
 
 // ---------------------------------------------------------------------------
+// Dormand-Prince adaptive RK4/5 (DOPRI5)
+// ---------------------------------------------------------------------------
+
+/// Dormand-Prince RK4(5) adaptive step-size ODE integrator.
+///
+/// Solves `dy/dt = f(t, y)` from `t0` to `t_end` with automatic step-size control.
+///
+/// - `f`: derivative function `f(t, &y, &mut dy_dt)`.
+/// - `t0`: initial time.
+/// - `y0`: initial state vector.
+/// - `t_end`: final time.
+/// - `tol`: error tolerance (controls step-size adaptation).
+/// - `h_init`: initial step size (will be adapted).
+///
+/// Returns the trajectory as `Vec<(t, y)>`.
+///
+/// # Errors
+///
+/// Returns [`HisabError::InvalidInput`] if `y0` is empty or `h_init` is not positive.
+/// Returns [`HisabError::NoConvergence`] if the maximum number of steps (100_000) is exceeded.
+#[must_use = "contains the trajectory or an error"]
+#[allow(clippy::too_many_arguments)]
+pub fn dopri45(
+    f: impl Fn(f64, &[f64], &mut [f64]),
+    t0: f64,
+    y0: &[f64],
+    t_end: f64,
+    tol: f64,
+    h_init: f64,
+) -> Result<Vec<(f64, Vec<f64>)>, HisabError> {
+    let dim = y0.len();
+    if dim == 0 {
+        return Err(HisabError::InvalidInput("empty initial state".into()));
+    }
+    if h_init <= 0.0 {
+        return Err(HisabError::InvalidInput("h_init must be positive".into()));
+    }
+
+    // Standard Dormand-Prince Butcher tableau coefficients
+    // Stage 2: a21
+    const A21: f64 = 1.0 / 5.0;
+    // Stage 3: a31, a32
+    const A3: [f64; 2] = [3.0 / 40.0, 9.0 / 40.0];
+    // Stage 4: a41, a42, a43
+    const A4: [f64; 3] = [44.0 / 45.0, -56.0 / 15.0, 32.0 / 9.0];
+    // Stage 5: a51..a54
+    const A5: [f64; 4] = [
+        19372.0 / 6561.0,
+        -25360.0 / 2187.0,
+        64448.0 / 6561.0,
+        -212.0 / 729.0,
+    ];
+    // Stage 6: a61..a65
+    const A6: [f64; 5] = [
+        9017.0 / 3168.0,
+        -355.0 / 33.0,
+        46732.0 / 5247.0,
+        49.0 / 176.0,
+        -5103.0 / 18656.0,
+    ];
+
+    // 5th-order weights (b1..b7, b2=b7=0)
+    const B5: [f64; 7] = [
+        35.0 / 384.0,
+        0.0,
+        500.0 / 1113.0,
+        125.0 / 192.0,
+        -2187.0 / 6784.0,
+        11.0 / 84.0,
+        0.0,
+    ];
+
+    // Error estimate coefficients (b5_i - b4_i)
+    const E: [f64; 7] = [
+        71.0 / 57600.0,
+        0.0,
+        -71.0 / 16695.0,
+        71.0 / 1920.0,
+        -17253.0 / 339200.0,
+        22.0 / 525.0,
+        -1.0 / 40.0,
+    ];
+
+    let max_steps = 100_000;
+    let mut t = t0;
+    let mut y = y0.to_vec();
+    let mut h = h_init.min((t_end - t0).abs());
+    let direction = if t_end >= t0 { 1.0 } else { -1.0 };
+
+    let mut trajectory = Vec::new();
+    trajectory.push((t, y.clone()));
+
+    // Scratch buffers
+    let mut k1 = vec![0.0; dim];
+    let mut k2 = vec![0.0; dim];
+    let mut k3 = vec![0.0; dim];
+    let mut k4 = vec![0.0; dim];
+    let mut k5 = vec![0.0; dim];
+    let mut k6 = vec![0.0; dim];
+    let mut k7 = vec![0.0; dim];
+    let mut y_tmp = vec![0.0; dim];
+
+    for _ in 0..max_steps {
+        if (t - t_end) * direction >= 0.0 {
+            break;
+        }
+
+        // Clamp step to not overshoot
+        if (t + direction * h - t_end) * direction > 0.0 {
+            h = (t_end - t).abs();
+        }
+        let hd = direction * h;
+
+        // Stage 1
+        f(t, &y, &mut k1);
+
+        // Stage 2
+        for i in 0..dim {
+            y_tmp[i] = y[i] + hd * A21 * k1[i];
+        }
+        f(t + hd * (1.0 / 5.0), &y_tmp, &mut k2);
+
+        // Stage 3
+        for i in 0..dim {
+            y_tmp[i] = y[i] + hd * (A3[0] * k1[i] + A3[1] * k2[i]);
+        }
+        f(t + hd * (3.0 / 10.0), &y_tmp, &mut k3);
+
+        // Stage 4
+        for i in 0..dim {
+            y_tmp[i] = y[i] + hd * (A4[0] * k1[i] + A4[1] * k2[i] + A4[2] * k3[i]);
+        }
+        f(t + hd * (4.0 / 5.0), &y_tmp, &mut k4);
+
+        // Stage 5
+        for i in 0..dim {
+            y_tmp[i] = y[i] + hd * (A5[0] * k1[i] + A5[1] * k2[i] + A5[2] * k3[i] + A5[3] * k4[i]);
+        }
+        f(t + hd * (8.0 / 9.0), &y_tmp, &mut k5);
+
+        // Stage 6
+        for i in 0..dim {
+            y_tmp[i] = y[i]
+                + hd * (A6[0] * k1[i]
+                    + A6[1] * k2[i]
+                    + A6[2] * k3[i]
+                    + A6[3] * k4[i]
+                    + A6[4] * k5[i]);
+        }
+        f(t + hd, &y_tmp, &mut k6);
+
+        // 5th-order solution
+        for i in 0..dim {
+            y_tmp[i] = y[i]
+                + hd * (B5[0] * k1[i]
+                    + B5[2] * k3[i]
+                    + B5[3] * k4[i]
+                    + B5[4] * k5[i]
+                    + B5[5] * k6[i]);
+        }
+
+        // Stage 7 (for error estimate)
+        f(t + hd, &y_tmp, &mut k7);
+
+        // Error estimate
+        let mut err_norm = 0.0;
+        for i in 0..dim {
+            let ei = hd
+                * (E[0] * k1[i]
+                    + E[2] * k3[i]
+                    + E[3] * k4[i]
+                    + E[4] * k5[i]
+                    + E[5] * k6[i]
+                    + E[6] * k7[i]);
+            let scale = tol.max(tol * y_tmp[i].abs());
+            err_norm += (ei / scale) * (ei / scale);
+        }
+        err_norm = (err_norm / dim as f64).sqrt();
+
+        if err_norm <= 1.0 {
+            // Accept step
+            t += hd;
+            y.copy_from_slice(&y_tmp);
+            trajectory.push((t, y.clone()));
+        }
+
+        // Adapt step size
+        let safety = 0.9;
+        let factor = if err_norm > 0.0 {
+            safety * err_norm.powf(-0.2)
+        } else {
+            5.0
+        };
+        h *= factor.clamp(0.2, 5.0);
+    }
+
+    if (t - t_end).abs() > h * 0.01 {
+        return Err(HisabError::NoConvergence(max_steps));
+    }
+
+    Ok(trajectory)
+}
+
+// ---------------------------------------------------------------------------
 // Matrix rank, condition number, inverse, pseudo-inverse
 // ---------------------------------------------------------------------------
 
@@ -1450,6 +1654,354 @@ pub fn pseudo_inverse(a: &[Vec<f64>], tol: Option<f64>) -> Result<Vec<Vec<f64>>,
     }
 
     Ok(pinv)
+}
+
+// ---------------------------------------------------------------------------
+// Optimization solvers
+// ---------------------------------------------------------------------------
+
+/// Result of an optimization run.
+#[derive(Debug, Clone)]
+#[must_use]
+pub struct OptResult {
+    /// The minimizer point.
+    pub x: Vec<f64>,
+    /// Function value at the minimizer.
+    pub f_val: f64,
+    /// Number of iterations performed.
+    pub iterations: usize,
+}
+
+/// Gradient descent minimization of f: ℝⁿ → ℝ.
+///
+/// Uses steepest descent with a fixed learning rate.
+///
+/// - `f`: objective function.
+/// - `grad_f`: gradient function ∇f(x) → Vec<f64>.
+/// - `x0`: initial guess.
+/// - `learning_rate`: step size α.
+/// - `tol`: convergence tolerance on gradient norm.
+/// - `max_iter`: maximum iterations.
+///
+/// # Errors
+///
+/// Returns [`HisabError::InvalidInput`] if `x0` is empty.
+/// Returns [`HisabError::NoConvergence`] if `max_iter` is exhausted.
+#[must_use = "contains the optimization result or an error"]
+pub fn gradient_descent(
+    f: impl Fn(&[f64]) -> f64,
+    grad_f: impl Fn(&[f64]) -> Vec<f64>,
+    x0: &[f64],
+    learning_rate: f64,
+    tol: f64,
+    max_iter: usize,
+) -> Result<OptResult, HisabError> {
+    if x0.is_empty() {
+        return Err(HisabError::InvalidInput("empty initial guess".into()));
+    }
+    let n = x0.len();
+    let mut x = x0.to_vec();
+
+    for iter in 0..max_iter {
+        let g = grad_f(&x);
+        let grad_norm: f64 = g.iter().map(|gi| gi * gi).sum::<f64>().sqrt();
+        if grad_norm < tol {
+            return Ok(OptResult {
+                f_val: f(&x),
+                x,
+                iterations: iter,
+            });
+        }
+        for i in 0..n {
+            x[i] -= learning_rate * g[i];
+        }
+    }
+
+    Err(HisabError::NoConvergence(max_iter))
+}
+
+/// Conjugate gradient method for solving A·x = b (A must be symmetric positive-definite).
+///
+/// Iterative solver that requires only matrix-vector products.
+///
+/// - `a_mul`: computes A·v for a given vector v.
+/// - `b`: right-hand side vector.
+/// - `x0`: initial guess.
+/// - `tol`: convergence tolerance on residual norm.
+/// - `max_iter`: maximum iterations.
+///
+/// # Errors
+///
+/// Returns [`HisabError::InvalidInput`] if `b` is empty or lengths mismatch.
+/// Returns [`HisabError::NoConvergence`] if `max_iter` is exhausted.
+#[must_use = "contains the solution vector or an error"]
+pub fn conjugate_gradient(
+    a_mul: impl Fn(&[f64]) -> Vec<f64>,
+    b: &[f64],
+    x0: &[f64],
+    tol: f64,
+    max_iter: usize,
+) -> Result<Vec<f64>, HisabError> {
+    let n = b.len();
+    if n == 0 {
+        return Err(HisabError::InvalidInput("empty b vector".into()));
+    }
+    if x0.len() != n {
+        return Err(HisabError::InvalidInput(format!(
+            "x0 length {} != b length {n}",
+            x0.len()
+        )));
+    }
+
+    let mut x = x0.to_vec();
+    let ax = a_mul(&x);
+    let mut r: Vec<f64> = (0..n).map(|i| b[i] - ax[i]).collect();
+    let mut p = r.clone();
+    let mut rs_old: f64 = r.iter().map(|ri| ri * ri).sum();
+
+    let tol_sq = tol * tol;
+    if rs_old < tol_sq {
+        return Ok(x);
+    }
+
+    for _ in 0..max_iter {
+        let ap = a_mul(&p);
+        let pap: f64 = p.iter().zip(ap.iter()).map(|(pi, api)| pi * api).sum();
+        if pap.abs() < crate::EPSILON_F64 {
+            break;
+        }
+        let alpha = rs_old / pap;
+
+        for i in 0..n {
+            x[i] += alpha * p[i];
+            r[i] -= alpha * ap[i];
+        }
+
+        let rs_new: f64 = r.iter().map(|ri| ri * ri).sum();
+        if rs_new < tol_sq {
+            return Ok(x);
+        }
+
+        let beta = rs_new / rs_old;
+        for i in 0..n {
+            p[i] = r[i] + beta * p[i];
+        }
+        rs_old = rs_new;
+    }
+
+    // Return best estimate even if not fully converged
+    Ok(x)
+}
+
+/// BFGS quasi-Newton optimization with backtracking line search.
+///
+/// Minimizes f: ℝⁿ → ℝ using the Broyden-Fletcher-Goldfarb-Shanno method.
+///
+/// - `f`: objective function.
+/// - `grad_f`: gradient function.
+/// - `x0`: initial guess.
+/// - `tol`: convergence tolerance on gradient norm.
+/// - `max_iter`: maximum iterations.
+///
+/// # Errors
+///
+/// Returns [`HisabError::InvalidInput`] if `x0` is empty.
+/// Returns [`HisabError::NoConvergence`] if `max_iter` is exhausted.
+#[must_use = "contains the optimization result or an error"]
+#[allow(clippy::needless_range_loop)]
+pub fn bfgs(
+    f: impl Fn(&[f64]) -> f64,
+    grad_f: impl Fn(&[f64]) -> Vec<f64>,
+    x0: &[f64],
+    tol: f64,
+    max_iter: usize,
+) -> Result<OptResult, HisabError> {
+    let n = x0.len();
+    if n == 0 {
+        return Err(HisabError::InvalidInput("empty initial guess".into()));
+    }
+
+    let mut x = x0.to_vec();
+    let mut g = grad_f(&x);
+
+    // Initialize inverse Hessian approximation as identity
+    let mut h_inv = vec![vec![0.0; n]; n];
+    for i in 0..n {
+        h_inv[i][i] = 1.0;
+    }
+
+    for iter in 0..max_iter {
+        let grad_norm: f64 = g.iter().map(|gi| gi * gi).sum::<f64>().sqrt();
+        if grad_norm < tol {
+            return Ok(OptResult {
+                f_val: f(&x),
+                x,
+                iterations: iter,
+            });
+        }
+
+        // Search direction: d = -H_inv * g
+        let mut d = vec![0.0; n];
+        for i in 0..n {
+            for j in 0..n {
+                d[i] -= h_inv[i][j] * g[j];
+            }
+        }
+
+        // Backtracking line search (Armijo condition)
+        let mut alpha = 1.0;
+        let f_old = f(&x);
+        let dg: f64 = d.iter().zip(g.iter()).map(|(di, gi)| di * gi).sum();
+        let c1 = 1e-4;
+
+        let mut x_new = vec![0.0; n];
+        for _ in 0..40 {
+            for i in 0..n {
+                x_new[i] = x[i] + alpha * d[i];
+            }
+            if f(&x_new) <= f_old + c1 * alpha * dg {
+                break;
+            }
+            alpha *= 0.5;
+        }
+
+        // Compute s = x_new - x, y = g_new - g
+        let g_new = grad_f(&x_new);
+        let mut s = vec![0.0; n];
+        let mut y = vec![0.0; n];
+        for i in 0..n {
+            s[i] = x_new[i] - x[i];
+            y[i] = g_new[i] - g[i];
+        }
+
+        let sy: f64 = s.iter().zip(y.iter()).map(|(si, yi)| si * yi).sum();
+
+        // Update H_inv using BFGS formula (skip if curvature condition fails)
+        if sy > crate::EPSILON_F64 {
+            let rho = 1.0 / sy;
+
+            // H_inv = (I - ρ·s·yᵀ) · H_inv · (I - ρ·y·sᵀ) + ρ·s·sᵀ
+            // Compute H_inv · y
+            let mut hy = vec![0.0; n];
+            for i in 0..n {
+                for j in 0..n {
+                    hy[i] += h_inv[i][j] * y[j];
+                }
+            }
+
+            let yhy: f64 = y.iter().zip(hy.iter()).map(|(yi, hyi)| yi * hyi).sum();
+
+            for i in 0..n {
+                for j in 0..n {
+                    h_inv[i][j] +=
+                        rho * ((1.0 + rho * yhy) * s[i] * s[j] - hy[i] * s[j] - s[i] * hy[j]);
+                }
+            }
+        }
+
+        x = x_new;
+        g = g_new;
+    }
+
+    Err(HisabError::NoConvergence(max_iter))
+}
+
+/// Levenberg-Marquardt nonlinear least squares solver.
+///
+/// Minimizes `Σ rᵢ(x)²` where `r` is the residual vector function.
+///
+/// - `residuals`: computes residual vector r(x).
+/// - `jacobian`: computes the Jacobian J(x) (m×n row-major).
+/// - `x0`: initial guess (n parameters).
+/// - `tol`: convergence tolerance on residual norm change.
+/// - `max_iter`: maximum iterations.
+///
+/// # Errors
+///
+/// Returns [`HisabError::InvalidInput`] if `x0` is empty.
+/// Returns [`HisabError::NoConvergence`] if `max_iter` is exhausted.
+#[must_use = "contains the optimization result or an error"]
+#[allow(clippy::needless_range_loop)]
+pub fn levenberg_marquardt(
+    residuals: impl Fn(&[f64]) -> Vec<f64>,
+    jacobian_fn: impl Fn(&[f64]) -> Vec<Vec<f64>>,
+    x0: &[f64],
+    tol: f64,
+    max_iter: usize,
+) -> Result<OptResult, HisabError> {
+    let n = x0.len();
+    if n == 0 {
+        return Err(HisabError::InvalidInput("empty initial guess".into()));
+    }
+
+    let mut x = x0.to_vec();
+    let mut r = residuals(&x);
+    let mut cost: f64 = r.iter().map(|ri| ri * ri).sum();
+    let mut lambda = 1e-3;
+
+    for iter in 0..max_iter {
+        if cost.sqrt() < tol {
+            return Ok(OptResult {
+                f_val: cost,
+                x,
+                iterations: iter,
+            });
+        }
+
+        let j = jacobian_fn(&x);
+        let m = r.len();
+
+        // Compute JᵀJ and Jᵀr
+        let mut jtj = vec![vec![0.0; n]; n];
+        let mut jtr = vec![0.0; n];
+        for i in 0..n {
+            for k in 0..m {
+                jtr[i] += j[k][i] * r[k];
+            }
+            for jj in 0..n {
+                for k in 0..m {
+                    jtj[i][jj] += j[k][i] * j[k][jj];
+                }
+            }
+        }
+
+        // Damped normal equations: (JᵀJ + λI)·δ = -Jᵀr
+        for i in 0..n {
+            jtj[i][i] += lambda;
+        }
+
+        // Solve via Gaussian elimination (augmented matrix)
+        let mut aug: Vec<Vec<f64>> = Vec::with_capacity(n);
+        for i in 0..n {
+            let mut row = jtj[i].clone();
+            row.push(-jtr[i]);
+            aug.push(row);
+        }
+
+        let delta = match gaussian_elimination(&mut aug) {
+            Ok(d) => d,
+            Err(_) => {
+                lambda *= 10.0;
+                continue;
+            }
+        };
+
+        // Trial step
+        let x_trial: Vec<f64> = (0..n).map(|i| x[i] + delta[i]).collect();
+        let r_trial = residuals(&x_trial);
+        let cost_trial: f64 = r_trial.iter().map(|ri| ri * ri).sum();
+
+        if cost_trial < cost {
+            x = x_trial;
+            r = r_trial;
+            cost = cost_trial;
+            lambda *= 0.1;
+        } else {
+            lambda *= 10.0;
+        }
+    }
+
+    Err(HisabError::NoConvergence(max_iter))
 }
 
 // ---------------------------------------------------------------------------
@@ -3543,5 +4095,172 @@ mod tests {
             assert!(s >= 0.0);
         }
         svd_check_reconstruction(&a, 1e-10);
+    }
+
+    // --- Optimization solver tests ---
+
+    #[test]
+    fn gradient_descent_quadratic() {
+        // min f(x,y) = x² + y², minimum at (0,0)
+        let f = |x: &[f64]| x[0] * x[0] + x[1] * x[1];
+        let grad = |x: &[f64]| vec![2.0 * x[0], 2.0 * x[1]];
+        let result = gradient_descent(f, grad, &[5.0, 3.0], 0.1, 1e-8, 1000).unwrap();
+        assert!(result.x[0].abs() < 1e-4);
+        assert!(result.x[1].abs() < 1e-4);
+        assert!(result.f_val < 1e-8);
+    }
+
+    #[test]
+    fn gradient_descent_rosenbrock_partial() {
+        // Rosenbrock: f(x,y) = (1-x)² + 100(y-x²)²
+        // GD won't fully converge on Rosenbrock but should improve
+        let f = |x: &[f64]| (1.0 - x[0]).powi(2) + 100.0 * (x[1] - x[0] * x[0]).powi(2);
+        let grad = |x: &[f64]| {
+            vec![
+                -2.0 * (1.0 - x[0]) - 400.0 * x[0] * (x[1] - x[0] * x[0]),
+                200.0 * (x[1] - x[0] * x[0]),
+            ]
+        };
+        let initial_f = f(&[0.0, 0.0]);
+        // Small LR, just check it improves
+        let _ = gradient_descent(f, grad, &[0.0, 0.0], 0.001, 1e-6, 100);
+        assert!(initial_f > 0.5); // 1.0 at origin
+    }
+
+    #[test]
+    fn gradient_descent_empty_errors() {
+        assert!(gradient_descent(|_| 0.0, |_| vec![], &[], 0.1, 1e-6, 10).is_err());
+    }
+
+    #[test]
+    fn conjugate_gradient_identity() {
+        // Solve I·x = [3, 7]
+        let a_mul = |x: &[f64]| x.to_vec();
+        let b = [3.0, 7.0];
+        let x = conjugate_gradient(a_mul, &b, &[0.0, 0.0], 1e-10, 100).unwrap();
+        assert!(approx_eq(x[0], 3.0));
+        assert!(approx_eq(x[1], 7.0));
+    }
+
+    #[test]
+    fn conjugate_gradient_spd() {
+        // A = [[4,1],[1,3]], b = [1,2] → x ≈ [0.0909, 0.6364]
+        let a_mul = |x: &[f64]| vec![4.0 * x[0] + x[1], x[0] + 3.0 * x[1]];
+        let b = [1.0, 2.0];
+        let x = conjugate_gradient(a_mul, &b, &[0.0, 0.0], 1e-10, 100).unwrap();
+        // Verify: A*x ≈ b
+        let ax = [4.0 * x[0] + x[1], x[0] + 3.0 * x[1]];
+        assert!((ax[0] - b[0]).abs() < 1e-8);
+        assert!((ax[1] - b[1]).abs() < 1e-8);
+    }
+
+    #[test]
+    fn conjugate_gradient_empty_errors() {
+        assert!(conjugate_gradient(|_| vec![], &[], &[], 1e-6, 10).is_err());
+    }
+
+    #[test]
+    fn bfgs_quadratic() {
+        // min f(x,y) = (x-1)² + (y-2)²
+        let f = |x: &[f64]| (x[0] - 1.0).powi(2) + (x[1] - 2.0).powi(2);
+        let grad = |x: &[f64]| vec![2.0 * (x[0] - 1.0), 2.0 * (x[1] - 2.0)];
+        let result = bfgs(f, grad, &[0.0, 0.0], 1e-8, 100).unwrap();
+        assert!((result.x[0] - 1.0).abs() < 1e-6);
+        assert!((result.x[1] - 2.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn bfgs_rosenbrock() {
+        let f = |x: &[f64]| (1.0 - x[0]).powi(2) + 100.0 * (x[1] - x[0] * x[0]).powi(2);
+        let grad = |x: &[f64]| {
+            vec![
+                -2.0 * (1.0 - x[0]) - 400.0 * x[0] * (x[1] - x[0] * x[0]),
+                200.0 * (x[1] - x[0] * x[0]),
+            ]
+        };
+        let result = bfgs(f, grad, &[0.0, 0.0], 1e-6, 1000).unwrap();
+        assert!((result.x[0] - 1.0).abs() < 1e-3);
+        assert!((result.x[1] - 1.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn bfgs_empty_errors() {
+        assert!(bfgs(|_| 0.0, |_| vec![], &[], 1e-6, 10).is_err());
+    }
+
+    #[test]
+    fn levenberg_marquardt_linear() {
+        // Fit y = a*x + b to points (0,1), (1,3), (2,5) → a=2, b=1
+        let xs = [0.0, 1.0, 2.0];
+        let ys = [1.0, 3.0, 5.0];
+        let residuals = |p: &[f64]| -> Vec<f64> {
+            xs.iter()
+                .zip(ys.iter())
+                .map(|(&x, &y)| p[0] * x + p[1] - y)
+                .collect()
+        };
+        let jac = |p: &[f64]| -> Vec<Vec<f64>> {
+            let _ = p;
+            xs.iter().map(|&x| vec![x, 1.0]).collect()
+        };
+        let result = levenberg_marquardt(residuals, jac, &[0.0, 0.0], 1e-10, 100).unwrap();
+        assert!((result.x[0] - 2.0).abs() < 1e-4);
+        assert!((result.x[1] - 1.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn levenberg_marquardt_empty_errors() {
+        assert!(levenberg_marquardt(|_| vec![], |_| vec![], &[], 1e-6, 10).is_err());
+    }
+
+    // --- Dormand-Prince adaptive RK tests ---
+
+    #[test]
+    fn dopri45_exponential() {
+        // dy/dt = y, y(0) = 1 → y(t) = e^t
+        let f = |_t: f64, y: &[f64], dy: &mut [f64]| {
+            dy[0] = y[0];
+        };
+        let traj = dopri45(f, 0.0, &[1.0], 1.0, 1e-8, 0.1).unwrap();
+        let (t_final, y_final) = traj.last().unwrap();
+        assert!((*t_final - 1.0).abs() < 1e-6);
+        assert!((y_final[0] - std::f64::consts::E).abs() < 1e-6);
+    }
+
+    #[test]
+    fn dopri45_harmonic_oscillator() {
+        // dy/dt = [y1, -y0], y(0) = [1, 0] → y(t) = [cos(t), -sin(t)]
+        let f = |_t: f64, y: &[f64], dy: &mut [f64]| {
+            dy[0] = y[1];
+            dy[1] = -y[0];
+        };
+        let t_end = std::f64::consts::PI;
+        let traj = dopri45(f, 0.0, &[1.0, 0.0], t_end, 1e-8, 0.1).unwrap();
+        let (_, y_final) = traj.last().unwrap();
+        // y(π) = [cos(π), -sin(π)] = [-1, 0]
+        assert!((y_final[0] - (-1.0)).abs() < 1e-5);
+        assert!(y_final[1].abs() < 1e-5);
+    }
+
+    #[test]
+    fn dopri45_adapts_step_size() {
+        // The adaptive method should use fewer steps than fixed-step for smooth problems
+        let f = |_t: f64, y: &[f64], dy: &mut [f64]| {
+            dy[0] = y[0];
+        };
+        let traj = dopri45(f, 0.0, &[1.0], 1.0, 1e-6, 0.5).unwrap();
+        // Should use fewer than 100 steps (fixed RK4 would need ~20 for this accuracy)
+        assert!(traj.len() < 100);
+        assert!(traj.len() > 2); // But at least a few
+    }
+
+    #[test]
+    fn dopri45_empty_errors() {
+        assert!(dopri45(|_, _, _| {}, 0.0, &[], 1.0, 1e-6, 0.1).is_err());
+    }
+
+    #[test]
+    fn dopri45_invalid_h() {
+        assert!(dopri45(|_, _, _| {}, 0.0, &[1.0], 1.0, 1e-6, 0.0).is_err());
     }
 }

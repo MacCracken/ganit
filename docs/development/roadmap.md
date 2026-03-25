@@ -72,17 +72,18 @@ Post-1.0 releases follow standard semver.
 - GJK deduplication, matrix_determinant in-place optimization
 - 466 tests, 89 benchmarks
 
+### 0.26.3 — Optimization Solvers + 3D Collision (2026-03-26)
+- gradient_descent, conjugate_gradient, bfgs, levenberg_marquardt, OptResult
+- dopri45: Dormand-Prince RK4(5) adaptive step-size ODE integrator
+- 3D GJK/EPA: ConvexSupport3D trait, ConvexHull3D, gjk_intersect_3d, gjk_epa_3d, Penetration3D
+- Obb: oriented bounding box with contains_point, closest_point, ray_obb
+- Capsule: segment+radius with contains_point, ray_capsule
+- Sphere/Obb/Capsule implement ConvexSupport3D for 3D collision
+- 504 tests
+
 ---
 
 ## Upcoming Milestones
-
-### 0.26.3 — Optimization Solvers + 3D Collision (2026-03-26)
-**Focus:** Iterative solvers and 3D geometry.
-
-- [ ] Gradient descent, conjugate gradient, BFGS/L-BFGS, Levenberg-Marquardt
-- [ ] Adaptive RK4/5 (Dormand-Prince) with step-size control
-- [ ] 3D convex hull (Quickhull), 3D GJK, 3D EPA
-- [ ] OBB, Capsule primitives, mesh-mesh intersection
 
 ### 0.27.3 — Autodiff, Interval, Symbolic, Tensor (2026-03-27)
 **Focus:** Advanced math modules (feature-gated).

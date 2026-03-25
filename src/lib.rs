@@ -67,12 +67,13 @@ pub use glam::{DMat3, DMat4, DQuat, DVec2, DVec3, DVec4};
 
 #[cfg(feature = "geo")]
 pub use geo::{
-    Aabb, Bvh, ConvexPolygon, ConvexSupport, Frustum, KdTree, Line, Octree, Plane, Quadtree, Ray,
-    Rect, Segment, SpatialHash, Sphere, Triangle,
+    Aabb, Bvh, Capsule, ConvexHull3D, ConvexPolygon, ConvexSupport, ConvexSupport3D, Frustum,
+    KdTree, Line, Obb, Octree, Penetration3D, Plane, Quadtree, Ray, Rect, Segment, SpatialHash,
+    Sphere, Triangle,
 };
 
 #[cfg(feature = "num")]
-pub use num::{Complex, CsrMatrix, Svd};
+pub use num::{Complex, CsrMatrix, OptResult, Svd};
 
 #[cfg(feature = "ai")]
 pub use ai::DaimonClient;

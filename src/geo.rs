@@ -1972,6 +1972,628 @@ pub fn gjk_epa(a: &dyn ConvexSupport, b: &dyn ConvexSupport) -> Option<Penetrati
     }
 }
 
+// ---------------------------------------------------------------------------
+// OBB (Oriented Bounding Box)
+// ---------------------------------------------------------------------------
+
+/// An oriented bounding box defined by a center, half-extents, and rotation.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Obb {
+    /// Center of the OBB.
+    pub center: Vec3,
+    /// Half-extents along each local axis.
+    pub half_extents: Vec3,
+    /// Rotation quaternion (local → world).
+    pub rotation: glam::Quat,
+}
+
+impl Obb {
+    /// Create a new OBB.
+    #[must_use]
+    #[inline]
+    pub fn new(center: Vec3, half_extents: Vec3, rotation: glam::Quat) -> Self {
+        Self {
+            center,
+            half_extents,
+            rotation,
+        }
+    }
+
+    /// The three local axes (columns of the rotation matrix) in world space.
+    #[must_use]
+    #[inline]
+    pub fn axes(&self) -> [Vec3; 3] {
+        let m = glam::Mat3::from_quat(self.rotation);
+        [m.x_axis, m.y_axis, m.z_axis]
+    }
+
+    /// Check whether a point is inside (or on the surface of) this OBB.
+    #[must_use]
+    #[inline]
+    pub fn contains_point(&self, point: Vec3) -> bool {
+        let d = point - self.center;
+        let axes = self.axes();
+        let he = self.half_extents.to_array();
+        for (i, axis) in axes.iter().enumerate() {
+            if d.dot(*axis).abs() > he[i] + crate::EPSILON_F32 {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Closest point on this OBB to a given point.
+    #[must_use]
+    #[inline]
+    pub fn closest_point(&self, point: Vec3) -> Vec3 {
+        let d = point - self.center;
+        let axes = self.axes();
+        let he = self.half_extents.to_array();
+        let mut result = self.center;
+        for (i, axis) in axes.iter().enumerate() {
+            let dist = d.dot(*axis).clamp(-he[i], he[i]);
+            result += *axis * dist;
+        }
+        result
+    }
+}
+
+/// Ray-OBB intersection. Returns the `t` parameter if the ray hits the OBB.
+#[must_use]
+#[inline]
+pub fn ray_obb(ray: &Ray, obb: &Obb) -> Option<f32> {
+    let d = obb.center - ray.origin;
+    let axes = obb.axes();
+    let he = obb.half_extents.to_array();
+
+    let mut t_min = f32::NEG_INFINITY;
+    let mut t_max = f32::INFINITY;
+
+    for i in 0..3 {
+        let e = axes[i].dot(d);
+        let f = axes[i].dot(ray.direction);
+
+        if f.abs() > crate::EPSILON_F32 {
+            let inv_f = 1.0 / f;
+            let mut t1 = (e - he[i]) * inv_f;
+            let mut t2 = (e + he[i]) * inv_f;
+            if t1 > t2 {
+                std::mem::swap(&mut t1, &mut t2);
+            }
+            t_min = t_min.max(t1);
+            t_max = t_max.min(t2);
+            if t_min > t_max {
+                return None;
+            }
+        } else if (-e - he[i]) > 0.0 || (-e + he[i]) < 0.0 {
+            return None;
+        }
+    }
+
+    if t_min >= 0.0 {
+        Some(t_min)
+    } else if t_max >= 0.0 {
+        Some(t_max)
+    } else {
+        None
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Capsule
+// ---------------------------------------------------------------------------
+
+/// A capsule defined by a line segment and a radius.
+///
+/// The capsule is the Minkowski sum of the segment and a sphere.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Capsule {
+    /// Start point of the capsule's axis.
+    pub start: Vec3,
+    /// End point of the capsule's axis.
+    pub end: Vec3,
+    /// Radius of the capsule.
+    pub radius: f32,
+}
+
+impl Capsule {
+    /// Create a new capsule.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::HisabError::InvalidInput`] if `radius` is negative.
+    #[inline]
+    pub fn new(start: Vec3, end: Vec3, radius: f32) -> Result<Self, crate::HisabError> {
+        if radius < 0.0 {
+            return Err(crate::HisabError::InvalidInput(
+                "capsule radius must be non-negative".into(),
+            ));
+        }
+        Ok(Self { start, end, radius })
+    }
+
+    /// Check whether a point is inside the capsule.
+    #[must_use]
+    #[inline]
+    pub fn contains_point(&self, point: Vec3) -> bool {
+        let seg = Segment::new(self.start, self.end);
+        seg.distance_to_point(point) <= self.radius + crate::EPSILON_F32
+    }
+
+    /// Length of the capsule's axis (not including the hemispherical caps).
+    #[must_use]
+    #[inline]
+    pub fn axis_length(&self) -> f32 {
+        (self.end - self.start).length()
+    }
+}
+
+/// Ray-capsule intersection. Returns the nearest `t >= 0` if the ray hits.
+#[must_use]
+pub fn ray_capsule(ray: &Ray, capsule: &Capsule) -> Option<f32> {
+    // Test against the infinite cylinder, then clamp to segment + check hemispheres
+    let seg = Segment::new(capsule.start, capsule.end);
+    let ab = capsule.end - capsule.start;
+    let ab_len_sq = ab.dot(ab);
+
+    if ab_len_sq < crate::EPSILON_F32 {
+        // Degenerate capsule: just a sphere
+        let sphere = Sphere {
+            center: capsule.start,
+            radius: capsule.radius,
+        };
+        return ray_sphere(ray, &sphere);
+    }
+
+    // Closest approach of ray to segment axis
+    let ao = ray.origin - capsule.start;
+    let d_par = ray.direction.dot(ab) / ab_len_sq;
+    let o_par = ao.dot(ab) / ab_len_sq;
+
+    let d_perp = ray.direction - ab * d_par;
+    let o_perp = ao - ab * o_par;
+
+    let a = d_perp.dot(d_perp);
+    let b = 2.0 * d_perp.dot(o_perp);
+    let c = o_perp.dot(o_perp) - capsule.radius * capsule.radius;
+
+    let disc = b * b - 4.0 * a * c;
+    if disc < 0.0 {
+        // Try sphere caps
+        let s1 = Sphere {
+            center: capsule.start,
+            radius: capsule.radius,
+        };
+        let s2 = Sphere {
+            center: capsule.end,
+            radius: capsule.radius,
+        };
+        let t1 = ray_sphere(ray, &s1);
+        let t2 = ray_sphere(ray, &s2);
+        return match (t1, t2) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (Some(a), None) | (None, Some(a)) => Some(a),
+            _ => None,
+        };
+    }
+
+    let inv_2a = 0.5 / a;
+    let sqrt_disc = disc.sqrt();
+    let t1 = (-b - sqrt_disc) * inv_2a;
+    let t2 = (-b + sqrt_disc) * inv_2a;
+
+    let mut best: Option<f32> = None;
+    let mut check = |t: f32| {
+        if t >= 0.0 {
+            let p = ray.at(t);
+            let proj = (p - capsule.start).dot(ab) / ab_len_sq;
+            if (0.0..=1.0).contains(&proj) {
+                best = Some(best.map_or(t, |b: f32| b.min(t)));
+            }
+        }
+    };
+    check(t1);
+    check(t2);
+
+    // Also check hemisphere caps
+    let s1 = Sphere {
+        center: capsule.start,
+        radius: capsule.radius,
+    };
+    let s2 = Sphere {
+        center: capsule.end,
+        radius: capsule.radius,
+    };
+    if let Some(t) = ray_sphere(ray, &s1) {
+        let p = ray.at(t);
+        if (p - capsule.start).dot(ab) <= 0.0 {
+            best = Some(best.map_or(t, |b: f32| b.min(t)));
+        }
+    }
+    if let Some(t) = ray_sphere(ray, &s2) {
+        let p = ray.at(t);
+        if (p - capsule.end).dot(ab) >= 0.0 {
+            best = Some(best.map_or(t, |b: f32| b.min(t)));
+        }
+    }
+
+    let _ = seg;
+    best
+}
+
+// ---------------------------------------------------------------------------
+// 3D GJK / EPA collision detection
+// ---------------------------------------------------------------------------
+
+/// A convex 3D shape that can compute a support point in a given direction.
+pub trait ConvexSupport3D {
+    /// Return the point on the shape farthest in `direction`.
+    fn support(&self, direction: Vec3) -> Vec3;
+}
+
+impl ConvexSupport3D for Obb {
+    #[inline]
+    fn support(&self, direction: Vec3) -> Vec3 {
+        let axes = self.axes();
+        let he = self.half_extents.to_array();
+        let mut result = self.center;
+        for i in 0..3 {
+            let sign = if axes[i].dot(direction) >= 0.0 {
+                1.0
+            } else {
+                -1.0
+            };
+            result += axes[i] * (sign * he[i]);
+        }
+        result
+    }
+}
+
+impl ConvexSupport3D for Capsule {
+    #[inline]
+    fn support(&self, direction: Vec3) -> Vec3 {
+        let len = direction.length();
+        let dir_norm = if len > crate::EPSILON_F32 {
+            direction / len
+        } else {
+            Vec3::X
+        };
+        // Farthest endpoint in direction, plus radius offset
+        let dot_start = self.start.dot(direction);
+        let dot_end = self.end.dot(direction);
+        let base = if dot_start >= dot_end {
+            self.start
+        } else {
+            self.end
+        };
+        base + dir_norm * self.radius
+    }
+}
+
+/// A convex polyhedron for 3D GJK/EPA.
+#[derive(Debug, Clone)]
+pub struct ConvexHull3D {
+    /// Vertices of the convex hull.
+    pub vertices: Vec<Vec3>,
+}
+
+impl ConvexHull3D {
+    /// Create a convex hull from vertices.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::HisabError::InvalidInput`] if `vertices` is empty.
+    pub fn new(vertices: Vec<Vec3>) -> Result<Self, crate::HisabError> {
+        if vertices.is_empty() {
+            return Err(crate::HisabError::InvalidInput(
+                "convex hull requires at least one vertex".into(),
+            ));
+        }
+        Ok(Self { vertices })
+    }
+}
+
+impl ConvexSupport3D for ConvexHull3D {
+    #[inline]
+    fn support(&self, direction: Vec3) -> Vec3 {
+        let mut best = self.vertices[0];
+        let mut best_dot = best.dot(direction);
+        for &v in &self.vertices[1..] {
+            let d = v.dot(direction);
+            if d > best_dot {
+                best_dot = d;
+                best = v;
+            }
+        }
+        best
+    }
+}
+
+impl ConvexSupport3D for Sphere {
+    #[inline]
+    fn support(&self, direction: Vec3) -> Vec3 {
+        let len = direction.length();
+        if len < crate::EPSILON_F32 {
+            return self.center + Vec3::new(self.radius, 0.0, 0.0);
+        }
+        self.center + direction * (self.radius / len)
+    }
+}
+
+/// Minkowski difference support for 3D shapes.
+#[inline]
+fn minkowski_support_3d(a: &dyn ConvexSupport3D, b: &dyn ConvexSupport3D, direction: Vec3) -> Vec3 {
+    a.support(direction) - b.support(-direction)
+}
+
+/// Penetration result from 3D EPA.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Penetration3D {
+    /// Penetration normal (direction to separate).
+    pub normal: Vec3,
+    /// Penetration depth.
+    pub depth: f32,
+}
+
+/// 3D GJK collision test.
+///
+/// Returns `true` if the two convex shapes overlap.
+#[must_use]
+pub fn gjk_intersect_3d(a: &dyn ConvexSupport3D, b: &dyn ConvexSupport3D) -> bool {
+    gjk_core_3d(a, b).is_some()
+}
+
+/// Combined 3D GJK + EPA.
+///
+/// Returns `None` if no overlap, or `Some(Penetration3D)` with separation info.
+#[must_use]
+pub fn gjk_epa_3d(a: &dyn ConvexSupport3D, b: &dyn ConvexSupport3D) -> Option<Penetration3D> {
+    let simplex = gjk_core_3d(a, b)?;
+    epa_penetration_3d(a, b, &simplex)
+}
+
+/// Core 3D GJK — returns the enclosing simplex (up to 4 points) if origin is contained.
+fn gjk_core_3d(a: &dyn ConvexSupport3D, b: &dyn ConvexSupport3D) -> Option<Vec<Vec3>> {
+    let mut direction = Vec3::X;
+    let mut simplex: Vec<Vec3> = Vec::with_capacity(4);
+
+    let s = minkowski_support_3d(a, b, direction);
+    simplex.push(s);
+    direction = -s;
+
+    for _ in 0..64 {
+        let new_point = minkowski_support_3d(a, b, direction);
+        if new_point.dot(direction) < 0.0 {
+            return None;
+        }
+        simplex.push(new_point);
+
+        if do_simplex_3d(&mut simplex, &mut direction) {
+            return Some(simplex);
+        }
+    }
+    None
+}
+
+/// Evolve the 3D simplex. Returns true if origin is enclosed.
+fn do_simplex_3d(simplex: &mut Vec<Vec3>, direction: &mut Vec3) -> bool {
+    match simplex.len() {
+        2 => {
+            // Line case
+            let a = simplex[1];
+            let b = simplex[0];
+            let ab = b - a;
+            let ao = -a;
+            if ab.dot(ao) > 0.0 {
+                *direction = ab.cross(ao).cross(ab);
+            } else {
+                simplex.clear();
+                simplex.push(a);
+                *direction = ao;
+            }
+            false
+        }
+        3 => {
+            // Triangle case
+            let a = simplex[2];
+            let b = simplex[1];
+            let c = simplex[0];
+            let ab = b - a;
+            let ac = c - a;
+            let ao = -a;
+            let abc = ab.cross(ac);
+
+            if abc.cross(ac).dot(ao) > 0.0 {
+                if ac.dot(ao) > 0.0 {
+                    simplex.clear();
+                    simplex.push(c);
+                    simplex.push(a);
+                    *direction = ac.cross(ao).cross(ac);
+                } else {
+                    simplex.clear();
+                    simplex.push(b);
+                    simplex.push(a);
+                    return do_simplex_3d(simplex, direction); // line case
+                }
+            } else if ab.cross(abc).dot(ao) > 0.0 {
+                simplex.clear();
+                simplex.push(b);
+                simplex.push(a);
+                return do_simplex_3d(simplex, direction); // line case
+            } else if abc.dot(ao) > 0.0 {
+                *direction = abc;
+            } else {
+                // Below triangle
+                simplex.swap(0, 1);
+                *direction = -abc;
+            }
+            false
+        }
+        4 => {
+            // Tetrahedron case
+            let a = simplex[3];
+            let b = simplex[2];
+            let c = simplex[1];
+            let d = simplex[0];
+            let ab = b - a;
+            let ac = c - a;
+            let ad = d - a;
+            let ao = -a;
+
+            let abc = ab.cross(ac);
+            let acd = ac.cross(ad);
+            let adb = ad.cross(ab);
+
+            if abc.dot(ao) > 0.0 {
+                simplex.clear();
+                simplex.push(c);
+                simplex.push(b);
+                simplex.push(a);
+                return do_simplex_3d(simplex, direction); // triangle
+            }
+            if acd.dot(ao) > 0.0 {
+                simplex.clear();
+                simplex.push(d);
+                simplex.push(c);
+                simplex.push(a);
+                return do_simplex_3d(simplex, direction);
+            }
+            if adb.dot(ao) > 0.0 {
+                simplex.clear();
+                simplex.push(b);
+                simplex.push(d);
+                simplex.push(a);
+                return do_simplex_3d(simplex, direction);
+            }
+            // Origin is inside the tetrahedron
+            true
+        }
+        _ => false,
+    }
+}
+
+/// 3D EPA: compute penetration depth from the GJK simplex.
+fn epa_penetration_3d(
+    a: &dyn ConvexSupport3D,
+    b: &dyn ConvexSupport3D,
+    simplex: &[Vec3],
+) -> Option<Penetration3D> {
+    if simplex.len() < 4 {
+        return None;
+    }
+
+    // Build initial polytope as triangular faces of the tetrahedron
+    // Each face is (i, j, k) with outward-pointing normal
+    let mut vertices: Vec<Vec3> = simplex.to_vec();
+    let mut faces: Vec<[usize; 3]> = vec![[0, 1, 2], [0, 3, 1], [0, 2, 3], [1, 3, 2]];
+
+    for _ in 0..64 {
+        // Find closest face to origin
+        let mut closest_dist = f32::INFINITY;
+        let mut closest_normal = Vec3::ZERO;
+        let mut closest_face = 0;
+
+        for (fi, face) in faces.iter().enumerate() {
+            let va = vertices[face[0]];
+            let vb = vertices[face[1]];
+            let vc = vertices[face[2]];
+            let normal = (vb - va).cross(vc - va).normalize();
+            let dist = normal.dot(va);
+
+            // Ensure normal points away from origin
+            let (normal, dist) = if dist < 0.0 {
+                (-normal, -dist)
+            } else {
+                (normal, dist)
+            };
+
+            if dist < closest_dist {
+                closest_dist = dist;
+                closest_normal = normal;
+                closest_face = fi;
+            }
+        }
+
+        let support = minkowski_support_3d(a, b, closest_normal);
+        let d = support.dot(closest_normal);
+
+        if (d - closest_dist).abs() < crate::EPSILON_F32 {
+            return Some(Penetration3D {
+                normal: closest_normal,
+                depth: closest_dist.abs(),
+            });
+        }
+
+        // Add support point and rebuild faces visible from it
+        let new_idx = vertices.len();
+        vertices.push(support);
+
+        // Find faces visible from the new point
+        let mut edges: Vec<[usize; 2]> = Vec::new();
+        let mut keep: Vec<bool> = vec![true; faces.len()];
+
+        for (fi, face) in faces.iter().enumerate() {
+            let va = vertices[face[0]];
+            let vb = vertices[face[1]];
+            let vc = vertices[face[2]];
+            let normal = (vb - va).cross(vc - va);
+            if normal.dot(support - va) > 0.0 {
+                keep[fi] = false;
+                // Collect edges
+                for e in 0..3 {
+                    let edge = [face[e], face[(e + 1) % 3]];
+                    // Check if this edge is shared with another visible face
+                    let reversed = [edge[1], edge[0]];
+                    if let Some(pos) = edges.iter().position(|e| *e == reversed) {
+                        edges.remove(pos);
+                    } else {
+                        edges.push(edge);
+                    }
+                }
+            }
+        }
+
+        // Remove visible faces
+        let mut new_faces: Vec<[usize; 3]> = Vec::new();
+        for (fi, face) in faces.iter().enumerate() {
+            if keep[fi] {
+                new_faces.push(*face);
+            }
+        }
+
+        // Create new faces from horizon edges to the new point
+        for edge in &edges {
+            new_faces.push([edge[0], edge[1], new_idx]);
+        }
+
+        faces = new_faces;
+        let _ = closest_face;
+    }
+
+    // Return best estimate
+    let mut closest_dist = f32::INFINITY;
+    let mut closest_normal = Vec3::ZERO;
+    for face in &faces {
+        let va = vertices[face[0]];
+        let vb = vertices[face[1]];
+        let vc = vertices[face[2]];
+        let normal = (vb - va).cross(vc - va).normalize();
+        let dist = normal.dot(va).abs();
+        if dist < closest_dist {
+            closest_dist = dist;
+            closest_normal = if normal.dot(va) >= 0.0 {
+                normal
+            } else {
+                -normal
+            };
+        }
+    }
+    Some(Penetration3D {
+        normal: closest_normal,
+        depth: closest_dist,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3603,5 +4225,190 @@ mod tests {
         let n = t.unit_normal();
         assert!(!n.x.is_nan() && !n.y.is_nan() && !n.z.is_nan());
         assert!(approx_eq(n.length(), 1.0));
+    }
+
+    // --- 3D GJK / EPA tests ---
+
+    fn make_box_3d(center: Vec3, half: f32) -> ConvexHull3D {
+        let h = Vec3::splat(half);
+        ConvexHull3D::new(vec![
+            center + Vec3::new(-h.x, -h.y, -h.z),
+            center + Vec3::new(h.x, -h.y, -h.z),
+            center + Vec3::new(-h.x, h.y, -h.z),
+            center + Vec3::new(h.x, h.y, -h.z),
+            center + Vec3::new(-h.x, -h.y, h.z),
+            center + Vec3::new(h.x, -h.y, h.z),
+            center + Vec3::new(-h.x, h.y, h.z),
+            center + Vec3::new(h.x, h.y, h.z),
+        ])
+        .unwrap()
+    }
+
+    #[test]
+    fn gjk3d_overlapping_boxes() {
+        let a = make_box_3d(Vec3::ZERO, 1.0);
+        let b = make_box_3d(Vec3::new(0.5, 0.0, 0.0), 1.0);
+        assert!(gjk_intersect_3d(&a, &b));
+    }
+
+    #[test]
+    fn gjk3d_separated_boxes() {
+        let a = make_box_3d(Vec3::ZERO, 1.0);
+        let b = make_box_3d(Vec3::new(5.0, 0.0, 0.0), 1.0);
+        assert!(!gjk_intersect_3d(&a, &b));
+    }
+
+    #[test]
+    fn gjk3d_same_shape() {
+        let a = make_box_3d(Vec3::ZERO, 1.0);
+        assert!(gjk_intersect_3d(&a, &a));
+    }
+
+    #[test]
+    fn gjk3d_sphere_sphere() {
+        let a = Sphere::new(Vec3::ZERO, 1.0).unwrap();
+        let b = Sphere::new(Vec3::new(1.5, 0.0, 0.0), 1.0).unwrap();
+        assert!(gjk_intersect_3d(&a, &b));
+
+        let c = Sphere::new(Vec3::new(5.0, 0.0, 0.0), 1.0).unwrap();
+        assert!(!gjk_intersect_3d(&a, &c));
+    }
+
+    #[test]
+    fn gjk3d_sphere_box() {
+        let a = Sphere::new(Vec3::ZERO, 1.0).unwrap();
+        let b = make_box_3d(Vec3::new(0.5, 0.0, 0.0), 0.5);
+        assert!(gjk_intersect_3d(&a, &b));
+    }
+
+    #[test]
+    fn gjk_epa_3d_penetration() {
+        let a = make_box_3d(Vec3::ZERO, 1.0);
+        let b = make_box_3d(Vec3::new(1.0, 0.0, 0.0), 1.0);
+        let pen = gjk_epa_3d(&a, &b);
+        assert!(pen.is_some());
+        let p = pen.unwrap();
+        assert!(p.depth > 0.0);
+    }
+
+    #[test]
+    fn gjk_epa_3d_no_overlap() {
+        let a = make_box_3d(Vec3::ZERO, 1.0);
+        let b = make_box_3d(Vec3::new(5.0, 0.0, 0.0), 1.0);
+        assert!(gjk_epa_3d(&a, &b).is_none());
+    }
+
+    #[test]
+    fn gjk3d_convex_hull_empty_errors() {
+        assert!(ConvexHull3D::new(vec![]).is_err());
+    }
+
+    // --- OBB tests ---
+
+    #[test]
+    fn obb_contains_center() {
+        let obb = Obb::new(Vec3::new(1.0, 2.0, 3.0), Vec3::ONE, glam::Quat::IDENTITY);
+        assert!(obb.contains_point(Vec3::new(1.0, 2.0, 3.0)));
+    }
+
+    #[test]
+    fn obb_contains_corner() {
+        let obb = Obb::new(Vec3::ZERO, Vec3::ONE, glam::Quat::IDENTITY);
+        assert!(obb.contains_point(Vec3::ONE));
+        assert!(!obb.contains_point(Vec3::splat(1.5)));
+    }
+
+    #[test]
+    fn obb_rotated_containment() {
+        let rot = glam::Quat::from_rotation_z(std::f32::consts::FRAC_PI_4);
+        let obb = Obb::new(Vec3::ZERO, Vec3::new(2.0, 0.5, 1.0), rot);
+        // Center should always be inside
+        assert!(obb.contains_point(Vec3::ZERO));
+    }
+
+    #[test]
+    fn obb_closest_point() {
+        let obb = Obb::new(Vec3::ZERO, Vec3::ONE, glam::Quat::IDENTITY);
+        let cp = obb.closest_point(Vec3::new(5.0, 0.0, 0.0));
+        assert!(approx_eq(cp.x, 1.0));
+        assert!(approx_eq(cp.y, 0.0));
+    }
+
+    #[test]
+    fn ray_obb_hit() {
+        let obb = Obb::new(Vec3::new(5.0, 0.0, 0.0), Vec3::ONE, glam::Quat::IDENTITY);
+        let r = Ray::new(Vec3::ZERO, Vec3::X).unwrap();
+        let t = ray_obb(&r, &obb);
+        assert!(t.is_some());
+        assert!(approx_eq(t.unwrap(), 4.0));
+    }
+
+    #[test]
+    fn ray_obb_miss() {
+        let obb = Obb::new(Vec3::new(5.0, 0.0, 0.0), Vec3::ONE, glam::Quat::IDENTITY);
+        let r = Ray::new(Vec3::ZERO, Vec3::Y).unwrap();
+        assert!(ray_obb(&r, &obb).is_none());
+    }
+
+    #[test]
+    fn gjk3d_obb_vs_obb() {
+        let a = Obb::new(Vec3::ZERO, Vec3::ONE, glam::Quat::IDENTITY);
+        let b = Obb::new(Vec3::new(1.5, 0.0, 0.0), Vec3::ONE, glam::Quat::IDENTITY);
+        assert!(gjk_intersect_3d(&a, &b));
+
+        let c = Obb::new(Vec3::new(5.0, 0.0, 0.0), Vec3::ONE, glam::Quat::IDENTITY);
+        assert!(!gjk_intersect_3d(&a, &c));
+    }
+
+    // --- Capsule tests ---
+
+    #[test]
+    fn capsule_contains_center() {
+        let cap = Capsule::new(Vec3::ZERO, Vec3::new(0.0, 2.0, 0.0), 0.5).unwrap();
+        assert!(cap.contains_point(Vec3::new(0.0, 1.0, 0.0)));
+    }
+
+    #[test]
+    fn capsule_contains_near_surface() {
+        let cap = Capsule::new(Vec3::ZERO, Vec3::new(0.0, 2.0, 0.0), 1.0).unwrap();
+        assert!(cap.contains_point(Vec3::new(0.9, 1.0, 0.0)));
+        assert!(!cap.contains_point(Vec3::new(2.0, 1.0, 0.0)));
+    }
+
+    #[test]
+    fn capsule_negative_radius_errors() {
+        assert!(Capsule::new(Vec3::ZERO, Vec3::Y, -1.0).is_err());
+    }
+
+    #[test]
+    fn capsule_axis_length() {
+        let cap = Capsule::new(Vec3::ZERO, Vec3::new(0.0, 3.0, 0.0), 0.5).unwrap();
+        assert!(approx_eq(cap.axis_length(), 3.0));
+    }
+
+    #[test]
+    fn ray_capsule_hit() {
+        let cap = Capsule::new(Vec3::new(5.0, -1.0, 0.0), Vec3::new(5.0, 1.0, 0.0), 0.5).unwrap();
+        let r = Ray::new(Vec3::ZERO, Vec3::X).unwrap();
+        let t = ray_capsule(&r, &cap);
+        assert!(t.is_some());
+        assert!(t.unwrap() > 4.0 && t.unwrap() < 5.0);
+    }
+
+    #[test]
+    fn ray_capsule_miss() {
+        let cap = Capsule::new(Vec3::new(5.0, -1.0, 0.0), Vec3::new(5.0, 1.0, 0.0), 0.5).unwrap();
+        let r = Ray::new(Vec3::ZERO, Vec3::Y).unwrap();
+        assert!(ray_capsule(&r, &cap).is_none());
+    }
+
+    #[test]
+    fn gjk3d_capsule_vs_sphere() {
+        let cap = Capsule::new(Vec3::ZERO, Vec3::new(0.0, 2.0, 0.0), 0.5).unwrap();
+        let sphere = Sphere::new(Vec3::new(1.0, 1.0, 0.0), 1.0).unwrap();
+        assert!(gjk_intersect_3d(&cap, &sphere));
+
+        let far = Sphere::new(Vec3::new(10.0, 0.0, 0.0), 0.5).unwrap();
+        assert!(!gjk_intersect_3d(&cap, &far));
     }
 }

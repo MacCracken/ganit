@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.26.3 (2026-03-26)
+
+### num — Optimization solvers
+- `gradient_descent()` — steepest descent with fixed learning rate
+- `conjugate_gradient()` — iterative SPD linear solver (Ax=b)
+- `bfgs()` — quasi-Newton optimizer with backtracking line search
+- `levenberg_marquardt()` — nonlinear least squares (damped Gauss-Newton)
+- `OptResult` struct for optimization output
+
+### num — Adaptive ODE solver
+- `dopri45()` — Dormand-Prince RK4(5) with automatic step-size control
+
+### geo — 3D collision detection
+- `ConvexSupport3D` trait, `ConvexHull3D` type
+- `gjk_intersect_3d()`, `gjk_epa_3d()`, `Penetration3D`
+- `Sphere`, `Obb`, `Capsule` implement `ConvexSupport3D`
+
+### geo — New primitives
+- `Obb` — oriented bounding box (center, half_extents, rotation)
+  - `contains_point()`, `closest_point()`, `axes()`
+  - `ray_obb()` intersection
+- `Capsule` — line segment + radius (Minkowski sum)
+  - `contains_point()`, `axis_length()`
+  - `ray_capsule()` intersection
+
+### Stats
+- 504 tests, zero clippy warnings
+
 ## 0.25.3 (2026-03-25)
 
 ### num — Singular Value Decomposition
