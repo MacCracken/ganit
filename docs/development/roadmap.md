@@ -70,26 +70,11 @@ Post-1.0: standard semver.
 
 ## 1.2.0 — Consumer essentials + remaining gaps
 
-### Consumer essentials (remaining from P(-1) audit)
-- [ ] Porter-Duff compositing operators — src-over, dst-over, src-in, etc. (transforms, aethersafha)
-
-### Deferred from gap analysis
+### Deferred (large effort)
 - [ ] MPR / XenoCollide collision alternative (impetus)
 - [ ] NURBS evaluation — rational B-splines (kiran)
 - [ ] Delaunay triangulation + Voronoi diagrams 2D (kiran)
 - [ ] Sparse LU/Cholesky factorization (joshua)
-- [ ] BiCGSTAB iterative solver for non-symmetric sparse systems (joshua)
-
-### Algorithmic extensions
-- [ ] BDF-3 through BDF-5 higher-order stiff solvers (joshua)
-- [ ] Higher-order symplectic: Yoshida 4th-order (joshua)
-- [ ] Hermite spline interpolation with TCB (kiran)
-- [ ] Monotone cubic interpolation (Fritsch-Carlson) for replay (joshua)
-- [ ] Tangent space computation (Mikktspace-compatible) for normal mapping (kiran)
-- [ ] Depth buffer linearization utility (kiran)
-- [ ] HDR tone mapping operators: Reinhard, ACES filmic (kiran, aethersafha)
-- [ ] Quasi-random sequences: Halton, Sobol for Monte Carlo (num)
-- [ ] Sparse matrix-transpose multiply (CsrMatrix::spmvt) (num)
 
 ### Quality
 - [ ] Complete doctests on all public functions

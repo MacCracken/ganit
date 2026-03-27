@@ -834,4 +834,76 @@ mod tests {
         let via_compose = composed.apply_to_point(p);
         assert!(vec3_approx_eq(via_compose, via_matrix));
     }
+
+    // --- Porter-Duff compositing ---
+
+    #[test]
+    fn composite_src_over_opaque() {
+        // Fully opaque source should replace destination
+        let (r, g, _b, a) = composite_src_over(1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0);
+        assert!(approx_eq(r, 1.0));
+        assert!(approx_eq(g, 0.0));
+        assert!(approx_eq(a, 1.0));
+    }
+
+    #[test]
+    fn composite_src_over_transparent() {
+        // Fully transparent source should pass through destination
+        let (r, _g, _b, a) = composite_src_over(0.0, 0.0, 0.0, 0.0, 0.5, 0.5, 0.5, 1.0);
+        assert!(approx_eq(r, 0.5));
+        assert!(approx_eq(a, 1.0));
+    }
+
+    #[test]
+    fn composite_src_in_masks() {
+        // src-in: source clipped by destination alpha
+        let (r, _g, _b, a) = composite_src_in(1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.5);
+        assert!(approx_eq(r, 0.5));
+        assert!(approx_eq(a, 0.5));
+    }
+
+    #[test]
+    fn composite_plus_clamped() {
+        let (r, _g, _b, a) = composite_plus(0.8, 0.0, 0.0, 1.0, 0.5, 0.0, 0.0, 1.0);
+        assert!(approx_eq(r, 1.0)); // Clamped
+        assert!(approx_eq(a, 1.0));
+    }
+
+    // --- HDR tone mapping ---
+
+    #[test]
+    fn tonemap_reinhard_zero() {
+        let (r, _g, _b) = tonemap_reinhard(0.0, 0.0, 0.0);
+        assert!(approx_eq(r, 0.0));
+    }
+
+    #[test]
+    fn tonemap_reinhard_convergence() {
+        let (r, _, _) = tonemap_reinhard(1000.0, 0.0, 0.0);
+        assert!(r > 0.99 && r <= 1.0); // Approaches 1.0
+    }
+
+    #[test]
+    fn tonemap_aces_range() {
+        let (r, _g, _b) = tonemap_aces(1.0, 1.0, 1.0);
+        assert!((0.0..=1.0).contains(&r));
+    }
+
+    // --- Depth linearization ---
+
+    #[test]
+    fn linearize_depth_near_far() {
+        let near = 0.1;
+        let far = 100.0;
+        let d_near = linearize_depth(0.0, near, far);
+        let d_far = linearize_depth(1.0, near, far);
+        assert!((d_near - near).abs() < 0.01);
+        assert!((d_far - far).abs() < 0.01);
+    }
+
+    #[test]
+    fn linearize_depth_reverse_z_near() {
+        let d = linearize_depth_reverse_z(1.0, 0.1);
+        assert!((d - 0.1).abs() < 0.001);
+    }
 }

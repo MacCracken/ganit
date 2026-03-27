@@ -839,4 +839,69 @@ mod tests {
             prev = y;
         }
     }
+
+    // --- Hermite TCB spline ---
+
+    #[test]
+    fn hermite_tcb_catmull_rom_equivalent() {
+        // TCB(0,0,0) should behave like Catmull-Rom
+        let p0 = Vec3::new(0.0, 0.0, 0.0);
+        let p1 = Vec3::new(1.0, 2.0, 0.0);
+        let p2 = Vec3::new(3.0, 3.0, 0.0);
+        let p3 = Vec3::new(4.0, 1.0, 0.0);
+        let tcb = hermite_tcb(p0, p1, p2, p3, 0.5, 0.0, 0.0, 0.0);
+        let cr = catmull_rom(p0, p1, p2, p3, 0.5);
+        assert!((tcb - cr).length() < 1e-4);
+    }
+
+    #[test]
+    fn hermite_tcb_endpoints() {
+        let p0 = Vec3::ZERO;
+        let p1 = Vec3::new(1.0, 0.0, 0.0);
+        let p2 = Vec3::new(2.0, 1.0, 0.0);
+        let p3 = Vec3::new(3.0, 0.0, 0.0);
+        let at_0 = hermite_tcb(p0, p1, p2, p3, 0.0, 0.5, 0.0, 0.0);
+        let at_1 = hermite_tcb(p0, p1, p2, p3, 1.0, 0.5, 0.0, 0.0);
+        assert!((at_0 - p1).length() < 1e-5);
+        assert!((at_1 - p2).length() < 1e-5);
+    }
+
+    // --- Monotone cubic interpolation ---
+
+    #[test]
+    fn monotone_cubic_linear_data() {
+        let xs = [0.0, 1.0, 2.0, 3.0];
+        let ys = [0.0, 1.0, 2.0, 3.0];
+        let v = monotone_cubic(&xs, &ys, 1.5).unwrap();
+        assert!((v - 1.5).abs() < 1e-10);
+    }
+
+    #[test]
+    fn monotone_cubic_preserves_monotonicity() {
+        let xs = [0.0, 1.0, 2.0, 3.0, 4.0];
+        let ys = [0.0, 1.0, 1.5, 1.8, 2.0]; // Monotonically increasing
+        let mut prev = -1.0;
+        for i in 0..40 {
+            let x = i as f64 * 0.1;
+            let v = monotone_cubic(&xs, &ys, x).unwrap();
+            assert!(v >= prev - 1e-10, "non-monotonic at x={x}: {prev} → {v}");
+            prev = v;
+        }
+    }
+
+    #[test]
+    fn monotone_cubic_endpoints() {
+        let xs = [0.0, 1.0, 2.0];
+        let ys = [10.0, 20.0, 30.0];
+        assert!((monotone_cubic(&xs, &ys, 0.0).unwrap() - 10.0).abs() < 1e-10);
+        assert!((monotone_cubic(&xs, &ys, 2.0).unwrap() - 30.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn monotone_cubic_out_of_range() {
+        let xs = [0.0, 1.0, 2.0];
+        let ys = [0.0, 1.0, 4.0];
+        assert!(monotone_cubic(&xs, &ys, -0.1).is_none());
+        assert!(monotone_cubic(&xs, &ys, 2.1).is_none());
+    }
 }

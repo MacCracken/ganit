@@ -191,3 +191,48 @@ pub fn segment_segment_closest(a0: Vec3, a1: Vec3, b0: Vec3, b1: Vec3) -> (Vec3,
     let p2 = b0 + d2 * t;
     (p1, p2, (p1 - p2).length_squared())
 }
+
+// ---------------------------------------------------------------------------
+// Tangent space computation
+// ---------------------------------------------------------------------------
+
+/// Compute tangent and bitangent vectors for a triangle given UV coordinates.
+///
+/// This is the standard approach used for normal mapping (compatible with
+/// Mikktspace conventions when averaged over a mesh). Returns `(tangent, bitangent)`.
+///
+/// The tangent vector points in the direction of increasing U, and the bitangent
+/// in the direction of increasing V, both in the plane of the triangle.
+#[must_use]
+pub fn compute_tangent(
+    p0: Vec3,
+    p1: Vec3,
+    p2: Vec3,
+    uv0: glam::Vec2,
+    uv1: glam::Vec2,
+    uv2: glam::Vec2,
+) -> (Vec3, Vec3) {
+    let edge1 = p1 - p0;
+    let edge2 = p2 - p0;
+    let duv1 = uv1 - uv0;
+    let duv2 = uv2 - uv0;
+
+    let denom = duv1.x * duv2.y - duv2.x * duv1.y;
+    if denom.abs() < crate::EPSILON_F32 {
+        // Degenerate UV — return a perpendicular frame from the normal
+        let normal = edge1.cross(edge2);
+        let tangent = if normal.x.abs() < 0.9 {
+            Vec3::X.cross(normal).normalize_or_zero()
+        } else {
+            Vec3::Y.cross(normal).normalize_or_zero()
+        };
+        let bitangent = normal.cross(tangent).normalize_or_zero();
+        return (tangent, bitangent);
+    }
+
+    let inv = 1.0 / denom;
+    let tangent = (edge1 * duv2.y - edge2 * duv1.y) * inv;
+    let bitangent = (edge2 * duv1.x - edge1 * duv2.x) * inv;
+
+    (tangent.normalize_or_zero(), bitangent.normalize_or_zero())
+}

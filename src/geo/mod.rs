@@ -2292,4 +2292,34 @@ mod tests {
         );
         assert!(approx_eq(dist_sq, 4.0)); // distance = 2
     }
+
+    // --- Tangent space ---
+
+    #[test]
+    fn compute_tangent_basic() {
+        let p0 = Vec3::new(0.0, 0.0, 0.0);
+        let p1 = Vec3::new(1.0, 0.0, 0.0);
+        let p2 = Vec3::new(0.0, 1.0, 0.0);
+        let uv0 = glam::Vec2::new(0.0, 0.0);
+        let uv1 = glam::Vec2::new(1.0, 0.0);
+        let uv2 = glam::Vec2::new(0.0, 1.0);
+        let (tangent, bitangent) = compute_tangent(p0, p1, p2, uv0, uv1, uv2);
+        // Tangent should point along +X (U direction)
+        assert!(tangent.dot(Vec3::X) > 0.9);
+        // Bitangent should point along +Y (V direction)
+        assert!(bitangent.dot(Vec3::Y) > 0.9);
+    }
+
+    #[test]
+    fn compute_tangent_degenerate_uv() {
+        // All same UV — should still return valid vectors
+        let p0 = Vec3::ZERO;
+        let p1 = Vec3::X;
+        let p2 = Vec3::Y;
+        let uv = glam::Vec2::ZERO;
+        let (tangent, bitangent) = compute_tangent(p0, p1, p2, uv, uv, uv);
+        // Should produce a valid frame, not NaN
+        assert!(tangent.length() > 0.5);
+        assert!(bitangent.length() > 0.5);
+    }
 }

@@ -166,6 +166,32 @@ impl CsrMatrix {
         Ok(y)
     }
 
+    /// Sparse matrix-transpose-vector multiply: y = Aᵀ · x.
+    ///
+    /// Computes the product of the transpose of this matrix with a vector,
+    /// without explicitly forming the transpose.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`HisabError::InvalidInput`] if `x` length doesn't match `nrows`.
+    #[must_use = "returns the product vector or an error"]
+    pub fn spmvt(&self, x: &[f64]) -> Result<Vec<f64>, HisabError> {
+        if x.len() != self.nrows {
+            return Err(HisabError::InvalidInput(format!(
+                "x length {} != nrows {}",
+                x.len(),
+                self.nrows
+            )));
+        }
+        let mut y = vec![0.0; self.ncols];
+        for (i, xi) in x.iter().enumerate().take(self.nrows) {
+            for idx in self.row_offsets[i]..self.row_offsets[i + 1] {
+                y[self.col_indices[idx]] += self.values[idx] * xi;
+            }
+        }
+        Ok(y)
+    }
+
     /// Add two CSR matrices of the same dimensions.
     ///
     /// # Errors

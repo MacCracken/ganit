@@ -65,3 +65,56 @@ impl Pcg32 {
         (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos()
     }
 }
+
+// ---------------------------------------------------------------------------
+// Quasi-random sequences
+// ---------------------------------------------------------------------------
+
+/// Halton sequence value for a given index and base.
+///
+/// Quasi-random low-discrepancy sequence. Use different prime bases for each
+/// dimension (e.g., 2 for x, 3 for y, 5 for z).
+///
+/// Returns a value in \[0, 1).
+#[must_use]
+#[inline]
+pub fn halton(index: u32, base: u32) -> f64 {
+    let mut result = 0.0;
+    let mut f = 1.0 / base as f64;
+    let mut i = index;
+    while i > 0 {
+        result += f * (i % base) as f64;
+        i /= base;
+        f /= base as f64;
+    }
+    result
+}
+
+/// Generate a 2D Halton point at the given index.
+///
+/// Uses bases 2 and 3 (the standard choice for 2D).
+#[must_use]
+#[inline]
+pub fn halton_2d(index: u32) -> (f64, f64) {
+    (halton(index, 2), halton(index, 3))
+}
+
+/// Sobol sequence (dimension 0) — the Van der Corput sequence in base 2.
+///
+/// Generates a quasi-random value in \[0, 1) using bit-reversal.
+/// For multi-dimensional Sobol, use different direction numbers per dimension;
+/// this implementation provides the foundational 1D sequence.
+#[must_use]
+#[inline]
+pub fn sobol(index: u32) -> f64 {
+    let mut n = index;
+    // Gray code: n ^= n >> 1
+    n ^= n >> 1;
+    // Bit-reverse
+    n = ((n & 0xAAAAAAAA) >> 1) | ((n & 0x55555555) << 1);
+    n = ((n & 0xCCCCCCCC) >> 2) | ((n & 0x33333333) << 2);
+    n = ((n & 0xF0F0F0F0) >> 4) | ((n & 0x0F0F0F0F) << 4);
+    n = ((n & 0xFF00FF00) >> 8) | ((n & 0x00FF00FF) << 8);
+    n = n.rotate_left(16);
+    n as f64 / (1u64 << 32) as f64
+}

@@ -290,8 +290,16 @@ pub fn unpremultiply_alpha(r: f32, g: f32, b: f32, a: f32) -> (f32, f32, f32, f3
 /// and returns `(out_r, out_g, out_b, out_a)`.
 #[must_use]
 #[inline]
+#[allow(clippy::too_many_arguments)]
 pub fn composite_src_over(
-    sr: f32, sg: f32, sb: f32, sa: f32, dr: f32, dg: f32, db: f32, da: f32,
+    sr: f32,
+    sg: f32,
+    sb: f32,
+    sa: f32,
+    dr: f32,
+    dg: f32,
+    db: f32,
+    da: f32,
 ) -> (f32, f32, f32, f32) {
     let inv_sa = 1.0 - sa;
     (
@@ -305,8 +313,16 @@ pub fn composite_src_over(
 /// Porter-Duff: destination over source.
 #[must_use]
 #[inline]
+#[allow(clippy::too_many_arguments)]
 pub fn composite_dst_over(
-    sr: f32, sg: f32, sb: f32, sa: f32, dr: f32, dg: f32, db: f32, da: f32,
+    sr: f32,
+    sg: f32,
+    sb: f32,
+    sa: f32,
+    dr: f32,
+    dg: f32,
+    db: f32,
+    da: f32,
 ) -> (f32, f32, f32, f32) {
     let inv_da = 1.0 - da;
     (
@@ -320,8 +336,16 @@ pub fn composite_dst_over(
 /// Porter-Duff: source in destination.
 #[must_use]
 #[inline]
+#[allow(clippy::too_many_arguments)]
 pub fn composite_src_in(
-    sr: f32, sg: f32, sb: f32, sa: f32, _dr: f32, _dg: f32, _db: f32, da: f32,
+    sr: f32,
+    sg: f32,
+    sb: f32,
+    sa: f32,
+    _dr: f32,
+    _dg: f32,
+    _db: f32,
+    da: f32,
 ) -> (f32, f32, f32, f32) {
     (sr * da, sg * da, sb * da, sa * da)
 }
@@ -329,8 +353,16 @@ pub fn composite_src_in(
 /// Porter-Duff: destination in source.
 #[must_use]
 #[inline]
+#[allow(clippy::too_many_arguments)]
 pub fn composite_dst_in(
-    _sr: f32, _sg: f32, _sb: f32, sa: f32, dr: f32, dg: f32, db: f32, da: f32,
+    _sr: f32,
+    _sg: f32,
+    _sb: f32,
+    sa: f32,
+    dr: f32,
+    dg: f32,
+    db: f32,
+    da: f32,
 ) -> (f32, f32, f32, f32) {
     (dr * sa, dg * sa, db * sa, da * sa)
 }
@@ -338,8 +370,16 @@ pub fn composite_dst_in(
 /// Porter-Duff: source out (source held out by destination).
 #[must_use]
 #[inline]
+#[allow(clippy::too_many_arguments)]
 pub fn composite_src_out(
-    sr: f32, sg: f32, sb: f32, sa: f32, _dr: f32, _dg: f32, _db: f32, da: f32,
+    sr: f32,
+    sg: f32,
+    sb: f32,
+    sa: f32,
+    _dr: f32,
+    _dg: f32,
+    _db: f32,
+    da: f32,
 ) -> (f32, f32, f32, f32) {
     let inv_da = 1.0 - da;
     (sr * inv_da, sg * inv_da, sb * inv_da, sa * inv_da)
@@ -348,8 +388,16 @@ pub fn composite_src_out(
 /// Porter-Duff: destination out (destination held out by source).
 #[must_use]
 #[inline]
+#[allow(clippy::too_many_arguments)]
 pub fn composite_dst_out(
-    _sr: f32, _sg: f32, _sb: f32, sa: f32, dr: f32, dg: f32, db: f32, da: f32,
+    _sr: f32,
+    _sg: f32,
+    _sb: f32,
+    sa: f32,
+    dr: f32,
+    dg: f32,
+    db: f32,
+    da: f32,
 ) -> (f32, f32, f32, f32) {
     let inv_sa = 1.0 - sa;
     (dr * inv_sa, dg * inv_sa, db * inv_sa, da * inv_sa)
@@ -358,8 +406,16 @@ pub fn composite_dst_out(
 /// Porter-Duff: source atop destination.
 #[must_use]
 #[inline]
+#[allow(clippy::too_many_arguments)]
 pub fn composite_src_atop(
-    sr: f32, sg: f32, sb: f32, sa: f32, dr: f32, dg: f32, db: f32, da: f32,
+    sr: f32,
+    sg: f32,
+    sb: f32,
+    sa: f32,
+    dr: f32,
+    dg: f32,
+    db: f32,
+    da: f32,
 ) -> (f32, f32, f32, f32) {
     let inv_sa = 1.0 - sa;
     (
@@ -373,8 +429,16 @@ pub fn composite_src_atop(
 /// Porter-Duff: destination atop source.
 #[must_use]
 #[inline]
+#[allow(clippy::too_many_arguments)]
 pub fn composite_dst_atop(
-    sr: f32, sg: f32, sb: f32, sa: f32, dr: f32, dg: f32, db: f32, da: f32,
+    sr: f32,
+    sg: f32,
+    sb: f32,
+    sa: f32,
+    dr: f32,
+    dg: f32,
+    db: f32,
+    da: f32,
 ) -> (f32, f32, f32, f32) {
     let inv_da = 1.0 - da;
     (
@@ -388,8 +452,16 @@ pub fn composite_dst_atop(
 /// Porter-Duff: XOR (exclusive or).
 #[must_use]
 #[inline]
+#[allow(clippy::too_many_arguments)]
 pub fn composite_xor(
-    sr: f32, sg: f32, sb: f32, sa: f32, dr: f32, dg: f32, db: f32, da: f32,
+    sr: f32,
+    sg: f32,
+    sb: f32,
+    sa: f32,
+    dr: f32,
+    dg: f32,
+    db: f32,
+    da: f32,
 ) -> (f32, f32, f32, f32) {
     let inv_sa = 1.0 - sa;
     let inv_da = 1.0 - da;
@@ -404,8 +476,16 @@ pub fn composite_xor(
 /// Porter-Duff: additive blend (plus / lighter).
 #[must_use]
 #[inline]
+#[allow(clippy::too_many_arguments)]
 pub fn composite_plus(
-    sr: f32, sg: f32, sb: f32, sa: f32, dr: f32, dg: f32, db: f32, da: f32,
+    sr: f32,
+    sg: f32,
+    sb: f32,
+    sa: f32,
+    dr: f32,
+    dg: f32,
+    db: f32,
+    da: f32,
 ) -> (f32, f32, f32, f32) {
     (
         (sr + dr).min(1.0),

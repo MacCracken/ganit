@@ -208,3 +208,106 @@ pub fn gmres(
 
     Ok(x)
 }
+
+// ---------------------------------------------------------------------------
+// BiCGSTAB iterative solver
+// ---------------------------------------------------------------------------
+
+/// BiCGSTAB (Bi-Conjugate Gradient Stabilized) for non-symmetric linear systems A·x = b.
+///
+/// More robust than GMRES for some non-symmetric problems, with fixed memory
+/// usage per iteration (no restart parameter needed).
+///
+/// - `a_mul`: matrix-vector product callback `A * v`.
+/// - `b`: right-hand side vector.
+/// - `x0`: initial guess.
+/// - `tol`: convergence tolerance on residual norm.
+/// - `max_iter`: maximum iterations.
+///
+/// # Errors
+///
+/// Returns [`HisabError::InvalidInput`] if dimensions mismatch.
+#[must_use = "contains the solution or an error"]
+pub fn bicgstab(
+    a_mul: impl Fn(&[f64]) -> Vec<f64>,
+    b: &[f64],
+    x0: &[f64],
+    tol: f64,
+    max_iter: usize,
+) -> Result<Vec<f64>, HisabError> {
+    let n = b.len();
+    if x0.len() != n {
+        return Err(HisabError::InvalidInput(
+            "x0 length must match b length".into(),
+        ));
+    }
+
+    let mut x = x0.to_vec();
+    let ax = a_mul(&x);
+    let mut r: Vec<f64> = (0..n).map(|i| b[i] - ax[i]).collect();
+    let r_hat: Vec<f64> = r.clone(); // Shadow residual (fixed)
+
+    let mut rho = 1.0;
+    let mut alpha = 1.0;
+    let mut omega = 1.0;
+    let mut v = vec![0.0; n];
+    let mut p = vec![0.0; n];
+
+    for _ in 0..max_iter {
+        let rho_new: f64 = r_hat.iter().zip(r.iter()).map(|(a, b)| a * b).sum();
+
+        if rho_new.abs() < 1e-30 {
+            break; // Breakdown
+        }
+
+        let beta = (rho_new / rho) * (alpha / omega);
+        rho = rho_new;
+
+        for i in 0..n {
+            p[i] = r[i] + beta * (p[i] - omega * v[i]);
+        }
+
+        v = a_mul(&p);
+
+        let r_hat_v: f64 = r_hat.iter().zip(v.iter()).map(|(a, b)| a * b).sum();
+        if r_hat_v.abs() < 1e-30 {
+            break; // Breakdown
+        }
+        alpha = rho / r_hat_v;
+
+        // s = r - alpha * v
+        let s: Vec<f64> = (0..n).map(|i| r[i] - alpha * v[i]).collect();
+
+        let s_norm: f64 = s.iter().map(|v| v * v).sum::<f64>().sqrt();
+        if s_norm < tol {
+            for i in 0..n {
+                x[i] += alpha * p[i];
+            }
+            return Ok(x);
+        }
+
+        let t = a_mul(&s);
+
+        let t_dot_s: f64 = t.iter().zip(s.iter()).map(|(a, b)| a * b).sum();
+        let t_dot_t: f64 = t.iter().map(|v| v * v).sum();
+        if t_dot_t.abs() < 1e-30 {
+            break; // Breakdown
+        }
+        omega = t_dot_s / t_dot_t;
+
+        for i in 0..n {
+            x[i] += alpha * p[i] + omega * s[i];
+        }
+
+        for i in 0..n {
+            r[i] = s[i] - omega * t[i];
+        }
+
+        let r_norm: f64 = r.iter().map(|v| v * v).sum::<f64>().sqrt();
+        if r_norm < tol {
+            return Ok(x);
+        }
+    }
+
+    Ok(x)
+}

@@ -536,6 +536,172 @@ pub fn bdf2(
     Ok(y_curr)
 }
 
+/// BDF-k (Backward Differentiation Formula, orders 3–5) for stiff ODE systems.
+///
+/// Higher-order implicit methods. Uses backward Euler and BDF-2 for bootstrap steps.
+///
+/// - `order`: BDF order (3, 4, or 5).
+///
+/// # Errors
+///
+/// Returns [`HisabError::ZeroSteps`] if `n` is zero.
+/// Returns [`HisabError::InvalidInput`] if `order` is not 3, 4, or 5.
+#[must_use = "contains the final state or an error"]
+#[allow(clippy::too_many_arguments, clippy::needless_range_loop)]
+pub fn bdf(
+    f: impl Fn(f64, &[f64], &mut [f64]),
+    jac: impl Fn(f64, &[f64], &mut Vec<Vec<f64>>),
+    t0: f64,
+    y0: &[f64],
+    t_end: f64,
+    n: usize,
+    newton_tol: f64,
+    max_newton: usize,
+    order: usize,
+) -> Result<Vec<f64>, HisabError> {
+    if n == 0 {
+        return Err(HisabError::ZeroSteps);
+    }
+    if !(3..=5).contains(&order) {
+        return Err(HisabError::InvalidInput(
+            "bdf order must be 3, 4, or 5".into(),
+        ));
+    }
+    let dim = y0.len();
+    let h = (t_end - t0) / n as f64;
+
+    // BDF coefficients: alpha[0..order] * y_history + beta * h * f(t_{k+1}, y_{k+1}) = 0
+    // Stored as: predictor coefficients for y_{k+1} and the f-coefficient
+    let (alphas, beta): (&[f64], f64) = match order {
+        3 => (&[18.0 / 11.0, -9.0 / 11.0, 2.0 / 11.0], 6.0 / 11.0),
+        4 => (
+            &[48.0 / 25.0, -36.0 / 25.0, 16.0 / 25.0, -3.0 / 25.0],
+            12.0 / 25.0,
+        ),
+        5 => (
+            &[
+                300.0 / 137.0,
+                -300.0 / 137.0,
+                200.0 / 137.0,
+                -75.0 / 137.0,
+                12.0 / 137.0,
+            ],
+            60.0 / 137.0,
+        ),
+        _ => return Err(HisabError::InvalidInput("unreachable".into())),
+    };
+
+    // Bootstrap: use backward Euler for initial steps
+    let bootstrap_steps = order - 1;
+    let mut history: Vec<Vec<f64>> = Vec::with_capacity(order);
+    history.push(y0.to_vec());
+
+    let mut t = t0;
+    let mut f_val = vec![0.0; dim];
+    let mut j_mat = vec![vec![0.0; dim]; dim];
+    let mut y_guess = vec![0.0; dim];
+
+    // Bootstrap with backward Euler
+    for _ in 0..bootstrap_steps.min(n) {
+        t += h;
+        y_guess.copy_from_slice(history.last().map_or(y0, |v| v.as_slice()));
+
+        for _ in 0..max_newton {
+            f(t, &y_guess, &mut f_val);
+            jac(t, &y_guess, &mut j_mat);
+            let mut aug: Vec<Vec<f64>> = Vec::with_capacity(dim);
+            for i in 0..dim {
+                let mut row = Vec::with_capacity(dim + 1);
+                for j in 0..dim {
+                    let ident = if i == j { 1.0 } else { 0.0 };
+                    row.push(ident - h * j_mat[i][j]);
+                }
+                let prev = history.last().map_or(y0[i], |v| v[i]);
+                row.push(-(y_guess[i] - prev - h * f_val[i]));
+                aug.push(row);
+            }
+            if let Ok(delta) = gaussian_elimination(&mut aug) {
+                let norm: f64 = delta.iter().map(|d| d * d).sum::<f64>().sqrt();
+                for i in 0..dim {
+                    y_guess[i] += delta[i];
+                }
+                if norm < newton_tol {
+                    break;
+                }
+            } else {
+                tracing::warn!(
+                    "bdf: Newton iteration failed in bootstrap step (singular Jacobian)"
+                );
+                break;
+            }
+        }
+        history.push(y_guess.clone());
+    }
+
+    if n <= bootstrap_steps {
+        return Ok(history.pop().unwrap_or_else(|| y0.to_vec()));
+    }
+
+    // Main BDF-k loop
+    for _ in bootstrap_steps..n {
+        t += h;
+
+        // Predictor: weighted sum of history
+        for i in 0..dim {
+            y_guess[i] = 0.0;
+            for (k, alpha) in alphas.iter().enumerate() {
+                let hist_idx = history.len() - 1 - k;
+                y_guess[i] += alpha * history[hist_idx][i];
+            }
+        }
+
+        // Newton corrector
+        for _ in 0..max_newton {
+            f(t, &y_guess, &mut f_val);
+            jac(t, &y_guess, &mut j_mat);
+
+            let mut aug: Vec<Vec<f64>> = Vec::with_capacity(dim);
+            for i in 0..dim {
+                let mut row = Vec::with_capacity(dim + 1);
+                for j in 0..dim {
+                    let ident = if i == j { 1.0 } else { 0.0 };
+                    row.push(ident - beta * h * j_mat[i][j]);
+                }
+                // Residual: y_guess - sum(alpha_k * y_{n-k}) - beta*h*f
+                let mut pred = 0.0;
+                for (k, alpha) in alphas.iter().enumerate() {
+                    let hist_idx = history.len() - 1 - k;
+                    pred += alpha * history[hist_idx][i];
+                }
+                let rhs = y_guess[i] - pred - beta * h * f_val[i];
+                row.push(-rhs);
+                aug.push(row);
+            }
+
+            if let Ok(delta) = gaussian_elimination(&mut aug) {
+                let norm: f64 = delta.iter().map(|d| d * d).sum::<f64>().sqrt();
+                for i in 0..dim {
+                    y_guess[i] += delta[i];
+                }
+                if norm < newton_tol {
+                    break;
+                }
+            } else {
+                tracing::warn!("bdf: Newton iteration failed (singular Jacobian)");
+                break;
+            }
+        }
+
+        // Slide history window
+        if history.len() >= order {
+            history.remove(0);
+        }
+        history.push(y_guess.clone());
+    }
+
+    Ok(history.pop().unwrap_or_else(|| y0.to_vec()))
+}
+
 // ---------------------------------------------------------------------------
 // Stochastic differential equations
 // ---------------------------------------------------------------------------
@@ -815,6 +981,91 @@ pub fn verlet(
     let mut t = t0;
     for _ in 0..n {
         verlet_step(&acc_fn, &mut pos, &mut vel, t, dt, &mut acc);
+        t += dt;
+    }
+    Ok((pos, vel))
+}
+
+/// Yoshida 4th-order symplectic integrator step.
+///
+/// Fourth-order composition method using the Yoshida triple-jump coefficients.
+/// Significantly more accurate than Verlet while remaining symplectic and
+/// time-reversible.
+///
+/// - `acc_fn`: computes acceleration from `(t, position, &mut acceleration_out)`.
+/// - `pos`: current position vector (modified in place).
+/// - `vel`: current velocity vector (modified in place).
+/// - `t`: current time.
+/// - `dt`: time step.
+#[inline]
+pub fn yoshida4_step(
+    acc_fn: &impl Fn(f64, &[f64], &mut [f64]),
+    pos: &mut [f64],
+    vel: &mut [f64],
+    t: f64,
+    dt: f64,
+) {
+    // Yoshida triple-jump coefficients
+    const CBRT2: f64 = 1.259_921_049_894_873_2; // 2^(1/3)
+    const W1: f64 = 1.0 / (2.0 - CBRT2);
+    const W0: f64 = -CBRT2 / (2.0 - CBRT2);
+
+    // Position and velocity sub-step weights
+    let c = [W1 * 0.5, (W0 + W1) * 0.5, (W0 + W1) * 0.5, W1 * 0.5];
+    let d = [W1, W0, W1];
+
+    let dim = pos.len();
+    let mut acc = vec![0.0; dim];
+
+    // Initial drift
+    for i in 0..dim {
+        pos[i] += c[0] * dt * vel[i];
+    }
+
+    for step in 0..3 {
+        // Kick
+        acc_fn(t, pos, &mut acc);
+        for i in 0..dim {
+            vel[i] += d[step] * dt * acc[i];
+        }
+        // Drift
+        for i in 0..dim {
+            pos[i] += c[step + 1] * dt * vel[i];
+        }
+    }
+}
+
+/// Run a Yoshida 4th-order symplectic integration over a time span.
+///
+/// Returns `(final_position, final_velocity)`.
+///
+/// # Errors
+///
+/// Returns [`HisabError::ZeroSteps`] if `n` is zero.
+/// Returns [`HisabError::InvalidInput`] if `pos0` and `vel0` differ in length.
+#[must_use = "contains the final state or an error"]
+pub fn yoshida4(
+    acc_fn: impl Fn(f64, &[f64], &mut [f64]),
+    pos0: &[f64],
+    vel0: &[f64],
+    t0: f64,
+    t_end: f64,
+    n: usize,
+) -> Result<(Vec<f64>, Vec<f64>), HisabError> {
+    if n == 0 {
+        return Err(HisabError::ZeroSteps);
+    }
+    if pos0.len() != vel0.len() {
+        return Err(HisabError::InvalidInput(
+            "pos and vel must have equal length".into(),
+        ));
+    }
+    let dt = (t_end - t0) / n as f64;
+    let mut pos = pos0.to_vec();
+    let mut vel = vel0.to_vec();
+    let mut t = t0;
+    for _ in 0..n {
+        yoshida4_step(&acc_fn, &mut pos, &mut vel, t, dt);
         t += dt;
     }
     Ok((pos, vel))

@@ -42,6 +42,42 @@
 - `projected_gauss_seidel_sor()` — PGS with configurable relaxation parameter omega
 - `projected_gauss_seidel()` now delegates to SOR with omega=1.0
 
+### num — BiCGSTAB iterative solver
+- `bicgstab()` — Bi-Conjugate Gradient Stabilized for non-symmetric linear systems
+
+### num — BDF high-order stiff solvers
+- `bdf()` — BDF-3, BDF-4, BDF-5 with configurable order, Newton corrector, and bootstrap
+
+### num — Quasi-random sequences
+- `halton()`, `halton_2d()` — Halton low-discrepancy sequence (any prime base)
+- `sobol()` — Sobol/Van der Corput sequence via Gray code + bit reversal
+
+### num — Sparse spmvt
+- `CsrMatrix::spmvt()` — sparse matrix-transpose-vector multiply without forming Aᵀ
+
+### num — Yoshida 4th-order symplectic integrator
+- `yoshida4_step()`, `yoshida4()` — triple-jump composition, more accurate than Verlet
+
+### calc — Hermite TCB spline
+- `hermite_tcb()` — Kochanek-Bartels spline with tension, continuity, bias parameters
+
+### calc — Monotone cubic interpolation
+- `monotone_cubic()` — Fritsch-Carlson method, guarantees no overshoot (ideal for replay)
+
+### transforms — Porter-Duff compositing
+- 10 operators: `composite_src_over`, `dst_over`, `src_in`, `dst_in`, `src_out`, `dst_out`, `src_atop`, `dst_atop`, `xor`, `plus` — all premultiplied alpha
+
+### transforms — HDR tone mapping
+- `tonemap_reinhard()`, `tonemap_reinhard_extended()` — Reinhard operator with optional white point
+- `tonemap_aces()` — ACES filmic curve (Narkowicz approximation)
+
+### transforms — Depth buffer utilities
+- `linearize_depth()` — standard NDC to view-space depth
+- `linearize_depth_reverse_z()` — reverse-Z NDC to view-space depth
+
+### geo — Tangent space computation
+- `compute_tangent()` — per-triangle tangent/bitangent from UV coordinates (Mikktspace-compatible)
+
 ### Fixed
 - EPA 2D winding: enforce CCW polytope orientation before expansion (prevents inverted normals)
 - `backward_euler()`, `bdf2()`: emit `tracing::warn!` on Newton non-convergence instead of silent acceptance
@@ -49,7 +85,7 @@
 - Rustdoc: escaped `[0,1]` bracket in color.rs, wrapped `Vec<f64>` in backticks in optimize.rs
 
 ### Stats
-- 746 tests (703 unit + 34 integration + 9 doc), zero clippy warnings
+- 774 tests (731 unit + 34 integration + 9 doc), zero clippy warnings
 
 ## 1.1.0 (2026-03-25)
 

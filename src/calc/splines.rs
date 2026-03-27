@@ -126,6 +126,128 @@ pub fn bspline_eval(degree: usize, control_points: &[Vec3], knots: &[f64], t: f6
 }
 
 // ---------------------------------------------------------------------------
+// Hermite spline with TCB (tension, continuity, bias)
+// ---------------------------------------------------------------------------
+
+/// Evaluate a Kochanek-Bartels (TCB) Hermite spline segment at parameter `t` in \[0, 1\].
+///
+/// Takes four control points `p0..p3` (the curve interpolates `p1` to `p2`)
+/// and TCB parameters:
+/// - `tension`: 0 = Catmull-Rom, 1 = sharp corners, -1 = loose
+/// - `continuity`: 0 = smooth, nonzero = corner at key
+/// - `bias`: 0 = symmetric, 1 = overshoots toward, -1 = overshoots away
+#[must_use]
+#[allow(clippy::many_single_char_names, clippy::too_many_arguments)]
+pub fn hermite_tcb(
+    p0: Vec3,
+    p1: Vec3,
+    p2: Vec3,
+    p3: Vec3,
+    t: f32,
+    tension: f32,
+    continuity: f32,
+    bias: f32,
+) -> Vec3 {
+    // Outgoing tangent at p1
+    let a = (1.0 - tension) * (1.0 + continuity) * (1.0 + bias) * 0.5;
+    let b = (1.0 - tension) * (1.0 - continuity) * (1.0 - bias) * 0.5;
+    let m0 = (p1 - p0) * a + (p2 - p1) * b;
+
+    // Incoming tangent at p2
+    let c = (1.0 - tension) * (1.0 - continuity) * (1.0 + bias) * 0.5;
+    let d = (1.0 - tension) * (1.0 + continuity) * (1.0 - bias) * 0.5;
+    let m1 = (p2 - p1) * c + (p3 - p2) * d;
+
+    // Cubic Hermite basis
+    let t2 = t * t;
+    let t3 = t2 * t;
+    let h00 = 2.0 * t3 - 3.0 * t2 + 1.0;
+    let h10 = t3 - 2.0 * t2 + t;
+    let h01 = -2.0 * t3 + 3.0 * t2;
+    let h11 = t3 - t2;
+
+    p1 * h00 + m0 * h10 + p2 * h01 + m1 * h11
+}
+
+// ---------------------------------------------------------------------------
+// Monotone cubic interpolation (Fritsch-Carlson)
+// ---------------------------------------------------------------------------
+
+/// Monotone cubic interpolation using the Fritsch-Carlson method.
+///
+/// Given sorted knots `xs` and values `ys`, evaluates the interpolant at `x`.
+/// Guarantees monotonicity between data points (no overshoot), making it
+/// ideal for deterministic replay and animation curves.
+///
+/// Returns `None` if inputs are invalid (fewer than 2 points, mismatched lengths,
+/// unsorted xs, or `x` is outside the data range).
+#[must_use]
+pub fn monotone_cubic(xs: &[f64], ys: &[f64], x: f64) -> Option<f64> {
+    let n = xs.len();
+    if n < 2 || ys.len() != n {
+        return None;
+    }
+    if x < xs[0] || x > xs[n - 1] {
+        return None;
+    }
+
+    // Compute secants
+    let mut deltas = Vec::with_capacity(n - 1);
+    let mut hs = Vec::with_capacity(n - 1);
+    for i in 0..n - 1 {
+        let h = xs[i + 1] - xs[i];
+        if h <= 0.0 {
+            return None; // Not sorted
+        }
+        hs.push(h);
+        deltas.push((ys[i + 1] - ys[i]) / h);
+    }
+
+    // Initial tangents (average of adjacent secants)
+    let mut ms = vec![0.0; n];
+    ms[0] = deltas[0];
+    ms[n - 1] = deltas[n - 2];
+    for i in 1..n - 1 {
+        ms[i] = (deltas[i - 1] + deltas[i]) * 0.5;
+    }
+
+    // Fritsch-Carlson monotonicity constraint
+    for i in 0..n - 1 {
+        if deltas[i].abs() < 1e-30 {
+            ms[i] = 0.0;
+            ms[i + 1] = 0.0;
+        } else {
+            let alpha = ms[i] / deltas[i];
+            let beta = ms[i + 1] / deltas[i];
+            let s = alpha * alpha + beta * beta;
+            if s > 9.0 {
+                let tau = 3.0 / s.sqrt();
+                ms[i] = tau * alpha * deltas[i];
+                ms[i + 1] = tau * beta * deltas[i];
+            }
+        }
+    }
+
+    // Find interval and evaluate cubic Hermite
+    let mut k = 0;
+    while k < n - 2 && xs[k + 1] < x {
+        k += 1;
+    }
+
+    let h = hs[k];
+    let t = (x - xs[k]) / h;
+    let t2 = t * t;
+    let t3 = t2 * t;
+
+    let h00 = 2.0 * t3 - 3.0 * t2 + 1.0;
+    let h10 = (t3 - 2.0 * t2 + t) * h;
+    let h01 = -2.0 * t3 + 3.0 * t2;
+    let h11 = (t3 - t2) * h;
+
+    Some(h00 * ys[k] + h10 * ms[k] + h01 * ys[k + 1] + h11 * ms[k + 1])
+}
+
+// ---------------------------------------------------------------------------
 // Arc-length parameterization
 // ---------------------------------------------------------------------------
 

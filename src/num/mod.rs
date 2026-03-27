@@ -26,7 +26,7 @@ pub use inertia::*;
 pub use linalg::*;
 pub use ode::*;
 pub use optimize::*;
-pub use rng::Pcg32;
+pub use rng::*;
 pub use roots::*;
 pub use solvers::*;
 pub use sparse::CsrMatrix;
@@ -2355,5 +2355,139 @@ mod tests {
     #[test]
     fn neumaier_sum_empty() {
         assert!((neumaier_sum(&[]) - 0.0).abs() < 1e-15);
+    }
+
+    // --- Yoshida 4th-order symplectic ---
+
+    #[test]
+    fn yoshida4_harmonic_oscillator() {
+        // x'' = -x, exact: x(t) = cos(t), v(t) = -sin(t)
+        let acc = |_t: f64, pos: &[f64], out: &mut [f64]| {
+            out[0] = -pos[0];
+        };
+        let (pos, vel) = yoshida4(acc, &[1.0], &[0.0], 0.0, std::f64::consts::TAU, 200).unwrap();
+        // After one full period, should return to (1, 0)
+        assert!((pos[0] - 1.0).abs() < 1e-6);
+        assert!(vel[0].abs() < 1e-5);
+    }
+
+    #[test]
+    fn yoshida4_more_accurate_than_verlet() {
+        // Both solve harmonic oscillator — Yoshida should have less error
+        let acc = |_t: f64, pos: &[f64], out: &mut [f64]| {
+            out[0] = -pos[0];
+        };
+        let n = 100;
+        let t_end = std::f64::consts::TAU;
+        let (y_pos, _) = yoshida4(acc, &[1.0], &[0.0], 0.0, t_end, n).unwrap();
+        let (v_pos, _) = verlet(acc, &[1.0], &[0.0], 0.0, t_end, n).unwrap();
+        let y_err = (y_pos[0] - 1.0).abs();
+        let v_err = (v_pos[0] - 1.0).abs();
+        assert!(
+            y_err < v_err,
+            "Yoshida error {y_err} should be < Verlet error {v_err}"
+        );
+    }
+
+    // --- BiCGSTAB ---
+
+    #[test]
+    fn bicgstab_spd_system() {
+        // A = [[4,1],[1,3]], b = [1,2]
+        let a_mul = |x: &[f64]| vec![4.0 * x[0] + x[1], x[0] + 3.0 * x[1]];
+        let b = [1.0, 2.0];
+        let x = bicgstab(a_mul, &b, &[0.0, 0.0], 1e-10, 100).unwrap();
+        let r0 = 4.0 * x[0] + x[1];
+        let r1 = x[0] + 3.0 * x[1];
+        assert!((r0 - 1.0).abs() < 1e-6);
+        assert!((r1 - 2.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn bicgstab_nonsymmetric() {
+        // Non-symmetric: A = [[3,1],[0,2]], b = [5,4]
+        let a_mul = |x: &[f64]| vec![3.0 * x[0] + x[1], 2.0 * x[1]];
+        let b = [5.0, 4.0];
+        let x = bicgstab(a_mul, &b, &[0.0, 0.0], 1e-10, 100).unwrap();
+        // Exact: x[1] = 2, x[0] = (5-2)/3 = 1
+        assert!((x[0] - 1.0).abs() < 1e-6);
+        assert!((x[1] - 2.0).abs() < 1e-6);
+    }
+
+    // --- Halton / Sobol ---
+
+    #[test]
+    fn halton_base2() {
+        assert!((halton(1, 2) - 0.5).abs() < 1e-10);
+        assert!((halton(2, 2) - 0.25).abs() < 1e-10);
+        assert!((halton(3, 2) - 0.75).abs() < 1e-10);
+    }
+
+    #[test]
+    fn halton_2d_in_unit_square() {
+        for i in 1..100 {
+            let (x, y) = halton_2d(i);
+            assert!((0.0..1.0).contains(&x));
+            assert!((0.0..1.0).contains(&y));
+        }
+    }
+
+    #[test]
+    fn sobol_in_unit_interval() {
+        for i in 0..100 {
+            let v = sobol(i);
+            assert!((0.0..1.0).contains(&v), "sobol({i}) = {v}");
+        }
+    }
+
+    // --- Sparse spmvt ---
+
+    #[test]
+    fn csr_spmvt_basic() {
+        // A = [[1,2],[3,4],[5,6]] (3x2), x = [1,1,1]
+        // A^T * x = [1+3+5, 2+4+6] = [9, 12]
+        let a = CsrMatrix::from_dense(&[vec![1.0, 2.0], vec![3.0, 4.0], vec![5.0, 6.0]]);
+        let y = a.spmvt(&[1.0, 1.0, 1.0]).unwrap();
+        assert!((y[0] - 9.0).abs() < 1e-10);
+        assert!((y[1] - 12.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn csr_spmvt_matches_transpose_spmv() {
+        let a = CsrMatrix::from_dense(&[vec![1.0, 2.0, 3.0], vec![4.0, 5.0, 6.0]]);
+        let x = [1.0, 2.0];
+        let y_via_spmvt = a.spmvt(&x).unwrap();
+        let at = a.transpose();
+        let y_via_transpose = at.spmv(&x).unwrap();
+        for (a, b) in y_via_spmvt.iter().zip(y_via_transpose.iter()) {
+            assert!((a - b).abs() < 1e-10);
+        }
+    }
+
+    // --- BDF high-order ---
+
+    #[test]
+    fn bdf3_stiff_system() {
+        // y' = -50*y, y(0) = 1 → y(1) = e^-50 ≈ 0
+        let f = |_t: f64, y: &[f64], dy: &mut [f64]| {
+            dy[0] = -50.0 * y[0];
+        };
+        let jac = |_t: f64, _y: &[f64], j: &mut Vec<Vec<f64>>| {
+            j[0][0] = -50.0;
+        };
+        let y = bdf(f, jac, 0.0, &[1.0], 1.0, 500, 1e-10, 20, 3).unwrap();
+        assert!(y[0].abs() < 1e-10);
+    }
+
+    #[test]
+    fn bdf5_stiff_system() {
+        let f = |_t: f64, y: &[f64], dy: &mut [f64]| {
+            dy[0] = -50.0 * y[0];
+        };
+        let jac = |_t: f64, _y: &[f64], j: &mut Vec<Vec<f64>>| {
+            j[0][0] = -50.0;
+        };
+        let y = bdf(f, jac, 0.0, &[1.0], 1.0, 500, 1e-10, 20, 5).unwrap();
+        assert!(y[0].abs() < 1e-10);
     }
 }
