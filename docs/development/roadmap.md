@@ -92,6 +92,28 @@ Post-1.0: standard semver.
 - [ ] Complete doctests on all public functions
 - [ ] GPU compute kernels via wgpu (shared with ranga)
 
+## 1.4.0 — Number theory + abaco integration
+
+### Number theory (num)
+- [ ] Prime sieves — Sieve of Eratosthenes, Sieve of Atkin, segmented sieve
+- [ ] Primality testing — Miller-Rabin, Baillie-PSW, deterministic variants for u64
+- [ ] Integer factorization — trial division, Pollard's rho, quadratic sieve
+- [ ] Modular arithmetic — modpow, modinv, extended Euclidean
+- [ ] Number-theoretic functions — Euler's totient, Mobius, Mertens, divisor sigma
+- [ ] Continued fraction expansion + convergents
+- [ ] Chinese Remainder Theorem solver
+
+### Symbolic extensions (symbolic)
+- [ ] Algebraic simplification rules: trig identities, log rules, power rules
+- [ ] Symbolic integration (basic: polynomial, trig, exponential)
+- [ ] Expression → LaTeX rendering
+- [ ] Pattern matching / substitution engine
+
+### abaco consumer support
+- [ ] Public API for abaco to call: `symbolic::Expr` ↔ abaco `Value` bridge
+- [ ] Solver dispatch: abaco parses `"solve x^2 - 2 = 0"` → hisab `newton_raphson` / `bisection`
+- [ ] Verified evaluation: abaco wraps result in `interval::Interval` for error bounds
+
 ## Watch List
 
 | Item | Area |
