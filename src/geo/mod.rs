@@ -1542,6 +1542,21 @@ mod tests {
         assert!(gjk_epa(&b, &a).is_some());
     }
 
+    #[test]
+    fn gjk_epa_normal_points_outward() {
+        // EPA normals should always point from A toward B (separation direction).
+        // Test with multiple shape orderings to exercise both CW and CCW simplex paths.
+        let a = make_square(0.0, 0.0, 2.0);
+        let b = make_square(1.0, 0.0, 2.0);
+        let pen_ab = gjk_epa(&a, &b).expect("should overlap");
+        let pen_ba = gjk_epa(&b, &a).expect("should overlap");
+        // Depth should be positive
+        assert!(pen_ab.depth > 0.0);
+        assert!(pen_ba.depth > 0.0);
+        // Depths should be approximately equal
+        assert!((pen_ab.depth - pen_ba.depth).abs() < 0.1);
+    }
+
     // --- V1.0b: Display impls ---
 
     #[test]
@@ -2112,8 +2127,12 @@ mod tests {
             inv_mass_b: 1.0,
         }];
         let rel_vels = [Vec3::new(0.0, -2.0, 0.0)];
-        let impulses = sequential_impulse(&constraints, &rel_vels, 10);
-        assert!(impulses[0] > 0.0, "should produce positive impulse");
+        let result = sequential_impulse(&constraints, &rel_vels, 10);
+        assert!(
+            result.normal[0] > 0.0,
+            "should produce positive normal impulse"
+        );
+        // Friction should be non-zero (tangential velocity is zero here though)
     }
 
     #[test]
@@ -2129,7 +2148,148 @@ mod tests {
             inv_mass_b: 1.0,
         }];
         let rel_vels = [Vec3::new(0.0, 1.0, 0.0)]; // Moving apart
-        let impulses = sequential_impulse(&constraints, &rel_vels, 10);
-        assert!(approx_eq(impulses[0], 0.0));
+        let result = sequential_impulse(&constraints, &rel_vels, 10);
+        assert!(approx_eq(result.normal[0], 0.0));
+    }
+
+    #[test]
+    fn sequential_impulse_friction() {
+        // Sliding contact: should produce friction impulse
+        let constraints = [ContactConstraint {
+            normal: Vec3::Y,
+            point: Vec3::ZERO,
+            penetration: 0.1,
+            restitution: 0.0,
+            friction: 0.5,
+            inv_mass_a: 1.0,
+            inv_mass_b: 1.0,
+        }];
+        let rel_vels = [Vec3::new(5.0, -2.0, 0.0)]; // Sliding + approaching
+        let result = sequential_impulse(&constraints, &rel_vels, 10);
+        assert!(result.normal[0] > 0.0, "should have normal impulse");
+        assert!(
+            result.friction[0].length() > 0.0,
+            "should have friction impulse"
+        );
+        // Friction impulse should oppose tangential velocity (negative X)
+        assert!(result.friction[0].x < 0.0);
+    }
+
+    // --- Closest point on triangle ---
+
+    #[test]
+    fn closest_point_on_triangle_interior() {
+        let tri = Triangle::new(
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(4.0, 0.0, 0.0),
+            Vec3::new(0.0, 4.0, 0.0),
+        );
+        // Point directly above centroid
+        let p = Vec3::new(1.0, 1.0, 5.0);
+        let closest = closest_point_on_triangle(&tri, p);
+        assert!(approx_eq(closest.z, 0.0)); // On the triangle plane
+        assert!(approx_eq(closest.x, 1.0));
+        assert!(approx_eq(closest.y, 1.0));
+    }
+
+    #[test]
+    fn closest_point_on_triangle_vertex() {
+        let tri = Triangle::new(
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(4.0, 0.0, 0.0),
+            Vec3::new(0.0, 4.0, 0.0),
+        );
+        // Closest to vertex A
+        let p = Vec3::new(-1.0, -1.0, 0.0);
+        let closest = closest_point_on_triangle(&tri, p);
+        assert!(vec3_approx_eq(closest, Vec3::ZERO));
+    }
+
+    #[test]
+    fn closest_point_on_triangle_edge() {
+        let tri = Triangle::new(
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(4.0, 0.0, 0.0),
+            Vec3::new(0.0, 4.0, 0.0),
+        );
+        // Below edge AB
+        let p = Vec3::new(2.0, -1.0, 0.0);
+        let closest = closest_point_on_triangle(&tri, p);
+        assert!(approx_eq(closest.y, 0.0)); // On edge AB
+        assert!(approx_eq(closest.x, 2.0));
+    }
+
+    // --- Barycentric coordinates ---
+
+    #[test]
+    fn barycentric_coords_vertices() {
+        let tri = Triangle::new(
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+        );
+        let (u, v, w) = barycentric_coords(&tri, Vec3::ZERO);
+        assert!(approx_eq(u, 1.0));
+        assert!(approx_eq(v, 0.0));
+        assert!(approx_eq(w, 0.0));
+
+        let (u, v, w) = barycentric_coords(&tri, Vec3::new(1.0, 0.0, 0.0));
+        assert!(approx_eq(u, 0.0));
+        assert!(approx_eq(v, 1.0));
+        assert!(approx_eq(w, 0.0));
+    }
+
+    #[test]
+    fn barycentric_coords_centroid() {
+        let tri = Triangle::new(
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(3.0, 0.0, 0.0),
+            Vec3::new(0.0, 3.0, 0.0),
+        );
+        let centroid = Vec3::new(1.0, 1.0, 0.0);
+        let (u, v, w) = barycentric_coords(&tri, centroid);
+        assert!(approx_eq(u + v + w, 1.0));
+        assert!(approx_eq(u, 1.0 / 3.0));
+    }
+
+    // --- Segment-segment closest ---
+
+    #[test]
+    fn segment_segment_closest_parallel() {
+        let (p1, p2, dist_sq) = segment_segment_closest(
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec3::new(1.0, 1.0, 0.0),
+        );
+        assert!(approx_eq(dist_sq, 1.0));
+        assert!(approx_eq(p1.y, 0.0));
+        assert!(approx_eq(p2.y, 1.0));
+    }
+
+    #[test]
+    fn segment_segment_closest_crossing() {
+        // Two segments that cross in the XZ plane
+        let (p1, p2, dist_sq) = segment_segment_closest(
+            Vec3::new(-1.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 0.0, -1.0),
+            Vec3::new(0.0, 0.0, 1.0),
+        );
+        assert!(approx_eq(dist_sq, 0.0));
+        assert!(approx_eq(p1.x, 0.0));
+        assert!(approx_eq(p2.z, 0.0));
+    }
+
+    #[test]
+    fn segment_segment_closest_skew() {
+        // Skew lines in 3D
+        let (_, _, dist_sq) = segment_segment_closest(
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.5, 2.0, 0.0),
+            Vec3::new(0.5, 2.0, 1.0),
+        );
+        assert!(approx_eq(dist_sq, 4.0)); // distance = 2
     }
 }

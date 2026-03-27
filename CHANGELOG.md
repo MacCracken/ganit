@@ -1,5 +1,56 @@
 # Changelog
 
+## [Unreleased]
+
+### transforms — Interpolation utilities
+- `inverse_lerp()` — compute parameter `t` from a value in a range
+- `remap()` — remap a value from one range to another
+
+### transforms — Reverse-Z projection
+- `projection_perspective_reverse_z()` — infinite far-plane reverse-Z projection (modern GPU standard)
+
+### transforms — HSV/HSL color conversion
+- `linear_to_hsv()`, `hsv_to_linear()` — HSV color space (hue in radians)
+- `linear_to_hsl()`, `hsl_to_linear()` — HSL color space (hue in radians)
+
+### transforms — Premultiplied alpha
+- `premultiply_alpha()`, `unpremultiply_alpha()` — straight ↔ premultiplied alpha conversion
+
+### transforms — Transform composition
+- `Transform2D::compose()` — chain two 2D transforms (rotation, scale, position composed directly)
+- `Transform3D::compose()` — chain two 3D transforms (quaternion multiplication, scale composition)
+
+### geo — Closest point on triangle
+- `closest_point_on_triangle()` — 3D Voronoi region test (Ericson algorithm)
+
+### geo — Barycentric coordinates
+- `barycentric_coords()` — compute (u, v, w) for a point projected onto a 3D triangle
+
+### geo — Segment-segment distance
+- `segment_segment_closest()` — closest points between two 3D line segments + squared distance
+
+### geo — Friction in sequential impulse
+- `ImpulseResult` struct with normal + friction impulse vectors
+- `sequential_impulse()` now solves tangent-plane Coulomb friction (clamped to friction cone)
+- **Breaking**: `sequential_impulse()` returns `ImpulseResult` instead of `Vec<f32>`
+
+### num — Compensated summation
+- `kahan_sum()` — Kahan compensated summation (O(1) error vs O(n) naive)
+- `neumaier_sum()` — improved Kahan that handles large+small value mixing
+
+### num — SOR for PGS
+- `projected_gauss_seidel_sor()` — PGS with configurable relaxation parameter omega
+- `projected_gauss_seidel()` now delegates to SOR with omega=1.0
+
+### Fixed
+- EPA 2D winding: enforce CCW polytope orientation before expansion (prevents inverted normals)
+- `backward_euler()`, `bdf2()`: emit `tracing::warn!` on Newton non-convergence instead of silent acceptance
+- Replaced `unreachable!()` in 2D GJK with safe fallback return
+- Rustdoc: escaped `[0,1]` bracket in color.rs, wrapped `Vec<f64>` in backticks in optimize.rs
+
+### Stats
+- 746 tests (703 unit + 34 integration + 9 doc), zero clippy warnings
+
 ## 1.1.0 (2026-03-25)
 
 ### num — Full eigendecomposition

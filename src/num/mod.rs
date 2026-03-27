@@ -16,6 +16,7 @@ mod roots;
 mod solvers;
 mod sparse;
 mod stability;
+mod summation;
 mod svd;
 
 pub use complex::Complex;
@@ -30,6 +31,7 @@ pub use roots::*;
 pub use solvers::*;
 pub use sparse::CsrMatrix;
 pub use stability::*;
+pub use summation::*;
 pub use svd::*;
 
 #[cfg(test)]
@@ -2292,5 +2294,66 @@ mod tests {
         let hi = [f64::INFINITY, f64::INFINITY];
         let x = projected_gauss_seidel(&a, &b, &lo, &hi, &[0.0, 0.0], 100, 1e-10).unwrap();
         assert!(x[0] >= -1e-10 && x[1] >= -1e-10, "PGS violated bounds");
+    }
+
+    #[test]
+    fn pgs_sor_matches_standard() {
+        // With omega=1.0, SOR should give same result as standard PGS
+        let a = vec![vec![4.0, 1.0], vec![1.0, 3.0]];
+        let b = [1.0, 2.0];
+        let lo = [f64::NEG_INFINITY; 2];
+        let hi = [f64::INFINITY; 2];
+        let x_std = projected_gauss_seidel(&a, &b, &lo, &hi, &[0.0, 0.0], 100, 1e-10).unwrap();
+        let x_sor =
+            projected_gauss_seidel_sor(&a, &b, &lo, &hi, &[0.0, 0.0], 100, 1e-10, 1.0).unwrap();
+        assert!((x_std[0] - x_sor[0]).abs() < 1e-10);
+        assert!((x_std[1] - x_sor[1]).abs() < 1e-10);
+    }
+
+    #[test]
+    fn pgs_sor_overrelaxation_converges() {
+        let a = vec![vec![4.0, 1.0], vec![1.0, 3.0]];
+        let b = [1.0, 2.0];
+        let lo = [f64::NEG_INFINITY; 2];
+        let hi = [f64::INFINITY; 2];
+        let x = projected_gauss_seidel_sor(&a, &b, &lo, &hi, &[0.0, 0.0], 100, 1e-10, 1.5).unwrap();
+        let r0 = 4.0 * x[0] + x[1];
+        let r1 = x[0] + 3.0 * x[1];
+        assert!((r0 - 1.0).abs() < 1e-6);
+        assert!((r1 - 2.0).abs() < 1e-6);
+    }
+
+    // --- Compensated summation tests ---
+
+    #[test]
+    fn kahan_sum_basic() {
+        let vals: Vec<f64> = (0..1000).map(|_| 0.1).collect();
+        let result = kahan_sum(&vals);
+        assert!((result - 100.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn kahan_sum_empty() {
+        assert!((kahan_sum(&[]) - 0.0).abs() < 1e-15);
+    }
+
+    #[test]
+    fn neumaier_sum_basic() {
+        let vals: Vec<f64> = (0..1000).map(|_| 0.1).collect();
+        let result = neumaier_sum(&vals);
+        assert!((result - 100.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn neumaier_sum_large_small() {
+        // Neumaier handles the case where large values dominate
+        let vals = vec![1e16, 1.0, -1e16, 1.0];
+        let result = neumaier_sum(&vals);
+        assert!((result - 2.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn neumaier_sum_empty() {
+        assert!((neumaier_sum(&[]) - 0.0).abs() < 1e-15);
     }
 }

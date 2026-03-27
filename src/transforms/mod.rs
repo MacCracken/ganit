@@ -665,4 +665,173 @@ mod tests {
         assert!(approx_eq(color.y, 0.3));
         assert!(approx_eq(color.z, 0.1));
     }
+
+    // --- inverse_lerp / remap ---
+
+    #[test]
+    fn inverse_lerp_basic() {
+        assert!(approx_eq(inverse_lerp(0.0, 10.0, 5.0), 0.5));
+        assert!(approx_eq(inverse_lerp(0.0, 10.0, 0.0), 0.0));
+        assert!(approx_eq(inverse_lerp(0.0, 10.0, 10.0), 1.0));
+    }
+
+    #[test]
+    fn inverse_lerp_degenerate() {
+        assert!(approx_eq(inverse_lerp(5.0, 5.0, 5.0), 0.0));
+    }
+
+    #[test]
+    fn remap_basic() {
+        assert!(approx_eq(remap(5.0, 0.0, 10.0, 0.0, 100.0), 50.0));
+        assert!(approx_eq(remap(0.0, 0.0, 10.0, 20.0, 40.0), 20.0));
+        assert!(approx_eq(remap(10.0, 0.0, 10.0, 20.0, 40.0), 40.0));
+    }
+
+    #[test]
+    fn lerp_inverse_lerp_roundtrip() {
+        let a = 3.0;
+        let b = 17.0;
+        let t = 0.7;
+        let v = lerp_f32(a, b, t);
+        let t_back = inverse_lerp(a, b, v);
+        assert!(approx_eq(t_back, t));
+    }
+
+    // --- reverse-Z projection ---
+
+    #[test]
+    fn reverse_z_near_maps_to_one() {
+        let m = projection_perspective_reverse_z(FRAC_PI_4, 1.0, 0.1);
+        // Near plane point: z = -0.1
+        let p = m * glam::Vec4::new(0.0, 0.0, -0.1, 1.0);
+        let ndc_z = p.z / p.w;
+        assert!(approx_eq(ndc_z, 1.0));
+    }
+
+    #[test]
+    fn reverse_z_far_approaches_zero() {
+        let m = projection_perspective_reverse_z(FRAC_PI_4, 1.0, 0.1);
+        // Very far point: z = -10000
+        let p = m * glam::Vec4::new(0.0, 0.0, -10000.0, 1.0);
+        let ndc_z = p.z / p.w;
+        assert!((0.0..0.001).contains(&ndc_z));
+    }
+
+    // --- HSV roundtrip ---
+
+    #[test]
+    fn hsv_roundtrip() {
+        let cases = [(0.8, 0.3, 0.1), (0.1, 0.9, 0.5), (0.5, 0.5, 0.5)];
+        for (r, g, b) in cases {
+            let (h, s, v) = linear_to_hsv(r, g, b);
+            let (rr, gg, bb) = hsv_to_linear(h, s, v);
+            assert!((rr - r).abs() < 1e-4, "R: {r} -> {rr}");
+            assert!((gg - g).abs() < 1e-4, "G: {g} -> {gg}");
+            assert!((bb - b).abs() < 1e-4, "B: {b} -> {bb}");
+        }
+    }
+
+    #[test]
+    fn hsv_grayscale() {
+        let (_, s, _) = linear_to_hsv(0.5, 0.5, 0.5);
+        assert!(approx_eq(s, 0.0));
+    }
+
+    // --- HSL roundtrip ---
+
+    #[test]
+    fn hsl_roundtrip() {
+        let cases = [(0.8, 0.3, 0.1), (0.1, 0.9, 0.5), (0.5, 0.5, 0.5)];
+        for (r, g, b) in cases {
+            let (h, s, l) = linear_to_hsl(r, g, b);
+            let (rr, gg, bb) = hsl_to_linear(h, s, l);
+            assert!((rr - r).abs() < 1e-4, "R: {r} -> {rr}");
+            assert!((gg - g).abs() < 1e-4, "G: {g} -> {gg}");
+            assert!((bb - b).abs() < 1e-4, "B: {b} -> {bb}");
+        }
+    }
+
+    // --- Premultiplied alpha ---
+
+    #[test]
+    fn premultiply_roundtrip() {
+        let (r, g, b, a) = (0.8, 0.6, 0.4, 0.5);
+        let (pr, pg, pb, pa) = premultiply_alpha(r, g, b, a);
+        assert!(approx_eq(pr, 0.4));
+        assert!(approx_eq(pa, 0.5));
+        let (ur, ug, ub, ua) = unpremultiply_alpha(pr, pg, pb, pa);
+        assert!(approx_eq(ur, r));
+        assert!(approx_eq(ug, g));
+        assert!(approx_eq(ub, b));
+        assert!(approx_eq(ua, a));
+    }
+
+    #[test]
+    fn unpremultiply_transparent() {
+        let (r, _g, _b, a) = unpremultiply_alpha(0.0, 0.0, 0.0, 0.0);
+        assert!(approx_eq(r, 0.0));
+        assert!(approx_eq(a, 0.0));
+    }
+
+    // --- Transform composition ---
+
+    #[test]
+    fn transform2d_compose_identity() {
+        let t = Transform2D::new(Vec2::new(3.0, 4.0), 0.5, Vec2::new(2.0, 1.0));
+        let composed = t.compose(&Transform2D::IDENTITY);
+        let p = Vec2::new(1.0, 1.0);
+        let a = t.apply_to_point(p);
+        let b = composed.apply_to_point(p);
+        assert!(approx_eq(a.x, b.x));
+        assert!(approx_eq(a.y, b.y));
+    }
+
+    #[test]
+    fn transform2d_compose_matches_matrix() {
+        let a = Transform2D::new(Vec2::new(1.0, 2.0), 0.3, Vec2::ONE);
+        let b = Transform2D::new(Vec2::new(3.0, -1.0), 0.7, Vec2::new(2.0, 2.0));
+        let composed = a.compose(&b);
+        let p = Vec2::new(5.0, -3.0);
+        // Matrix path: b.matrix * a.matrix * point
+        let m = b.to_matrix() * a.to_matrix();
+        let via_matrix = m * Vec3::new(p.x, p.y, 1.0);
+        let via_compose = composed.apply_to_point(p);
+        assert!((via_compose.x - via_matrix.x).abs() < 1e-3);
+        assert!((via_compose.y - via_matrix.y).abs() < 1e-3);
+    }
+
+    #[test]
+    fn transform3d_compose_identity() {
+        let t = Transform3D::new(
+            Vec3::new(1.0, 2.0, 3.0),
+            Quat::from_rotation_y(0.5),
+            Vec3::ONE,
+        );
+        let composed = t.compose(&Transform3D::IDENTITY);
+        let p = Vec3::new(1.0, 1.0, 1.0);
+        let a = t.apply_to_point(p);
+        let b = composed.apply_to_point(p);
+        assert!(vec3_approx_eq(a, b));
+    }
+
+    #[test]
+    fn transform3d_compose_matches_matrix() {
+        let a = Transform3D::new(
+            Vec3::new(1.0, 0.0, 0.0),
+            Quat::from_rotation_y(0.3),
+            Vec3::ONE,
+        );
+        let b = Transform3D::new(
+            Vec3::new(0.0, 5.0, 0.0),
+            Quat::from_rotation_x(0.5),
+            Vec3::splat(2.0),
+        );
+        let composed = a.compose(&b);
+        let p = Vec3::new(1.0, -1.0, 2.0);
+        let m = b.to_matrix() * a.to_matrix();
+        let v = m * glam::Vec4::new(p.x, p.y, p.z, 1.0);
+        let via_matrix = Vec3::new(v.x, v.y, v.z);
+        let via_compose = composed.apply_to_point(p);
+        assert!(vec3_approx_eq(via_compose, via_matrix));
+    }
 }

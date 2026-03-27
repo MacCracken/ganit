@@ -405,7 +405,10 @@ pub fn backward_euler(
 
             delta = match gaussian_elimination(&mut aug) {
                 Ok(d) => d,
-                Err(_) => break,
+                Err(_) => {
+                    tracing::warn!("backward_euler: Newton iteration failed (singular Jacobian)");
+                    break;
+                }
             };
 
             let norm: f64 = delta.iter().map(|d| d * d).sum::<f64>().sqrt();
@@ -479,6 +482,7 @@ pub fn bdf2(
                 break;
             }
         } else {
+            tracing::warn!("bdf2: Newton iteration failed in bootstrap step (singular Jacobian)");
             break;
         }
     }
@@ -520,6 +524,7 @@ pub fn bdf2(
                     break;
                 }
             } else {
+                tracing::warn!("bdf2: Newton iteration failed (singular Jacobian)");
                 break;
             }
         }

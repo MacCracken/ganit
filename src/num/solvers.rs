@@ -22,12 +22,40 @@ pub fn projected_gauss_seidel(
     max_iter: usize,
     tol: f64,
 ) -> Result<Vec<f64>, HisabError> {
+    projected_gauss_seidel_sor(a, b, lo, hi, x0, max_iter, tol, 1.0)
+}
+
+/// Projected Gauss-Seidel with Successive Over-Relaxation (SOR).
+///
+/// Same as [`projected_gauss_seidel`] but with a configurable relaxation parameter `omega`.
+/// - `omega = 1.0`: standard Gauss-Seidel
+/// - `omega > 1.0`: over-relaxation (typically 1.2–1.8 for faster convergence)
+/// - `omega < 1.0`: under-relaxation (more stable for ill-conditioned systems)
+///
+/// # Errors
+///
+/// Returns [`HisabError::InvalidInput`] if dimensions are inconsistent or omega is not positive.
+#[must_use = "contains the solution or an error"]
+#[allow(clippy::needless_range_loop, clippy::too_many_arguments)]
+pub fn projected_gauss_seidel_sor(
+    a: &[Vec<f64>],
+    b: &[f64],
+    lo: &[f64],
+    hi: &[f64],
+    x0: &[f64],
+    max_iter: usize,
+    tol: f64,
+    omega: f64,
+) -> Result<Vec<f64>, HisabError> {
     let n = b.len();
     if n == 0 {
         return Err(HisabError::InvalidInput("empty system".into()));
     }
     if a.len() != n || lo.len() != n || hi.len() != n || x0.len() != n {
         return Err(HisabError::InvalidInput("dimension mismatch".into()));
+    }
+    if omega <= 0.0 {
+        return Err(HisabError::InvalidInput("omega must be positive".into()));
     }
 
     let mut x = x0.to_vec();
@@ -44,7 +72,8 @@ pub fn projected_gauss_seidel(
                     sigma -= a[i][j] * x[j];
                 }
             }
-            let new_x = (sigma / a[i][i]).clamp(lo[i], hi[i]);
+            let gs_x = sigma / a[i][i];
+            let new_x = (x[i] + omega * (gs_x - x[i])).clamp(lo[i], hi[i]);
             max_change = max_change.max((new_x - x[i]).abs());
             x[i] = new_x;
         }

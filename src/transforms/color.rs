@@ -28,7 +28,7 @@ pub fn linear_to_srgb(c: f32) -> f32 {
     }
 }
 
-/// Convert an sRGB color (Vec3, components in [0,1]) to linear.
+/// Convert an sRGB color (Vec3, components in \[0,1\]) to linear.
 #[must_use]
 #[inline]
 pub fn srgb_to_linear_vec3(color: Vec3) -> Vec3 {
@@ -144,6 +144,340 @@ pub fn oklab_to_linear(lab_l: f32, lab_a: f32, lab_b: f32) -> (f32, f32, f32) {
     let b = -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s;
 
     (r, g, b)
+}
+
+// ---------------------------------------------------------------------------
+// HSV / HSL conversions
+// ---------------------------------------------------------------------------
+
+/// Convert linear RGB to HSV (hue in radians 0..TAU, saturation 0..1, value 0..1).
+#[must_use]
+#[inline]
+pub fn linear_to_hsv(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let delta = max - min;
+
+    let v = max;
+    let s = if max > crate::EPSILON_F32 {
+        delta / max
+    } else {
+        0.0
+    };
+
+    let h = if delta < crate::EPSILON_F32 {
+        0.0
+    } else if (max - r).abs() < crate::EPSILON_F32 {
+        std::f32::consts::FRAC_PI_3 * ((g - b) / delta).rem_euclid(6.0)
+    } else if (max - g).abs() < crate::EPSILON_F32 {
+        std::f32::consts::FRAC_PI_3 * ((b - r) / delta + 2.0)
+    } else {
+        std::f32::consts::FRAC_PI_3 * ((r - g) / delta + 4.0)
+    };
+
+    (h, s, v)
+}
+
+/// Convert HSV to linear RGB (hue in radians 0..TAU).
+#[must_use]
+#[inline]
+pub fn hsv_to_linear(h: f32, s: f32, v: f32) -> (f32, f32, f32) {
+    if s < crate::EPSILON_F32 {
+        return (v, v, v);
+    }
+    let h_deg = h / std::f32::consts::FRAC_PI_3; // 0..6
+    let sector = h_deg.floor() as i32;
+    let f = h_deg - sector as f32;
+    let p = v * (1.0 - s);
+    let q = v * (1.0 - s * f);
+    let t = v * (1.0 - s * (1.0 - f));
+    match sector.rem_euclid(6) {
+        0 => (v, t, p),
+        1 => (q, v, p),
+        2 => (p, v, t),
+        3 => (p, q, v),
+        4 => (t, p, v),
+        _ => (v, p, q),
+    }
+}
+
+/// Convert linear RGB to HSL (hue in radians 0..TAU, saturation 0..1, lightness 0..1).
+#[must_use]
+#[inline]
+pub fn linear_to_hsl(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let delta = max - min;
+    let l = (max + min) * 0.5;
+
+    let s = if delta < crate::EPSILON_F32 {
+        0.0
+    } else {
+        delta / (1.0 - (2.0 * l - 1.0).abs())
+    };
+
+    let h = if delta < crate::EPSILON_F32 {
+        0.0
+    } else if (max - r).abs() < crate::EPSILON_F32 {
+        std::f32::consts::FRAC_PI_3 * ((g - b) / delta).rem_euclid(6.0)
+    } else if (max - g).abs() < crate::EPSILON_F32 {
+        std::f32::consts::FRAC_PI_3 * ((b - r) / delta + 2.0)
+    } else {
+        std::f32::consts::FRAC_PI_3 * ((r - g) / delta + 4.0)
+    };
+
+    (h, s, l)
+}
+
+/// Convert HSL to linear RGB (hue in radians 0..TAU).
+#[must_use]
+#[inline]
+pub fn hsl_to_linear(h: f32, s: f32, l: f32) -> (f32, f32, f32) {
+    if s < crate::EPSILON_F32 {
+        return (l, l, l);
+    }
+    let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
+    let h_deg = h / std::f32::consts::FRAC_PI_3; // 0..6
+    let x = c * (1.0 - (h_deg.rem_euclid(2.0) - 1.0).abs());
+    let m = l - c * 0.5;
+    let sector = h_deg.floor() as i32;
+    let (r, g, b) = match sector.rem_euclid(6) {
+        0 => (c, x, 0.0),
+        1 => (x, c, 0.0),
+        2 => (0.0, c, x),
+        3 => (0.0, x, c),
+        4 => (x, 0.0, c),
+        _ => (c, 0.0, x),
+    };
+    (r + m, g + m, b + m)
+}
+
+// ---------------------------------------------------------------------------
+// Premultiplied alpha
+// ---------------------------------------------------------------------------
+
+/// Convert a straight-alpha RGBA color to premultiplied alpha.
+///
+/// `(r, g, b)` are multiplied by `a`.
+#[must_use]
+#[inline]
+pub fn premultiply_alpha(r: f32, g: f32, b: f32, a: f32) -> (f32, f32, f32, f32) {
+    (r * a, g * a, b * a, a)
+}
+
+/// Convert a premultiplied-alpha RGBA color back to straight alpha.
+///
+/// Divides `(r, g, b)` by `a`. Returns `(0, 0, 0, 0)` for fully transparent pixels.
+#[must_use]
+#[inline]
+pub fn unpremultiply_alpha(r: f32, g: f32, b: f32, a: f32) -> (f32, f32, f32, f32) {
+    if a < crate::EPSILON_F32 {
+        (0.0, 0.0, 0.0, 0.0)
+    } else {
+        let inv_a = 1.0 / a;
+        (r * inv_a, g * inv_a, b * inv_a, a)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Porter-Duff compositing operators (premultiplied alpha)
+// ---------------------------------------------------------------------------
+
+/// Porter-Duff compositing: source over destination.
+///
+/// All inputs and outputs are in **premultiplied alpha** space.
+/// Each function takes `(src_r, src_g, src_b, src_a, dst_r, dst_g, dst_b, dst_a)`
+/// and returns `(out_r, out_g, out_b, out_a)`.
+#[must_use]
+#[inline]
+pub fn composite_src_over(
+    sr: f32, sg: f32, sb: f32, sa: f32, dr: f32, dg: f32, db: f32, da: f32,
+) -> (f32, f32, f32, f32) {
+    let inv_sa = 1.0 - sa;
+    (
+        sr + dr * inv_sa,
+        sg + dg * inv_sa,
+        sb + db * inv_sa,
+        sa + da * inv_sa,
+    )
+}
+
+/// Porter-Duff: destination over source.
+#[must_use]
+#[inline]
+pub fn composite_dst_over(
+    sr: f32, sg: f32, sb: f32, sa: f32, dr: f32, dg: f32, db: f32, da: f32,
+) -> (f32, f32, f32, f32) {
+    let inv_da = 1.0 - da;
+    (
+        dr + sr * inv_da,
+        dg + sg * inv_da,
+        db + sb * inv_da,
+        da + sa * inv_da,
+    )
+}
+
+/// Porter-Duff: source in destination.
+#[must_use]
+#[inline]
+pub fn composite_src_in(
+    sr: f32, sg: f32, sb: f32, sa: f32, _dr: f32, _dg: f32, _db: f32, da: f32,
+) -> (f32, f32, f32, f32) {
+    (sr * da, sg * da, sb * da, sa * da)
+}
+
+/// Porter-Duff: destination in source.
+#[must_use]
+#[inline]
+pub fn composite_dst_in(
+    _sr: f32, _sg: f32, _sb: f32, sa: f32, dr: f32, dg: f32, db: f32, da: f32,
+) -> (f32, f32, f32, f32) {
+    (dr * sa, dg * sa, db * sa, da * sa)
+}
+
+/// Porter-Duff: source out (source held out by destination).
+#[must_use]
+#[inline]
+pub fn composite_src_out(
+    sr: f32, sg: f32, sb: f32, sa: f32, _dr: f32, _dg: f32, _db: f32, da: f32,
+) -> (f32, f32, f32, f32) {
+    let inv_da = 1.0 - da;
+    (sr * inv_da, sg * inv_da, sb * inv_da, sa * inv_da)
+}
+
+/// Porter-Duff: destination out (destination held out by source).
+#[must_use]
+#[inline]
+pub fn composite_dst_out(
+    _sr: f32, _sg: f32, _sb: f32, sa: f32, dr: f32, dg: f32, db: f32, da: f32,
+) -> (f32, f32, f32, f32) {
+    let inv_sa = 1.0 - sa;
+    (dr * inv_sa, dg * inv_sa, db * inv_sa, da * inv_sa)
+}
+
+/// Porter-Duff: source atop destination.
+#[must_use]
+#[inline]
+pub fn composite_src_atop(
+    sr: f32, sg: f32, sb: f32, sa: f32, dr: f32, dg: f32, db: f32, da: f32,
+) -> (f32, f32, f32, f32) {
+    let inv_sa = 1.0 - sa;
+    (
+        sr * da + dr * inv_sa,
+        sg * da + dg * inv_sa,
+        sb * da + db * inv_sa,
+        da,
+    )
+}
+
+/// Porter-Duff: destination atop source.
+#[must_use]
+#[inline]
+pub fn composite_dst_atop(
+    sr: f32, sg: f32, sb: f32, sa: f32, dr: f32, dg: f32, db: f32, da: f32,
+) -> (f32, f32, f32, f32) {
+    let inv_da = 1.0 - da;
+    (
+        dr * sa + sr * inv_da,
+        dg * sa + sg * inv_da,
+        db * sa + sb * inv_da,
+        sa,
+    )
+}
+
+/// Porter-Duff: XOR (exclusive or).
+#[must_use]
+#[inline]
+pub fn composite_xor(
+    sr: f32, sg: f32, sb: f32, sa: f32, dr: f32, dg: f32, db: f32, da: f32,
+) -> (f32, f32, f32, f32) {
+    let inv_sa = 1.0 - sa;
+    let inv_da = 1.0 - da;
+    (
+        sr * inv_da + dr * inv_sa,
+        sg * inv_da + dg * inv_sa,
+        sb * inv_da + db * inv_sa,
+        sa * inv_da + da * inv_sa,
+    )
+}
+
+/// Porter-Duff: additive blend (plus / lighter).
+#[must_use]
+#[inline]
+pub fn composite_plus(
+    sr: f32, sg: f32, sb: f32, sa: f32, dr: f32, dg: f32, db: f32, da: f32,
+) -> (f32, f32, f32, f32) {
+    (
+        (sr + dr).min(1.0),
+        (sg + dg).min(1.0),
+        (sb + db).min(1.0),
+        (sa + da).min(1.0),
+    )
+}
+
+// ---------------------------------------------------------------------------
+// HDR tone mapping
+// ---------------------------------------------------------------------------
+
+/// Reinhard tone mapping operator (per-channel).
+///
+/// Maps HDR luminance to \[0, 1\] via `L / (1 + L)`.
+#[must_use]
+#[inline]
+pub fn tonemap_reinhard(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
+    (r / (1.0 + r), g / (1.0 + g), b / (1.0 + b))
+}
+
+/// Extended Reinhard with adjustable white point.
+///
+/// `white` is the luminance value that maps to 1.0 (controls highlight rolloff).
+#[must_use]
+#[inline]
+pub fn tonemap_reinhard_extended(r: f32, g: f32, b: f32, white: f32) -> (f32, f32, f32) {
+    let w2 = white * white;
+    let map = |c: f32| c * (1.0 + c / w2) / (1.0 + c);
+    (map(r), map(g), map(b))
+}
+
+/// ACES filmic tone mapping (Narkowicz approximation).
+///
+/// Industry-standard cinematic tone curve from the Academy Color Encoding System.
+#[must_use]
+#[inline]
+pub fn tonemap_aces(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
+    // Narkowicz 2015, "ACES Filmic Tone Mapping Curve"
+    let map = |x: f32| {
+        let a = 2.51;
+        let b = 0.03;
+        let c = 2.43;
+        let d = 0.59;
+        let e = 0.14;
+        ((x * (a * x + b)) / (x * (c * x + d) + e)).clamp(0.0, 1.0)
+    };
+    (map(r), map(g), map(b))
+}
+
+// ---------------------------------------------------------------------------
+// Depth buffer utilities
+// ---------------------------------------------------------------------------
+
+/// Linearize a depth buffer value from NDC to view-space depth.
+///
+/// For standard (non-reverse-Z) perspective projection where near maps to 0
+/// and far maps to 1 in NDC.
+#[must_use]
+#[inline]
+pub fn linearize_depth(ndc_depth: f32, near: f32, far: f32) -> f32 {
+    near * far / (far - ndc_depth * (far - near))
+}
+
+/// Linearize a reverse-Z depth buffer value to view-space depth.
+///
+/// For reverse-Z projection where near maps to 1 and far maps to 0.
+#[must_use]
+#[inline]
+pub fn linearize_depth_reverse_z(ndc_depth: f32, near: f32) -> f32 {
+    near / ndc_depth
 }
 
 // ---------------------------------------------------------------------------

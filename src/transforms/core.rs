@@ -79,6 +79,25 @@ impl Transform2D {
     pub fn inverse_matrix(&self) -> Mat3 {
         self.to_matrix().inverse()
     }
+
+    /// Compose two 2D transforms: apply `self` then `other` (i.e., `other * self`).
+    ///
+    /// The resulting transform has the combined effect of both. Position, rotation,
+    /// and scale are composed directly (rotation is summed, scale is multiplied).
+    #[must_use]
+    #[inline]
+    pub fn compose(&self, other: &Transform2D) -> Transform2D {
+        let (sin, cos) = other.rotation.sin_cos();
+        let rotated_pos = Vec2::new(
+            cos * self.position.x * other.scale.x - sin * self.position.y * other.scale.y,
+            sin * self.position.x * other.scale.x + cos * self.position.y * other.scale.y,
+        );
+        Transform2D {
+            position: rotated_pos + other.position,
+            rotation: self.rotation + other.rotation,
+            scale: self.scale * other.scale,
+        }
+    }
 }
 
 impl Default for Transform2D {
@@ -136,6 +155,20 @@ impl Transform3D {
     #[inline]
     pub fn inverse_matrix(&self) -> Mat4 {
         self.to_matrix().inverse()
+    }
+
+    /// Compose two 3D transforms: apply `self` then `other` (i.e., `other * self`).
+    ///
+    /// Position is transformed by the outer transform's rotation and scale,
+    /// rotations are multiplied, scales are multiplied.
+    #[must_use]
+    #[inline]
+    pub fn compose(&self, other: &Transform3D) -> Transform3D {
+        Transform3D {
+            position: other.rotation * (other.scale * self.position) + other.position,
+            rotation: other.rotation * self.rotation,
+            scale: other.scale * self.scale,
+        }
     }
 }
 
@@ -217,6 +250,53 @@ pub fn lerp_f32(a: f32, b: f32, t: f32) -> f32 {
 #[inline]
 pub fn lerp_vec3(a: Vec3, b: Vec3, t: f32) -> Vec3 {
     a + (b - a) * t
+}
+
+/// Inverse linear interpolation: given a value between `a` and `b`, return the parameter `t`.
+///
+/// `inverse_lerp(a, b, lerp(a, b, t)) ≈ t` for any `t`.
+/// Returns 0.0 if `a == b` (degenerate range).
+#[must_use]
+#[inline]
+pub fn inverse_lerp(a: f32, b: f32, value: f32) -> f32 {
+    let denom = b - a;
+    if denom.abs() < crate::EPSILON_F32 {
+        0.0
+    } else {
+        (value - a) / denom
+    }
+}
+
+/// Remap a value from one range to another.
+///
+/// Equivalent to `lerp(out_lo, out_hi, inverse_lerp(in_lo, in_hi, value))`.
+/// Returns `out_lo` if the input range is degenerate.
+#[must_use]
+#[inline]
+pub fn remap(value: f32, in_lo: f32, in_hi: f32, out_lo: f32, out_hi: f32) -> f32 {
+    let t = inverse_lerp(in_lo, in_hi, value);
+    lerp_f32(out_lo, out_hi, t)
+}
+
+/// Create a reverse-Z infinite far-plane perspective projection matrix.
+///
+/// Maps near plane to depth=1 and infinity to depth=0, providing better
+/// depth precision for distant objects. This is the modern standard for
+/// GPU rendering (recommended by all GPU vendors since ~2015).
+///
+/// `fov_y_radians`: vertical field of view in radians.
+/// `aspect`: width / height.
+/// `near`: near clipping plane (must be positive).
+#[must_use]
+#[inline]
+pub fn projection_perspective_reverse_z(fov_y_radians: f32, aspect: f32, near: f32) -> Mat4 {
+    let f = 1.0 / (fov_y_radians * 0.5).tan();
+    Mat4::from_cols(
+        Vec4::new(f / aspect, 0.0, 0.0, 0.0),
+        Vec4::new(0.0, f, 0.0, 0.0),
+        Vec4::new(0.0, 0.0, 0.0, -1.0),
+        Vec4::new(0.0, 0.0, near, 0.0),
+    )
 }
 
 // ---------------------------------------------------------------------------

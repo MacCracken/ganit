@@ -211,7 +211,7 @@ fn gjk_core(
                     return GjkResult::Intersection(simplex, simplex_len);
                 }
             }
-            _ => unreachable!(),
+            _ => return GjkResult::NoIntersection,
         }
     }
 
@@ -259,6 +259,13 @@ pub fn epa_penetration(
     // Pre-allocate for typical EPA expansion.
     let mut polytope: Vec<glam::Vec2> = Vec::with_capacity(32);
     polytope.extend_from_slice(simplex);
+
+    // Ensure CCW winding — EPA normals assume CCW polytope order.
+    let signed_area = (polytope[1].x - polytope[0].x) * (polytope[2].y - polytope[0].y)
+        - (polytope[2].x - polytope[0].x) * (polytope[1].y - polytope[0].y);
+    if signed_area < 0.0 {
+        polytope.swap(0, 1);
+    }
 
     for _ in 0..EPA_MAX_ITERATIONS {
         // Find the closest edge to the origin
@@ -432,20 +439,30 @@ pub struct ContactConstraint {
     pub inv_mass_b: f32,
 }
 
+/// Result of sequential impulse solving: normal and friction impulses per contact.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImpulseResult {
+    /// Normal impulse magnitudes (one per constraint, always >= 0).
+    pub normal: Vec<f32>,
+    /// Tangent friction impulse vectors (one per constraint).
+    pub friction: Vec<Vec3>,
+}
+
 /// Solve contact constraints using sequential impulse iteration.
 ///
 /// Given a set of contact constraints and relative velocities, computes
-/// impulses that resolve penetration and apply friction.
+/// impulses that resolve penetration and apply Coulomb friction.
 ///
-/// Returns a vector of impulse magnitudes (one per constraint).
+/// Returns [`ImpulseResult`] with normal and friction impulses per constraint.
 #[must_use]
 pub fn sequential_impulse(
     constraints: &[ContactConstraint],
     rel_velocities: &[Vec3],
     iterations: usize,
-) -> Vec<f32> {
+) -> ImpulseResult {
     let n = constraints.len();
-    let mut impulses = vec![0.0f32; n];
+    let mut normal_impulses = vec![0.0f32; n];
+    let mut friction_impulses = vec![Vec3::ZERO; n];
 
     for _ in 0..iterations {
         for i in 0..n {
@@ -456,19 +473,37 @@ pub fn sequential_impulse(
             }
 
             let v_rel = if i < rel_velocities.len() {
-                rel_velocities[i].dot(c.normal)
+                rel_velocities[i]
             } else {
-                0.0
+                Vec3::ZERO
             };
 
             // Normal impulse
-            let j_n = -(1.0 + c.restitution) * v_rel / inv_mass;
-            let new_impulse = (impulses[i] + j_n).max(0.0); // Clamp: no pull
-            impulses[i] = new_impulse;
+            let v_n = v_rel.dot(c.normal);
+            let j_n = -(1.0 + c.restitution) * v_n / inv_mass;
+            let new_impulse = (normal_impulses[i] + j_n).max(0.0);
+            normal_impulses[i] = new_impulse;
+
+            // Tangent friction impulse (Coulomb cone)
+            if c.friction > crate::EPSILON_F32 {
+                let v_tangent = v_rel - c.normal * v_n;
+                let tangent_speed = v_tangent.length();
+                if tangent_speed > crate::EPSILON_F32 {
+                    let tangent_dir = v_tangent / tangent_speed;
+                    let j_t = -tangent_speed / inv_mass;
+                    // Clamp to friction cone: |j_t| <= mu * j_n
+                    let max_friction = c.friction * new_impulse;
+                    let clamped = j_t.clamp(-max_friction, max_friction);
+                    friction_impulses[i] = tangent_dir * clamped;
+                }
+            }
         }
     }
 
-    impulses
+    ImpulseResult {
+        normal: normal_impulses,
+        friction: friction_impulses,
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -22,7 +22,7 @@ pub struct OptResult {
 /// Uses steepest descent with a fixed learning rate.
 ///
 /// - `f`: objective function.
-/// - `grad_f`: gradient function ∇f(x) → Vec<f64>.
+/// - `grad_f`: gradient function ∇f(x) → `Vec<f64>`.
 /// - `x0`: initial guess.
 /// - `learning_rate`: step size α.
 /// - `tol`: convergence tolerance on gradient norm.

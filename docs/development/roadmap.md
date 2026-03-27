@@ -21,6 +21,8 @@ Hisab owns **typed mathematical operations** — the programmatic math that engi
 | **joshua** | ODE solvers (RK4, DOPRI45), simulation math, deterministic replay |
 | **aethersafha** | Projection matrices, transform composition/interpolation for compositor |
 | **abaco** | Symbolic algebra (Expr), interval arithmetic for verified evaluation |
+| **svara** | Complex, FFT, easing functions (vocal synthesis) |
+| **prani** | Easing functions (creature vocal synthesis, via svara) |
 
 ## Versioning
 
@@ -66,7 +68,10 @@ Post-1.0: standard semver.
 
 ---
 
-## 1.2.0 — Remaining gaps + polish
+## 1.2.0 — Consumer essentials + remaining gaps
+
+### Consumer essentials (remaining from P(-1) audit)
+- [ ] Porter-Duff compositing operators — src-over, dst-over, src-in, etc. (transforms, aethersafha)
 
 ### Deferred from gap analysis
 - [ ] MPR / XenoCollide collision alternative (impetus)
@@ -89,6 +94,26 @@ Post-1.0: standard semver.
 ### Quality
 - [ ] Complete doctests on all public functions
 - [ ] GPU compute kernels via wgpu (shared with ranga)
+
+## 1.3.0 — Structural depth
+
+### Physics solver completeness
+- [ ] Constraint warm-starting for sequential impulse — cache impulses across frames (geo, impetus)
+- [ ] Island detection / contact graph connectivity — union-find for sleeping + parallel solving (geo, impetus)
+
+### Numerical robustness
+- [ ] Apply compensated summation to ODE solvers and integration routines internally
+- [ ] Flat `Vec<f64>` matrix layout option for dense linear algebra (cache-friendly alternative to `Vec<Vec<f64>>`)
+
+### Geometry extensions
+- [ ] Frustum-OBB culling test (geo, kiran)
+- [ ] Point-in-convex-polygon 2D (geo, kiran)
+- [ ] AABB-from-transformed-AABB fast path (geo, kiran)
+- [ ] Triangle mesh adjacency / half-edge structure (geo, kiran)
+
+### Compositor / rendering
+- [ ] Gamma-aware interpolation — decode→lerp→encode combined (transforms, aethersafha)
+- [ ] Exposure / EV ↔ luminance conversion for HDR pipelines (transforms, kiran, aethersafha)
 
 ## Watch List
 
