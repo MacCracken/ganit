@@ -172,6 +172,56 @@ impl Aabb {
             max: self.max.max(other.max),
         }
     }
+
+    /// Compute the AABB of this AABB after applying an affine transform.
+    ///
+    /// Uses the Arvo/Koppelman method, which avoids transforming all 8 corners.
+    /// For each output axis `i`, the contribution of input column `j` is:
+    /// `min[i] += min(m[i][j]*old_min[j], m[i][j]*old_max[j])`.
+    ///
+    /// Only the upper-left 3×3 rotation/scale portion of `transform` and the
+    /// translation column are used (the homogeneous row is ignored, so this is
+    /// correct for affine — but not projective — transforms).
+    #[must_use]
+    #[inline]
+    pub fn transformed(&self, transform: glam::Mat4) -> Aabb {
+        // Extract the 3×3 linear part and the translation.
+        let col = [
+            transform.x_axis.truncate(), // column 0
+            transform.y_axis.truncate(), // column 1
+            transform.z_axis.truncate(), // column 2
+        ];
+        let translation = transform.w_axis.truncate();
+
+        let old_min = self.min.to_array();
+        let old_max = self.max.to_array();
+
+        let mut new_min = translation;
+        let mut new_max = translation;
+
+        // For each output axis i, accumulate contributions from each input axis j.
+        let new_min_arr = new_min.as_mut();
+        let new_max_arr = new_max.as_mut();
+        for j in 0..3 {
+            let col_arr = col[j].to_array();
+            for i in 0..3 {
+                let lo = col_arr[i] * old_min[j];
+                let hi = col_arr[i] * old_max[j];
+                if lo < hi {
+                    new_min_arr[i] += lo;
+                    new_max_arr[i] += hi;
+                } else {
+                    new_min_arr[i] += hi;
+                    new_max_arr[i] += lo;
+                }
+            }
+        }
+
+        Aabb {
+            min: new_min,
+            max: new_max,
+        }
+    }
 }
 
 impl fmt::Display for Aabb {
@@ -573,3 +623,86 @@ pub fn ray_capsule(ray: &Ray, capsule: &Capsule) -> Option<f32> {
 }
 
 // ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use glam::{Mat4, Vec3};
+
+    const EPS: f32 = 1e-5;
+
+    fn approx_vec3(a: Vec3, b: Vec3) -> bool {
+        (a - b).length() < EPS
+    }
+
+    // --- Aabb::transformed tests --------------------------------------------
+
+    #[test]
+    fn transformed_identity_unchanged() {
+        let aabb = Aabb::new(Vec3::new(-1.0, -2.0, -3.0), Vec3::new(1.0, 2.0, 3.0));
+        let result = aabb.transformed(Mat4::IDENTITY);
+        assert!(approx_vec3(result.min, aabb.min));
+        assert!(approx_vec3(result.max, aabb.max));
+    }
+
+    #[test]
+    fn transformed_translation_only() {
+        let aabb = Aabb::new(Vec3::new(-1.0, -1.0, -1.0), Vec3::new(1.0, 1.0, 1.0));
+        let t = Mat4::from_translation(Vec3::new(3.0, 5.0, -2.0));
+        let result = aabb.transformed(t);
+        assert!(approx_vec3(result.min, Vec3::new(2.0, 4.0, -3.0)));
+        assert!(approx_vec3(result.max, Vec3::new(4.0, 6.0, -1.0)));
+    }
+
+    #[test]
+    fn transformed_uniform_scale() {
+        let aabb = Aabb::new(Vec3::new(-1.0, -1.0, -1.0), Vec3::new(1.0, 1.0, 1.0));
+        let s = Mat4::from_scale(Vec3::splat(2.0));
+        let result = aabb.transformed(s);
+        assert!(approx_vec3(result.min, Vec3::splat(-2.0)));
+        assert!(approx_vec3(result.max, Vec3::splat(2.0)));
+    }
+
+    #[test]
+    fn transformed_90_deg_rotation() {
+        // Rotate 90° around Z: (x,y,z) → (-y, x, z)
+        // An AABB [0,1]×[0,1]×[0,1] should become [-1,0]×[0,1]×[0,1]
+        let aabb = Aabb::new(Vec3::new(0.0, 0.0, 0.0), Vec3::new(1.0, 1.0, 1.0));
+        let r = Mat4::from_rotation_z(std::f32::consts::FRAC_PI_2);
+        let result = aabb.transformed(r);
+        // new_min.x = -1, new_max.x = 0 (within rounding)
+        assert!(
+            (result.min.x - (-1.0)).abs() < 1e-5,
+            "min.x = {}",
+            result.min.x
+        );
+        assert!(
+            (result.max.x - 0.0).abs() < 1e-5,
+            "max.x = {}",
+            result.max.x
+        );
+        assert!(
+            (result.min.y - 0.0).abs() < 1e-5,
+            "min.y = {}",
+            result.min.y
+        );
+        assert!(
+            (result.max.y - 1.0).abs() < 1e-5,
+            "max.y = {}",
+            result.max.y
+        );
+    }
+
+    #[test]
+    fn transformed_result_min_le_max() {
+        // Regardless of the transform, min should never exceed max.
+        let aabb = Aabb::new(Vec3::new(-2.0, -3.0, -1.0), Vec3::new(2.0, 3.0, 1.0));
+        let m = Mat4::from_cols_array(&[
+            -1.0, 0.5, 0.0, 0.0, 0.3, 2.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 2.0, 3.0, 1.0,
+        ]);
+        let result = aabb.transformed(m);
+        assert!(result.min.x <= result.max.x);
+        assert!(result.min.y <= result.max.y);
+        assert!(result.min.z <= result.max.z);
+    }
+}

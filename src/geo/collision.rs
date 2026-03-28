@@ -454,15 +454,60 @@ pub struct ImpulseResult {
 /// impulses that resolve penetration and apply Coulomb friction.
 ///
 /// Returns [`ImpulseResult`] with normal and friction impulses per constraint.
+///
+/// This is equivalent to calling [`sequential_impulse_warm`] with
+/// `warm_start: None`.
 #[must_use]
 pub fn sequential_impulse(
     constraints: &[ContactConstraint],
     rel_velocities: &[Vec3],
     iterations: usize,
 ) -> ImpulseResult {
+    sequential_impulse_warm(constraints, rel_velocities, iterations, None, 0.0)
+}
+
+/// Solve contact constraints with warm-starting from previous frame's impulses.
+///
+/// `warm_start` is the previous frame's [`ImpulseResult`]. If provided, initial
+/// impulses are seeded from it (scaled by `warm_factor` ∈ \[0,1\] to damp).
+/// This dramatically reduces iteration count for stable stacking.
+///
+/// A `warm_factor` of `0.8`–`0.95` is typical for physics at 60 Hz. Pass
+/// `warm_start: None` (or use [`sequential_impulse`]) to start from rest.
+#[must_use]
+pub fn sequential_impulse_warm(
+    constraints: &[ContactConstraint],
+    rel_velocities: &[Vec3],
+    iterations: usize,
+    warm_start: Option<&ImpulseResult>,
+    warm_factor: f32,
+) -> ImpulseResult {
     let n = constraints.len();
-    let mut normal_impulses = vec![0.0f32; n];
-    let mut friction_impulses = vec![Vec3::ZERO; n];
+
+    // Seed initial impulses from the previous frame, scaled by warm_factor.
+    let warm_factor = warm_factor.clamp(0.0, 1.0);
+    let mut normal_impulses: Vec<f32> = if let Some(ws) = warm_start {
+        ws.normal
+            .iter()
+            .take(n)
+            .map(|&j| (j * warm_factor).max(0.0))
+            .chain(std::iter::repeat(0.0))
+            .take(n)
+            .collect()
+    } else {
+        vec![0.0f32; n]
+    };
+    let mut friction_impulses: Vec<Vec3> = if let Some(ws) = warm_start {
+        ws.friction
+            .iter()
+            .take(n)
+            .map(|&f| f * warm_factor)
+            .chain(std::iter::repeat(Vec3::ZERO))
+            .take(n)
+            .collect()
+    } else {
+        vec![Vec3::ZERO; n]
+    };
 
     for _ in 0..iterations {
         for i in 0..n {
@@ -1101,4 +1146,115 @@ pub fn mpr_penetration(a: &dyn ConvexSupport3D, b: &dyn ConvexSupport3D) -> Opti
     let depth = n.dot(portal[0]).abs();
 
     Some(Penetration3D { normal: n, depth })
+}
+
+// ---------------------------------------------------------------------------
+// Point-in-convex-polygon (2D)
+// ---------------------------------------------------------------------------
+
+/// Test whether a 2D point lies inside (or on the boundary of) a convex polygon.
+///
+/// Uses cross-product winding: for each directed edge of the polygon, the point
+/// must lie on the same side (consistent sign of the 2D cross product). The
+/// polygon vertices must be in counter-clockwise order (as produced by
+/// [`convex_hull_2d`]).
+///
+/// Returns `false` for polygons with fewer than 3 vertices.
+#[must_use]
+#[inline]
+pub fn point_in_convex_polygon(point: glam::Vec2, polygon: &ConvexPolygon) -> bool {
+    let verts = &polygon.vertices;
+    let n = verts.len();
+    if n < 3 {
+        return false;
+    }
+    // For a CCW polygon, the point is inside iff the 2D cross product of each
+    // edge vector with the vector from the edge start to the point is >= 0.
+    for i in 0..n {
+        let a = verts[i];
+        let b = verts[(i + 1) % n];
+        let edge = b - a;
+        let to_point = point - a;
+        // 2D cross product: edge.x * to_point.y - edge.y * to_point.x
+        let cross = edge.x * to_point.y - edge.y * to_point.x;
+        if cross < 0.0 {
+            return false;
+        }
+    }
+    true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use glam::Vec2;
+
+    // --- point_in_convex_polygon tests --------------------------------------
+
+    fn square_polygon() -> ConvexPolygon {
+        // Unit square CCW: (0,0), (1,0), (1,1), (0,1)
+        ConvexPolygon::new(vec![
+            Vec2::new(0.0, 0.0),
+            Vec2::new(1.0, 0.0),
+            Vec2::new(1.0, 1.0),
+            Vec2::new(0.0, 1.0),
+        ])
+        .unwrap()
+    }
+
+    fn triangle_polygon() -> ConvexPolygon {
+        // CCW triangle
+        ConvexPolygon::new(vec![
+            Vec2::new(0.0, 0.0),
+            Vec2::new(2.0, 0.0),
+            Vec2::new(1.0, 2.0),
+        ])
+        .unwrap()
+    }
+
+    #[test]
+    fn point_inside_square() {
+        let poly = square_polygon();
+        assert!(point_in_convex_polygon(Vec2::new(0.5, 0.5), &poly));
+    }
+
+    #[test]
+    fn point_outside_square() {
+        let poly = square_polygon();
+        assert!(!point_in_convex_polygon(Vec2::new(1.5, 0.5), &poly));
+        assert!(!point_in_convex_polygon(Vec2::new(-0.1, 0.5), &poly));
+    }
+
+    #[test]
+    fn point_on_edge_square() {
+        let poly = square_polygon();
+        // On the bottom edge
+        assert!(point_in_convex_polygon(Vec2::new(0.5, 0.0), &poly));
+    }
+
+    #[test]
+    fn point_inside_triangle() {
+        let poly = triangle_polygon();
+        assert!(point_in_convex_polygon(Vec2::new(1.0, 0.5), &poly));
+    }
+
+    #[test]
+    fn point_outside_triangle() {
+        let poly = triangle_polygon();
+        assert!(!point_in_convex_polygon(Vec2::new(0.0, 1.5), &poly));
+        assert!(!point_in_convex_polygon(Vec2::new(3.0, 0.0), &poly));
+    }
+
+    #[test]
+    fn point_at_vertex_triangle() {
+        let poly = triangle_polygon();
+        assert!(point_in_convex_polygon(Vec2::new(0.0, 0.0), &poly));
+    }
+
+    #[test]
+    fn degenerate_polygon_returns_false() {
+        // Only 2 vertices — not a polygon
+        let poly = ConvexPolygon::new(vec![Vec2::new(0.0, 0.0), Vec2::new(1.0, 0.0)]).unwrap();
+        assert!(!point_in_convex_polygon(Vec2::new(0.5, 0.0), &poly));
+    }
 }

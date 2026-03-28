@@ -906,4 +906,107 @@ mod tests {
         let d = linearize_depth_reverse_z(1.0, 0.1);
         assert!((d - 0.1).abs() < 0.001);
     }
+
+    // --- lerp_srgb ---
+
+    #[test]
+    fn lerp_srgb_endpoints() {
+        let black = (0.0f32, 0.0, 0.0);
+        let white = (1.0f32, 1.0, 1.0);
+        let at_zero = lerp_srgb(black, white, 0.0);
+        let at_one = lerp_srgb(black, white, 1.0);
+        assert!((at_zero.0 - 0.0).abs() < 1e-6);
+        assert!((at_one.0 - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn lerp_srgb_midpoint_brighter_than_naive() {
+        // Gamma-correct midpoint of black/white should be > 0.5 in sRGB
+        let mid = lerp_srgb((0.0, 0.0, 0.0), (1.0, 1.0, 1.0), 0.5);
+        assert!(
+            mid.0 > 0.5,
+            "gamma-aware mid ({}) should exceed naive 0.5",
+            mid.0
+        );
+        assert!((mid.0 - 0.735).abs() < 0.01);
+    }
+
+    #[test]
+    fn lerp_srgb_symmetry() {
+        let a = (0.2f32, 0.4, 0.8);
+        let b = (0.8f32, 0.2, 0.3);
+        let ab = lerp_srgb(a, b, 0.3);
+        let ba = lerp_srgb(b, a, 0.7);
+        assert!((ab.0 - ba.0).abs() < 1e-5);
+        assert!((ab.1 - ba.1).abs() < 1e-5);
+        assert!((ab.2 - ba.2).abs() < 1e-5);
+    }
+
+    #[test]
+    fn lerp_srgb_vec3_matches_tuple() {
+        use glam::Vec3;
+        let a = (0.3f32, 0.5, 0.7);
+        let b = (0.7f32, 0.3, 0.1);
+        let t = 0.4;
+        let tuple_result = lerp_srgb(a, b, t);
+        let vec_result = lerp_srgb_vec3(Vec3::new(a.0, a.1, a.2), Vec3::new(b.0, b.1, b.2), t);
+        assert!((tuple_result.0 - vec_result.x).abs() < 1e-6);
+        assert!((tuple_result.1 - vec_result.y).abs() < 1e-6);
+        assert!((tuple_result.2 - vec_result.z).abs() < 1e-6);
+    }
+
+    #[test]
+    fn lerp_srgb_same_color() {
+        let color = (0.5f32, 0.3, 0.8);
+        let result = lerp_srgb(color, color, 0.5);
+        assert!((result.0 - color.0).abs() < 1e-5);
+        assert!((result.1 - color.1).abs() < 1e-5);
+        assert!((result.2 - color.2).abs() < 1e-5);
+    }
+
+    // --- ev100_to_luminance / luminance_to_ev100 / ev100_to_exposure ---
+
+    #[test]
+    fn ev100_luminance_known_value() {
+        use std::f32::consts::PI;
+        // EV=3: L = 2^0 * 12.5 / π = 12.5 / π
+        let lum = ev100_to_luminance(3.0);
+        assert!((lum - 12.5 / PI).abs() < 0.001);
+    }
+
+    #[test]
+    fn ev100_luminance_roundtrip() {
+        for ev in [-2.0f32, 0.0, 3.0, 6.0, 12.0] {
+            let lum = ev100_to_luminance(ev);
+            let ev_back = luminance_to_ev100(lum);
+            assert!(
+                (ev_back - ev).abs() < 1e-4,
+                "roundtrip failed for EV={ev}: got {ev_back}"
+            );
+        }
+    }
+
+    #[test]
+    fn ev100_exposure_monotone_decreasing() {
+        let e0 = ev100_to_exposure(0.0);
+        let e3 = ev100_to_exposure(3.0);
+        let e6 = ev100_to_exposure(6.0);
+        assert!(e0 > e3, "exposure should decrease with higher EV");
+        assert!(e3 > e6, "exposure should decrease with higher EV");
+    }
+
+    #[test]
+    fn ev100_exposure_formula() {
+        // ev=0: 1 / (1.2 * 1.0) = 1/1.2
+        let e = ev100_to_exposure(0.0);
+        assert!((e - 1.0 / 1.2).abs() < 1e-6);
+    }
+
+    #[test]
+    fn ev100_luminance_doubling() {
+        // Each +1 EV doubles the luminance
+        let l0 = ev100_to_luminance(4.0);
+        let l1 = ev100_to_luminance(5.0);
+        assert!((l1 / l0 - 2.0).abs() < 1e-4);
+    }
 }

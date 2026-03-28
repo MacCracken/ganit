@@ -288,6 +288,32 @@ impl Frustum {
         }
         true
     }
+
+    /// Conservative check whether an OBB intersects the frustum.
+    ///
+    /// Uses the separating axis test against each frustum plane. For each plane,
+    /// computes the OBB's projection radius (the extent of the OBB along the
+    /// plane normal) and checks whether the OBB center is within that radius of
+    /// the plane.
+    ///
+    /// Returns `false` only if the OBB is fully outside at least one plane.
+    #[must_use]
+    #[inline]
+    pub fn contains_obb(&self, obb: &Obb) -> bool {
+        let axes = obb.axes();
+        let he = obb.half_extents.to_array();
+        for plane in &self.planes {
+            let signed_dist = plane.signed_distance(obb.center);
+            // Projection radius: sum of |half_extent_i * dot(axis_i, plane_normal)|
+            let radius = he[0] * axes[0].dot(plane.normal).abs()
+                + he[1] * axes[1].dot(plane.normal).abs()
+                + he[2] * axes[2].dot(plane.normal).abs();
+            if signed_dist + radius < 0.0 {
+                return false;
+            }
+        }
+        true
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -469,3 +495,80 @@ pub fn fresnel_exact(cos_i: f32, n1: f32, n2: f32) -> f32 {
 }
 
 // ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use glam::{Mat4, Quat, Vec3};
+
+    fn ortho_frustum() -> Frustum {
+        // Orthographic projection covering ±10 on X/Y and depth 0..20 (NDC Z in [0,1]).
+        let proj = Mat4::orthographic_rh(-10.0, 10.0, -10.0, 10.0, 0.1, 20.0);
+        Frustum::from_view_projection(proj)
+    }
+
+    fn unit_obb_at(center: Vec3) -> Obb {
+        Obb::new(center, Vec3::splat(1.0), Quat::IDENTITY)
+    }
+
+    // --- Frustum-OBB tests ---------------------------------------------------
+
+    #[test]
+    fn frustum_obb_center_inside() {
+        let frustum = ortho_frustum();
+        let obb = unit_obb_at(Vec3::new(0.0, 0.0, -10.0));
+        assert!(frustum.contains_obb(&obb), "OBB at origin should be inside");
+    }
+
+    #[test]
+    fn frustum_obb_fully_outside_x() {
+        let frustum = ortho_frustum();
+        // Center at x=20, half_extent=1 → fully outside the x=10 boundary.
+        let obb = unit_obb_at(Vec3::new(20.0, 0.0, -10.0));
+        assert!(
+            !frustum.contains_obb(&obb),
+            "OBB far outside on X should be culled"
+        );
+    }
+
+    #[test]
+    fn frustum_obb_straddling_plane_not_culled() {
+        let frustum = ortho_frustum();
+        // Center at x=9.5, half_extent=2 → projection radius along X is 2, so
+        // the OBB extends from 7.5 to 11.5 — it straddles the x=10 plane.
+        let obb = Obb::new(Vec3::new(9.5, 0.0, -10.0), Vec3::splat(2.0), Quat::IDENTITY);
+        assert!(
+            frustum.contains_obb(&obb),
+            "OBB straddling plane must not be culled"
+        );
+    }
+
+    #[test]
+    fn frustum_obb_rotated_projection_radius() {
+        let frustum = ortho_frustum();
+        // 45° rotation around Z increases the projection of a (2,2,1) box onto X/Y.
+        // With half-extents (2,2,1) rotated 45°: radius along X = 2*cos45 + 2*sin45 ≈ 2.83.
+        // Center at (8, 0, -10): signed_dist = 10 - 8 = 2; 2.83 > 2 so it overlaps.
+        let rot = Quat::from_rotation_z(std::f32::consts::FRAC_PI_4);
+        let obb = Obb::new(Vec3::new(8.0, 0.0, -10.0), Vec3::new(2.0, 2.0, 1.0), rot);
+        assert!(
+            frustum.contains_obb(&obb),
+            "Rotated OBB overlapping boundary should not be culled"
+        );
+    }
+
+    #[test]
+    fn frustum_obb_just_outside() {
+        let frustum = ortho_frustum();
+        // Center at x=11.5, half_extent=1 → even with radius=1, min edge is at 10.5 > 10.
+        let obb = Obb::new(
+            Vec3::new(11.5, 0.0, -10.0),
+            Vec3::splat(1.0),
+            Quat::IDENTITY,
+        );
+        assert!(
+            !frustum.contains_obb(&obb),
+            "OBB just outside boundary should be culled"
+        );
+    }
+}

@@ -5,6 +5,7 @@
 //! Cooley-Tukey FFT/IFFT, DST-I/IDST-I, DCT-II/IDCT, and Runge-Kutta (RK4) ODE integration.
 
 mod complex;
+mod dense_matrix;
 mod eigen;
 mod fft;
 mod inertia;
@@ -21,6 +22,7 @@ mod summation;
 mod svd;
 
 pub use complex::Complex;
+pub use dense_matrix::*;
 pub use eigen::*;
 pub use fft::*;
 pub use inertia::*;

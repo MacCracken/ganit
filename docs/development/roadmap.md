@@ -78,29 +78,29 @@ Post-1.0: standard semver.
 
 ---
 
-## 1.4.0 — Structural depth + quality
+## 1.4.0 — Structural depth + quality (shipped in 1.3.0)
 
 ### Physics solver completeness
-- [ ] Constraint warm-starting for sequential impulse — cache impulses across frames (geo, impetus)
-- [ ] Island detection / contact graph connectivity — union-find for sleeping + parallel solving (geo, impetus)
+- [x] Constraint warm-starting for sequential impulse — cache impulses across frames (geo, impetus)
+- [x] Island detection / contact graph connectivity — union-find for sleeping + parallel solving (geo, impetus)
 
 ### Numerical robustness
-- [ ] Apply compensated summation to ODE solvers and integration routines internally
-- [ ] Flat `Vec<f64>` matrix layout option for dense linear algebra (cache-friendly alternative to `Vec<Vec<f64>>`)
+- [x] Apply compensated summation to ODE solvers and integration routines internally
+- [x] Flat `Vec<f64>` matrix layout option for dense linear algebra (cache-friendly alternative to `Vec<Vec<f64>>`)
 
 ### Geometry extensions
-- [ ] Frustum-OBB culling test (geo, kiran)
-- [ ] Point-in-convex-polygon 2D (geo, kiran)
-- [ ] AABB-from-transformed-AABB fast path (geo, kiran)
-- [ ] Triangle mesh adjacency / half-edge structure (geo, kiran)
+- [x] Frustum-OBB culling test (geo, kiran)
+- [x] Point-in-convex-polygon 2D (geo, kiran)
+- [x] AABB-from-transformed-AABB fast path (geo, kiran)
+- [x] Triangle mesh adjacency / half-edge structure (geo, kiran)
 
 ### Compositor / rendering
-- [ ] Gamma-aware interpolation — decode→lerp→encode combined (transforms, aethersafha)
-- [ ] Exposure / EV ↔ luminance conversion for HDR pipelines (transforms, kiran, aethersafha)
+- [x] Gamma-aware interpolation — decode→lerp→encode combined (transforms, aethersafha)
+- [x] Exposure / EV ↔ luminance conversion for HDR pipelines (transforms, kiran, aethersafha)
 
 ### Quality
 - [ ] Complete doctests on all public functions
-- [ ] GPU compute kernels via wgpu (shared with ranga)
+- [ ] GPU compute kernels via soorat (feature-gated compute pipeline)
 
 ## Watch List
 

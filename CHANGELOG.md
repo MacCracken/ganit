@@ -36,8 +36,45 @@
 - `SolveOptions` — configurable initial guess, bracket, tolerance, max iterations
 - `eval_verified()` — interval arithmetic evaluation for verified error bounds (requires `interval` feature)
 
+### geo — Constraint warm-starting
+- `sequential_impulse_warm()` — warm-started sequential impulse solver; seeds from previous frame's impulses (configurable warm factor) for faster convergence in stable stacking
+- `sequential_impulse()` now delegates to warm variant internally
+
+### geo — Island detection
+- `detect_islands()` — contact graph connectivity via union-find (O(n·α(n))); classifies active vs sleeping islands
+- `ContactEdge`, `Island` types for contact graph representation
+
+### geo — Frustum-OBB culling
+- `Frustum::contains_obb()` — conservative OBB culling via separating axis test against frustum planes
+
+### geo — Point-in-convex-polygon 2D
+- `point_in_convex_polygon()` — cross-product winding test for convex polygons
+
+### geo — AABB-from-transformed-AABB
+- `Aabb::transformed()` — fast tight AABB from affine-transformed AABB (Arvo method, no 8-corner expansion)
+
+### geo — Half-edge mesh
+- `HalfEdgeMesh` — half-edge data structure for triangle mesh adjacency queries
+- `from_triangles()`, `adjacent_faces()`, `vertex_faces()`, `is_boundary_vertex()`, `boundary_edges()`
+
+### num — DenseMatrix flat layout
+- `DenseMatrix` — row-major flat `Vec<f64>` matrix (cache-friendly alternative to `Vec<Vec<f64>>`)
+- `mul_vec()`, `mul_mat()`, `transpose()`, `frobenius_norm()`, `Index`/`IndexMut` via `(row, col)` tuples
+- Bidirectional conversion: `from_vec_of_vec()`, `to_vec_of_vec()`
+
+### num — Compensated summation in ODE solvers
+- `rk4()`, `rk4_trajectory()` now use Neumaier-compensated accumulation across steps
+- `integral_simpson()` now uses Neumaier accumulator for panel summation
+
+### transforms — Gamma-aware interpolation
+- `lerp_srgb()`, `lerp_srgb_vec3()` — decode sRGB → lerp in linear space → encode sRGB
+
+### transforms — Exposure / EV ↔ luminance
+- `ev100_to_luminance()`, `luminance_to_ev100()` — EV100 ↔ cd/m² (Lagarde & de Rousiers 2014)
+- `ev100_to_exposure()` — EV to exposure multiplier for HDR pipelines
+
 ### Stats
-- 887 tests (843 unit + 34 integration + 10 doc), zero clippy warnings
+- 971 tests (921 unit + 34 integration + 16 doc), zero clippy warnings
 
 ## 1.2.0 (2026-03-27)
 

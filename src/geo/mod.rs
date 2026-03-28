@@ -11,7 +11,9 @@ mod closest;
 mod collision;
 mod decompose;
 mod delaunay;
+mod halfedge;
 mod intersection;
+mod islands;
 mod primitives;
 mod sdf;
 mod spatial;
@@ -20,7 +22,9 @@ pub use closest::*;
 pub use collision::*;
 pub use decompose::*;
 pub use delaunay::*;
+pub use halfedge::*;
 pub use intersection::*;
+pub use islands::*;
 pub use primitives::*;
 pub use sdf::*;
 pub use spatial::*;
@@ -2175,6 +2179,115 @@ mod tests {
         );
         // Friction impulse should oppose tangential velocity (negative X)
         assert!(result.friction[0].x < 0.0);
+    }
+
+    // --- sequential_impulse_warm tests ---
+
+    fn make_approach_constraint() -> ContactConstraint {
+        ContactConstraint {
+            normal: Vec3::Y,
+            point: Vec3::ZERO,
+            penetration: 0.1,
+            restitution: 0.0,
+            friction: 0.5,
+            inv_mass_a: 1.0,
+            inv_mass_b: 1.0,
+        }
+    }
+
+    #[test]
+    fn warm_start_none_matches_cold_start() {
+        // With warm_start: None the result must be identical to sequential_impulse.
+        let c = make_approach_constraint();
+        let rv = [Vec3::new(0.0, -2.0, 0.0)];
+        let cold = sequential_impulse(&[c], &rv, 10);
+        let warm = sequential_impulse_warm(&[c], &rv, 10, None, 0.0);
+        assert!(approx_eq(cold.normal[0], warm.normal[0]));
+        assert!(vec3_approx_eq(cold.friction[0], warm.friction[0]));
+    }
+
+    #[test]
+    fn warm_start_zero_factor_same_as_cold() {
+        // warm_factor = 0.0 discards all warm impulses → same as cold start.
+        let c = make_approach_constraint();
+        let rv = [Vec3::new(0.0, -2.0, 0.0)];
+        let prev = ImpulseResult {
+            normal: vec![100.0],
+            friction: vec![Vec3::new(50.0, 0.0, 0.0)],
+        };
+        let warm = sequential_impulse_warm(&[c], &rv, 10, Some(&prev), 0.0);
+        let cold = sequential_impulse(&[c], &rv, 10);
+        assert!(approx_eq(cold.normal[0], warm.normal[0]));
+    }
+
+    #[test]
+    fn warm_start_seeds_impulses_and_converges_faster() {
+        // A stacked body resting (rel_vel ≈ 0): warm-starting with the
+        // correct impulse from frame N should produce a larger initial
+        // normal impulse than cold-starting, allowing fewer iterations
+        // to reach the same result.
+        let c = make_approach_constraint();
+        let rv = [Vec3::new(0.0, -0.01, 0.0)]; // nearly resting
+        let prev_normal = sequential_impulse(&[c], &rv, 20).normal[0];
+        let prev = ImpulseResult {
+            normal: vec![prev_normal],
+            friction: vec![Vec3::ZERO],
+        };
+        // With warm factor 0.9, even 1 iteration should be close to the
+        // 20-iteration cold result.
+        let warm1 = sequential_impulse_warm(&[c], &rv, 1, Some(&prev), 0.9);
+        let cold20 = sequential_impulse(&[c], &rv, 20);
+        // They should be within 20% of each other.
+        assert!(
+            (warm1.normal[0] - cold20.normal[0]).abs() < 0.2 * cold20.normal[0] + 1e-6,
+            "warm={} cold={}",
+            warm1.normal[0],
+            cold20.normal[0]
+        );
+    }
+
+    #[test]
+    fn warm_factor_clamped_to_zero_one() {
+        // warm_factor > 1.0 should be clamped to 1.0 (no amplification).
+        let c = make_approach_constraint();
+        let rv = [Vec3::new(0.0, -2.0, 0.0)];
+        let prev = ImpulseResult {
+            normal: vec![1.0],
+            friction: vec![Vec3::ZERO],
+        };
+        // Passing 2.0 should behave the same as 1.0.
+        let r_clamped = sequential_impulse_warm(&[c], &rv, 10, Some(&prev), 2.0);
+        let r_one = sequential_impulse_warm(&[c], &rv, 10, Some(&prev), 1.0);
+        assert!(approx_eq(r_clamped.normal[0], r_one.normal[0]));
+    }
+
+    #[test]
+    fn warm_start_shorter_than_constraints_pads_with_zero() {
+        // If warm_start has fewer entries than constraints, extras start at 0.
+        let c = make_approach_constraint();
+        let rv = [Vec3::new(0.0, -2.0, 0.0), Vec3::new(0.0, -2.0, 0.0)];
+        let prev = ImpulseResult {
+            normal: vec![1.0], // only one entry for two constraints
+            friction: vec![Vec3::ZERO],
+        };
+        let r = sequential_impulse_warm(&[c, c], &rv, 10, Some(&prev), 0.8);
+        // Both constraints should have valid (positive) impulses.
+        assert!(r.normal[0] >= 0.0);
+        assert!(r.normal[1] >= 0.0);
+    }
+
+    #[test]
+    fn warm_start_negative_normal_clamped_to_zero() {
+        // A warm-start normal impulse < 0 must be clamped to 0 (impulses are
+        // compressive-only).
+        let c = make_approach_constraint();
+        let rv = [Vec3::new(0.0, -2.0, 0.0)];
+        let prev = ImpulseResult {
+            normal: vec![-999.0], // physically invalid — must be ignored
+            friction: vec![Vec3::ZERO],
+        };
+        let r = sequential_impulse_warm(&[c], &rv, 1, Some(&prev), 1.0);
+        assert!(r.normal[0] >= 0.0, "negative warm impulse must be clamped");
     }
 
     // --- Closest point on triangle ---

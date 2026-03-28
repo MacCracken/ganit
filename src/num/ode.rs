@@ -9,7 +9,8 @@ use crate::HisabError;
 /// Perform one RK4 step in-place, reusing scratch buffers.
 ///
 /// All k1–k4 and tmp buffers are allocated by the caller and reused across steps,
-/// eliminating per-step heap allocations.
+/// eliminating per-step heap allocations. The `comp` buffer carries Neumaier
+/// compensation terms across steps, reducing floating-point accumulation error.
 #[allow(clippy::needless_range_loop, clippy::too_many_arguments)]
 fn rk4_step(
     f: &impl Fn(f64, &[f64], &mut [f64]),
@@ -21,6 +22,7 @@ fn rk4_step(
     k3: &mut [f64],
     k4: &mut [f64],
     tmp: &mut [f64],
+    comp: &mut [f64],
     dim: usize,
 ) {
     f(t, y, k1);
@@ -40,9 +42,18 @@ fn rk4_step(
     }
     f(t + h, tmp, k4);
 
+    // Neumaier-compensated accumulation: tracks low-order bits across steps.
     let h6 = h / 6.0;
     for i in 0..dim {
-        y[i] += h6 * (k1[i] + 2.0 * k2[i] + 2.0 * k3[i] + k4[i]);
+        let delta = h6 * (k1[i] + 2.0 * k2[i] + 2.0 * k3[i] + k4[i]);
+        let new_sum = y[i] + delta;
+        // Capture the rounding error and accumulate into the compensation term.
+        if y[i].abs() >= delta.abs() {
+            comp[i] += (y[i] - new_sum) + delta;
+        } else {
+            comp[i] += (delta - new_sum) + y[i];
+        }
+        y[i] = new_sum + comp[i];
     }
 }
 
@@ -82,10 +93,12 @@ pub fn rk4(
     let mut k3 = vec![0.0; dim];
     let mut k4 = vec![0.0; dim];
     let mut tmp = vec![0.0; dim];
+    // Neumaier compensation buffer — persists across steps.
+    let mut comp = vec![0.0f64; dim];
 
     for _ in 0..n {
         rk4_step(
-            &f, t, h, &mut y, &mut k1, &mut k2, &mut k3, &mut k4, &mut tmp, dim,
+            &f, t, h, &mut y, &mut k1, &mut k2, &mut k3, &mut k4, &mut tmp, &mut comp, dim,
         );
         t += h;
     }
@@ -120,12 +133,14 @@ pub fn rk4_trajectory(
     let mut k3 = vec![0.0; dim];
     let mut k4 = vec![0.0; dim];
     let mut tmp = vec![0.0; dim];
+    // Neumaier compensation buffer — persists across steps.
+    let mut comp = vec![0.0f64; dim];
     let mut trajectory = Vec::with_capacity(n + 1);
     trajectory.push((t, y.clone()));
 
     for _ in 0..n {
         rk4_step(
-            &f, t, h, &mut y, &mut k1, &mut k2, &mut k3, &mut k4, &mut tmp, dim,
+            &f, t, h, &mut y, &mut k1, &mut k2, &mut k3, &mut k4, &mut tmp, &mut comp, dim,
         );
         t += h;
         trajectory.push((t, y.clone()));

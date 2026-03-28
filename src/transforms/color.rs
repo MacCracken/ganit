@@ -561,4 +561,139 @@ pub fn linearize_depth_reverse_z(ndc_depth: f32, near: f32) -> f32 {
 }
 
 // ---------------------------------------------------------------------------
+// Gamma-aware interpolation
+// ---------------------------------------------------------------------------
+
+/// Gamma-aware linear interpolation: decode sRGB → lerp in linear light → encode sRGB.
+///
+/// Interpolating directly in sRGB space produces perceptually dark midpoints.
+/// This function converts both endpoints to linear light, lerps each channel,
+/// then encodes the result back to sRGB.
+///
+/// # Examples
+///
+/// ```
+/// use hisab::transforms::lerp_srgb;
+///
+/// // Midpoint of black and white in linear-aware sRGB
+/// let mid = lerp_srgb((0.0, 0.0, 0.0), (1.0, 1.0, 1.0), 0.5);
+/// // Result is approximately (0.735, 0.735, 0.735) — brighter than 0.5
+/// assert!((mid.0 - 0.735).abs() < 0.01);
+/// ```
+#[must_use]
+#[inline]
+pub fn lerp_srgb(a: (f32, f32, f32), b: (f32, f32, f32), t: f32) -> (f32, f32, f32) {
+    let al = (
+        srgb_to_linear(a.0),
+        srgb_to_linear(a.1),
+        srgb_to_linear(a.2),
+    );
+    let bl = (
+        srgb_to_linear(b.0),
+        srgb_to_linear(b.1),
+        srgb_to_linear(b.2),
+    );
+    let r = al.0 + (bl.0 - al.0) * t;
+    let g = al.1 + (bl.1 - al.1) * t;
+    let b_ch = al.2 + (bl.2 - al.2) * t;
+    (linear_to_srgb(r), linear_to_srgb(g), linear_to_srgb(b_ch))
+}
+
+/// Gamma-aware linear interpolation for [`Vec3`] sRGB colors.
+///
+/// Equivalent to [`lerp_srgb`] but operates on `Vec3` (x=R, y=G, z=B).
+///
+/// # Examples
+///
+/// ```
+/// use hisab::transforms::lerp_srgb_vec3;
+/// use glam::Vec3;
+///
+/// let black = Vec3::ZERO;
+/// let white = Vec3::ONE;
+/// let mid = lerp_srgb_vec3(black, white, 0.5);
+/// assert!((mid.x - 0.735).abs() < 0.01);
+/// ```
+#[must_use]
+#[inline]
+pub fn lerp_srgb_vec3(a: Vec3, b: Vec3, t: f32) -> Vec3 {
+    let al = srgb_to_linear_vec3(a);
+    let bl = srgb_to_linear_vec3(b);
+    let lerped = al + (bl - al) * t;
+    linear_to_srgb_vec3(lerped)
+}
+
+// ---------------------------------------------------------------------------
+// Exposure / EV ↔ luminance conversion
+// ---------------------------------------------------------------------------
+
+/// Convert exposure value (EV100) to luminance (cd/m²).
+///
+/// Formula: `L = 2^(EV - 3) * 12.5 / π`
+///
+/// Reference: Lagarde & de Rousiers 2014, "Moving Frostbite to PBR".
+///
+/// # Examples
+///
+/// ```
+/// use hisab::transforms::ev100_to_luminance;
+/// use std::f32::consts::PI;
+///
+/// // EV100 = 3 → L = 1.0 * 12.5 / π ≈ 3.979
+/// let lum = ev100_to_luminance(3.0);
+/// assert!((lum - 12.5 / PI).abs() < 0.001);
+/// ```
+#[must_use]
+#[inline]
+pub fn ev100_to_luminance(ev: f32) -> f32 {
+    2.0_f32.powf(ev - 3.0) * 12.5 / std::f32::consts::PI
+}
+
+/// Convert luminance (cd/m²) to exposure value (EV100).
+///
+/// Formula: `EV = log2(L * π / 12.5) + 3`
+///
+/// This is the inverse of [`ev100_to_luminance`].
+///
+/// # Examples
+///
+/// ```
+/// use hisab::transforms::luminance_to_ev100;
+///
+/// // Round-trip: EV → luminance → EV
+/// let ev_orig = 6.0_f32;
+/// let lum = hisab::transforms::ev100_to_luminance(ev_orig);
+/// let ev_back = luminance_to_ev100(lum);
+/// assert!((ev_back - ev_orig).abs() < 1e-5);
+/// ```
+#[must_use]
+#[inline]
+pub fn luminance_to_ev100(luminance: f32) -> f32 {
+    (luminance * std::f32::consts::PI / 12.5).log2() + 3.0
+}
+
+/// Compute an exposure multiplier from EV100.
+///
+/// Formula: `exposure = 1 / (1.2 * 2^EV)`
+///
+/// Suitable for use as a linear scale factor applied to HDR scene values
+/// before tone mapping.
+///
+/// # Examples
+///
+/// ```
+/// use hisab::transforms::ev100_to_exposure;
+///
+/// // Higher EV → smaller multiplier (darker image)
+/// let e0 = ev100_to_exposure(0.0);
+/// let e6 = ev100_to_exposure(6.0);
+/// assert!(e6 < e0);
+/// ```
+#[must_use]
+#[inline]
+pub fn ev100_to_exposure(ev: f32) -> f32 {
+    1.0 / (1.2 * 2.0_f32.powf(ev))
+}
+
+// ---------------------------------------------------------------------------
 // Spherical harmonics (L0-L2)

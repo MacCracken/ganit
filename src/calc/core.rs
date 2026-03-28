@@ -53,9 +53,24 @@ pub fn integral_trapezoidal(
     Ok(sum * h)
 }
 
+/// Neumaier-compensated addition helper: adds `v` into `(sum, comp)`.
+#[inline(always)]
+fn neumaier_add(sum: &mut f64, comp: &mut f64, v: f64) {
+    let t = *sum + v;
+    if sum.abs() >= v.abs() {
+        *comp += (*sum - t) + v;
+    } else {
+        *comp += (v - t) + *sum;
+    }
+    *sum = t;
+}
+
 /// Numerical integration using Simpson's rule.
 ///
 /// `n` must be even. If odd, it is rounded up.
+///
+/// Uses Neumaier compensated summation internally to reduce floating-point
+/// accumulation error when integrating over many sub-intervals.
 ///
 /// # Errors
 ///
@@ -73,20 +88,24 @@ pub fn integral_simpson(
         return Err(HisabError::ZeroSteps);
     }
     let h = (b - a) / n as f64;
-    let mut sum = f(a) + f(b);
 
-    // Process pairs: odd indices get coefficient 4, even get 2.
-    // Unrolled to avoid branch per iteration.
+    // Neumaier-compensated accumulator.
+    let mut sum = f(a) + f(b);
+    let mut comp = 0.0_f64;
+
+    // Process pairs: odd indices get coefficient 4, even (interior) get 2.
     let mut i = 1;
     while i < n {
-        sum += 4.0 * f(a + i as f64 * h);
-        sum += 2.0 * f(a + (i + 1) as f64 * h);
+        neumaier_add(&mut sum, &mut comp, 4.0 * f(a + i as f64 * h));
+        // The last pair adds 2*f(b), but f(b) is already in sum — corrected below.
+        neumaier_add(&mut sum, &mut comp, 2.0 * f(a + (i + 1) as f64 * h));
         i += 2;
     }
-    // Correct the last even-index term (we added 2*f(b) but f(b) is already counted)
-    sum -= 2.0 * f(b);
+    // The loop added 2*f(b) for the last even index, which equals f(b).
+    // We need only 1*f(b), so subtract the extra copy.
+    neumaier_add(&mut sum, &mut comp, -2.0 * f(b));
 
-    Ok(sum * h / 3.0)
+    Ok((sum + comp) * h / 3.0)
 }
 
 /// Linear interpolation between two f64 values.
