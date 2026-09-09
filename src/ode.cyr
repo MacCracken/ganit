@@ -278,7 +278,7 @@ fn ode_dopri45_trajectory(f, t0, y0, tf, dt0, tol, out_ts, out_ys) {
 
         if (f64_gt(err_norm, _ODE_F64_ONE) == 1) {
             # Reject step -- shrink h
-            var factor = f64_mul(_ODE_SAFETY, f64_pow(err_norm, _ODE_EXP_NEG_0P2));
+            var factor = f64_mul(_ODE_SAFETY, ganita_f64_pow(err_norm, _ODE_EXP_NEG_0P2));
             if (f64_lt(factor, _ODE_MIN_FACTOR) == 1) {
                 factor = _ODE_MIN_FACTOR;
             }
@@ -293,7 +293,7 @@ fn ode_dopri45_trajectory(f, t0, y0, tf, dt0, tol, out_ts, out_ys) {
             # Grow h
             var factor = _ODE_MAX_FACTOR;
             if (f64_gt(err_norm, _ODE_F64_ZERO) == 1) {
-                factor = f64_mul(_ODE_SAFETY, f64_pow(err_norm, _ODE_EXP_NEG_0P2));
+                factor = f64_mul(_ODE_SAFETY, ganita_f64_pow(err_norm, _ODE_EXP_NEG_0P2));
                 if (f64_gt(factor, _ODE_MAX_FACTOR) == 1) {
                     factor = _ODE_MAX_FACTOR;
                 }

@@ -677,8 +677,8 @@ fn opt_levenberg_marquardt(residuals, jacobian, x0, n_params, n_residuals, tol, 
     # (jtj by the JtJ fill, rhs by the negation loop, lu/piv by mat_lu), so
     # reusing them is safe; in particular the `+lambda` added to jtj's diagonal
     # cannot accumulate because the fill rewrites every element first.
-    var jtj = mat_new(np, np);
-    var lu  = mat_new(np, np);
+    var jtj = ganita_mat_new(np, np);
+    var lu  = ganita_mat_new(np, np);
     var rhs = alloc(np * 8);
     var piv = alloc(np * 8);
 
@@ -739,8 +739,8 @@ fn opt_levenberg_marquardt(residuals, jacobian, x0, n_params, n_residuals, tol, 
                     sum_jj = f64_add(sum_jj, f64_mul(j_kpi2, j_kpj));
                     kk = kk + 1;
                 }
-                mat_set(jtj, pi, pj, sum_jj);
-                if (pj != pi) { mat_set(jtj, pj, pi, sum_jj); }
+                ganita_mat_set(jtj, pi, pj, sum_jj);
+                if (pj != pi) { ganita_mat_set(jtj, pj, pi, sum_jj); }
                 pj = pj + 1;
             }
             pi = pi + 1;
@@ -750,8 +750,8 @@ fn opt_levenberg_marquardt(residuals, jacobian, x0, n_params, n_residuals, tol, 
         # Add lambda to diagonal
         pi = 0;
         while (pi < np) {
-            var diag = mat_get(jtj, pi, pi);
-            mat_set(jtj, pi, pi, f64_add(diag, lambda));
+            var diag = ganita_mat_get(jtj, pi, pi);
+            ganita_mat_set(jtj, pi, pi, f64_add(diag, lambda));
             pi = pi + 1;
         }
 
@@ -763,7 +763,7 @@ fn opt_levenberg_marquardt(residuals, jacobian, x0, n_params, n_residuals, tol, 
         }
 
         # Solve via LU decomposition (lu / piv are hoisted)
-        var sign = mat_lu(jtj, lu, piv);
+        var sign = ganita_mat_lu(jtj, lu, piv);
 
         if (sign == 0) {
             # Singular -- increase damping and retry
@@ -772,7 +772,7 @@ fn opt_levenberg_marquardt(residuals, jacobian, x0, n_params, n_residuals, tol, 
             continue;
         }
 
-        mat_lu_solve(lu, piv, rhs, delta);
+        ganita_mat_lu_solve(lu, piv, rhs, delta);
 
         # Trial step: x_trial = x + delta
         _opt_axpy(x_trial, x, _OPT_F64_ONE, delta, np);

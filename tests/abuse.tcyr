@@ -289,8 +289,8 @@ assert_neq(mat_new_guarded(1, 1), 0, "mat_new_guarded: 1 x 1 allocates");
 
 # The stdlib constructor is guarded too as of ganita 1.0.4 -- before that,
 # mat_new(-5, 3) segfaulted outright.
-assert_eq(mat_new((0 - 5), 3), 0, "mat_new (stdlib): rows = -5 -> 0");
-assert_eq(mat_new(1000000000, 1000000000), 0, "mat_new (stdlib): 1e9 x 1e9 -> 0");
+assert_eq(ganita_mat_new((0 - 5), 3), 0, "mat_new (stdlib): rows = -5 -> 0");
+assert_eq(ganita_mat_new(1000000000, 1000000000), 0, "mat_new (stdlib): 1e9 x 1e9 -> 0");
 
 # alloc() itself is the bottom of the designed-0 chain: nothing else in this
 # file can be reasoned about if a non-positive size ever returns a pointer.
@@ -610,16 +610,16 @@ assert_eq(minkowski(9, 9), f64_neg(F64_ONE), "minkowski: 9, 9 -> -1.0 bits");
 assert_eq(minkowski((0 - 1), 4), 0, "minkowski: off-diagonal -> 0");
 
 # svd_truncated's k is a rank, not an offset, but it sizes the copy loops.
-var ab_A33 = mat_new(3, 3);
-mat_set(ab_A33, 0, 0, F64_TWO);
-mat_set(ab_A33, 1, 1, f64_from(3));
-mat_set(ab_A33, 2, 2, f64_from(4));
+var ab_A33 = ganita_mat_new(3, 3);
+ganita_mat_set(ab_A33, 0, 0, F64_TWO);
+ganita_mat_set(ab_A33, 1, 1, f64_from(3));
+ganita_mat_set(ab_A33, 2, 2, f64_from(4));
 var ab_S3 = alloc(3 * 8);
-assert_eq(svd_truncated(ab_A33, 0, mat_new(3, 3), ab_S3, mat_new(3, 3)),
+assert_eq(svd_truncated(ab_A33, 0, ganita_mat_new(3, 3), ab_S3, ganita_mat_new(3, 3)),
   HSB_ERR_INVALID_INPUT, "svd_truncated: k = 0 -> HSB_ERR_INVALID_INPUT");
-assert_eq(svd_truncated(ab_A33, (0 - 1), mat_new(3, 3), ab_S3, mat_new(3, 3)),
+assert_eq(svd_truncated(ab_A33, (0 - 1), ganita_mat_new(3, 3), ab_S3, ganita_mat_new(3, 3)),
   HSB_ERR_INVALID_INPUT, "svd_truncated: k = -1 -> HSB_ERR_INVALID_INPUT");
-assert_eq(svd_truncated(ab_A33, 99, mat_new(3, 3), ab_S3, mat_new(3, 3)),
+assert_eq(svd_truncated(ab_A33, 99, ganita_mat_new(3, 3), ab_S3, ganita_mat_new(3, 3)),
   HSB_ERR_INVALID_INPUT, "svd_truncated: k = 99 (> cols) -> HSB_ERR_INVALID_INPUT");
 
 # ode_bdf selects a coefficient row by `order`; a wild order is a table overrun.
@@ -700,9 +700,9 @@ test_group("abuse: svd_golub_kahan / eigen_qr shape + null contract");
 
 # svd_golub_kahan is the one routine in linalg_precision.cyr that validates its
 # whole surface (2.8.3). These assertions pin that contract so it cannot regress.
-var ab_A34 = mat_new(3, 4);
-var ab_U34 = mat_new(3, 4);
-var ab_Vt44 = mat_new(4, 4);
+var ab_A34 = ganita_mat_new(3, 4);
+var ab_U34 = ganita_mat_new(3, 4);
+var ab_Vt44 = ganita_mat_new(4, 4);
 assert_eq(svd_golub_kahan(ab_A34, ab_U34, alloc(32), ab_Vt44), HSB_ERR_INVALID_INPUT,
   "svd_golub_kahan: 3x4 (m < n) rejected");
 assert_eq(svd_golub_kahan(0, ab_U34, ab_S3, ab_Vt44), HSB_ERR_INVALID_INPUT,
@@ -724,21 +724,21 @@ assert_eq(svd_golub_kahan(mat_new_guarded(1000000, 1000000), ab_U34, ab_S3, ab_V
 # original reproducer for the null-out_vals case used mat_new(3, 3), an all-zero
 # matrix, which returns early from the tridiagonal QR before it ever writes to
 # out_vals and so exits 0 rather than 139. The register line has been corrected.
-assert_eq(eigen_qr(ab_A33, 0, 50, ab_S3, mat_new(3, 3)), HSB_ERR_INVALID_INPUT,
+assert_eq(eigen_qr(ab_A33, 0, 50, ab_S3, ganita_mat_new(3, 3)), HSB_ERR_INVALID_INPUT,
   "eigen_qr: n = 0 -> HSB_ERR_INVALID_INPUT");
-assert_eq(eigen_qr(ab_A33, (0 - 3), 50, ab_S3, mat_new(3, 3)), HSB_ERR_INVALID_INPUT,
+assert_eq(eigen_qr(ab_A33, (0 - 3), 50, ab_S3, ganita_mat_new(3, 3)), HSB_ERR_INVALID_INPUT,
   "eigen_qr: n = -3 -> HSB_ERR_INVALID_INPUT (was exit 139)");
-assert_eq(eigen_qr(0, 3, 50, ab_S3, mat_new(3, 3)), HSB_ERR_INVALID_INPUT,
+assert_eq(eigen_qr(0, 3, 50, ab_S3, ganita_mat_new(3, 3)), HSB_ERR_INVALID_INPUT,
   "eigen_qr: A = 0 -> HSB_ERR_INVALID_INPUT (was exit 139)");
-assert_eq(eigen_qr(ab_A33, 3, 50, 0, mat_new(3, 3)), HSB_ERR_INVALID_INPUT,
+assert_eq(eigen_qr(ab_A33, 3, 50, 0, ganita_mat_new(3, 3)), HSB_ERR_INVALID_INPUT,
   "eigen_qr: out_vals = 0 -> HSB_ERR_INVALID_INPUT (was exit 139 on a converging A)");
 assert_eq(eigen_qr(ab_A33, 3, 50, ab_S3, 0), HSB_ERR_INVALID_INPUT,
   "eigen_qr: out_vecs = 0 -> HSB_ERR_INVALID_INPUT (was exit 139)");
-assert_eq(eigen_qr(mat_new_guarded(1000000, 1000000), 3, 50, ab_S3, mat_new(3, 3)),
+assert_eq(eigen_qr(mat_new_guarded(1000000, 1000000), 3, 50, ab_S3, ganita_mat_new(3, 3)),
   HSB_ERR_INVALID_INPUT, "eigen_qr: capped mat_new_guarded 0 flows through");
-assert_eq(eigen_qr(ab_A33, 1000000000, 50, ab_S3, mat_new(3, 3)), HSB_ERR_INVALID_INPUT,
+assert_eq(eigen_qr(ab_A33, 1000000000, 50, ab_S3, ganita_mat_new(3, 3)), HSB_ERR_INVALID_INPUT,
   "eigen_qr: n = 1e9 against a 3x3 A -> HSB_ERR_INVALID_INPUT");
-assert_eq(eigen_qr(ab_A33, 3, 50, ab_S3, mat_new(2, 2)), HSB_ERR_INVALID_INPUT,
+assert_eq(eigen_qr(ab_A33, 3, 50, ab_S3, ganita_mat_new(2, 2)), HSB_ERR_INVALID_INPUT,
   "eigen_qr: out_vecs 2x2 too small for n = 3 -> HSB_ERR_INVALID_INPUT");
 
 # TIGHTENED, NOT WEAKENED ([Unreleased]). This case previously asserted
@@ -762,21 +762,21 @@ assert_eq(eigen_qr(ab_A33, 3, 50, ab_S3, mat_new(2, 2)), HSB_ERR_INVALID_INPUT,
 # extent, so a 3x4 with n = 3 is a shape eigen_qr cannot answer for, and
 # rejecting it outright is a better contract than a convergence failure that
 # happens to fall out. Not on a number nobody measured.
-assert_eq(eigen_qr(ab_A34, 3, 50, ab_S3, mat_new(3, 3)), HSB_ERR_INVALID_INPUT,
+assert_eq(eigen_qr(ab_A34, 3, 50, ab_S3, ganita_mat_new(3, 3)), HSB_ERR_INVALID_INPUT,
   "eigen_qr: non-square 3x4 -> HSB_ERR_INVALID_INPUT (was NO_CONVERGENCE at max_iter 50)");
-assert_eq(eigen_qr(ab_A34, 3, 10000, ab_S3, mat_new(3, 3)), HSB_ERR_INVALID_INPUT,
+assert_eq(eigen_qr(ab_A34, 3, 10000, ab_S3, ganita_mat_new(3, 3)), HSB_ERR_INVALID_INPUT,
   "eigen_qr: non-square 3x4 stays rejected at max_iter 10000 (budget-independent)");
 
-assert_eq(eigen_qr(ab_A33, 3, 0, ab_S3, mat_new(3, 3)), HSB_ERR_NO_CONVERGENCE,
+assert_eq(eigen_qr(ab_A33, 3, 0, ab_S3, ganita_mat_new(3, 3)), HSB_ERR_NO_CONVERGENCE,
   "eigen_qr: max_iter = 0 -> no-convergence");
-assert_eq(eigen_qr(ab_A33, 3, (0 - 5), ab_S3, mat_new(3, 3)), HSB_ERR_NO_CONVERGENCE,
+assert_eq(eigen_qr(ab_A33, 3, (0 - 5), ab_S3, ganita_mat_new(3, 3)), HSB_ERR_NO_CONVERGENCE,
   "eigen_qr: max_iter = -5 -> no-convergence");
 
 # eigen_qr still WORKS on the shape it documents -- the guards reject callers,
 # not the routine's own job. diag(2, 3, 4) has eigenvalues 4, 3, 2 in eigen_qr's
 # descending-magnitude order.
 var ab_eqv = alloc(3 * 8);
-assert_eq(eigen_qr(ab_A33, 3, 1000, ab_eqv, mat_new(3, 3)), HSB_ERR_NONE,
+assert_eq(eigen_qr(ab_A33, 3, 1000, ab_eqv, ganita_mat_new(3, 3)), HSB_ERR_NONE,
   "eigen_qr: diag(2,3,4) still decomposes after the guards");
 assert_eq(load64(ab_eqv), f64_from(4), "eigen_qr: diag(2,3,4) lambda0 == 4");
 assert_eq(load64(ab_eqv + 8), f64_from(3), "eigen_qr: diag(2,3,4) lambda1 == 3");
@@ -817,9 +817,9 @@ assert_eq(load64(ab_ep_val), F64_TWO,
 
 # A matrix e_0 is NOT an eigenvector of, so the iteration actually iterates:
 # [[2,1],[1,3]] has dominant eigenvalue (5 + sqrt 5) / 2 = 3.618033988749895.
-var ab_ep2 = mat_new(2, 2);
-mat_set(ab_ep2, 0, 0, F64_TWO);   mat_set(ab_ep2, 0, 1, F64_ONE);
-mat_set(ab_ep2, 1, 0, F64_ONE);   mat_set(ab_ep2, 1, 1, f64_from(3));
+var ab_ep2 = ganita_mat_new(2, 2);
+ganita_mat_set(ab_ep2, 0, 0, F64_TWO);   ganita_mat_set(ab_ep2, 0, 1, F64_ONE);
+ganita_mat_set(ab_ep2, 1, 0, F64_ONE);   ganita_mat_set(ab_ep2, 1, 1, f64_from(3));
 var ab_ep2_vec = alloc(2 * 8);
 assert_eq(eigen_power(ab_ep2, 2, 1000, ab_ep_val, ab_ep2_vec), HSB_ERR_NONE,
   "eigen_power: [[2,1],[1,3]] converges after the guards");
@@ -845,20 +845,20 @@ assert_eq(lyapunov_max(ab_A33, 3, (0 - 5), ab_ly), HSB_ERR_NONE,
   "lyapunov_max: iterations = -5 -> HSB_ERR_NONE, not a hang");
 assert_eq(load64(ab_ly), f64_from(0), "lyapunov_max: iterations = -5 stores 0");
 # Still works on the documented shape: the identity map expands nothing.
-assert_eq(lyapunov_max(mat_identity(3), 3, 50, ab_ly), HSB_ERR_NONE,
+assert_eq(lyapunov_max(ganita_mat_identity(3), 3, 50, ab_ly), HSB_ERR_NONE,
   "lyapunov_max: identity still runs after the guards");
 assert(f64_lt(f64_abs(load64(ab_ly)), 0x3E45798EE2308C3A) == 1,
   "lyapunov_max: identity exponent is 0");
 
 test_group("abuse: CSR sparse dimension mismatches");
 
-var ab_dm22 = mat_new(2, 2);
-mat_set(ab_dm22, 0, 0, F64_ONE);
-mat_set(ab_dm22, 1, 1, F64_TWO);
-var ab_dm23 = mat_new(2, 3);
-mat_set(ab_dm23, 0, 0, F64_ONE);
-var ab_dm32 = mat_new(3, 2);
-mat_set(ab_dm32, 0, 0, F64_ONE);
+var ab_dm22 = ganita_mat_new(2, 2);
+ganita_mat_set(ab_dm22, 0, 0, F64_ONE);
+ganita_mat_set(ab_dm22, 1, 1, F64_TWO);
+var ab_dm23 = ganita_mat_new(2, 3);
+ganita_mat_set(ab_dm23, 0, 0, F64_ONE);
+var ab_dm32 = ganita_mat_new(3, 2);
+ganita_mat_set(ab_dm32, 0, 0, F64_ONE);
 
 var ab_csr22 = csr_from_dense(ab_dm22);
 var ab_csr23 = csr_from_dense(ab_dm23);
@@ -871,7 +871,7 @@ assert_neq(csr_add(ab_csr22, ab_csr22), 0, "csr_add: conformable pair still work
 
 # An all-zero dense matrix is the empty CSR -- nnz 0, alloc(0) for both data
 # arrays, and every downstream walk has to cope with a null data pointer.
-var ab_csr_empty = csr_from_dense(mat_new(2, 2));
+var ab_csr_empty = csr_from_dense(ganita_mat_new(2, 2));
 assert_eq(csr_nnz(ab_csr_empty), 0, "csr_from_dense: all-zero matrix has nnz 0");
 var ab_spx = alloc(2 * 8);
 store64(ab_spx, F64_ONE);
@@ -904,7 +904,7 @@ assert_eq(solve_pgs(ab_A33, ab_b3, ab_xg, 3, ab_lo3, ab_hi3, (0 - 5)), 0,
   "solve_pgs: max_iter = -5");
 
 # A zero-diagonal system is the singular case solve_pgs documents as "skip".
-assert_eq(solve_pgs(mat_new(3, 3), ab_b3, ab_xg, 3, ab_lo3, ab_hi3, 5), 0,
+assert_eq(solve_pgs(ganita_mat_new(3, 3), ab_b3, ab_xg, 3, ab_lo3, ab_hi3, 5), 0,
   "solve_pgs: all-zero diagonal skipped, not divided by");
 
 assert_neq(solve_gmres(&_ab_matvec, ab_b3, ab_xg, 3, EPSILON_F64, 0, 2), 0,
@@ -1110,17 +1110,17 @@ assert_eq(_ab_clob(ab_hal_can, 16), 0, "num_halton_2d: canary clean for -5 / 0 /
 # --- svd_golub_kahan on a rejected shape (fresh dims, not hisab.tcyr's 2x16) ---
 # out_U is 3 x 9 = 27 data slots; the bidiagonalisation seeds the identity with
 # mat_set(U, i, i) for i < n, so on m < n every i >= m lands past the buffer.
-var ab_sA = mat_new(3, 9);
+var ab_sA = ganita_mat_new(3, 9);
 var ab_sj = 0;
 while (ab_sj < 9) {
-    mat_set(ab_sA, 0, ab_sj, f64_from(ab_sj + 1));
-    mat_set(ab_sA, 1, ab_sj, f64_from(2 * ab_sj + 3));
-    mat_set(ab_sA, 2, ab_sj, f64_from(3 * ab_sj + 5));
+    ganita_mat_set(ab_sA, 0, ab_sj, f64_from(ab_sj + 1));
+    ganita_mat_set(ab_sA, 1, ab_sj, f64_from(2 * ab_sj + 3));
+    ganita_mat_set(ab_sA, 2, ab_sj, f64_from(3 * ab_sj + 5));
     ab_sj = ab_sj + 1;
 }
-var ab_sU = mat_new(3, 9);
+var ab_sU = ganita_mat_new(3, 9);
 var ab_sU_can = _ab_canary_new(48);
-var ab_sVt = mat_new(9, 9);
+var ab_sVt = ganita_mat_new(9, 9);
 var ab_sS = alloc(9 * 8);
 assert_eq(svd_golub_kahan(ab_sA, ab_sU, ab_sS, ab_sVt), HSB_ERR_INVALID_INPUT,
   "svd_golub_kahan 3x9 (m < n): HSB_ERR_INVALID_INPUT");
@@ -1318,7 +1318,7 @@ assert_neq(m4_ortho_rh(0, 0, 0, 0, 0, 0), 0, "m4_ortho_rh: all-zero args allocat
 assert_neq(m4_look_at_rh(hvec3_zero(), hvec3_zero(), hvec3_zero()), 0,
   "m4_look_at_rh: eye == target == up allocates");
 assert_neq(hquat_inverse(hquat_new(0, 0, 0, 0)), 0, "hquat_inverse: zero quaternion allocates");
-assert_eq(f64_to(matrix_condition_number(mat_new(3, 3))), (0 - 1),
+assert_eq(f64_to(matrix_condition_number(ganita_mat_new(3, 3))), (0 - 1),
   "matrix_condition_number: singular -> -1 sentinel");
 
 # A zero-scale transform is the rank-collapse case every renderer hits.

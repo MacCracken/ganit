@@ -85,7 +85,7 @@ fn cx_norm_sq(a) {
 fn cx_abs(a) { return f64_sqrt(cx_norm_sq(a)); }
 
 #must_use
-fn cx_arg(a) { return f64_atan2(HComplex_im(a), HComplex_re(a)); }
+fn cx_arg(a) { return ganita_f64_atan2(HComplex_im(a), HComplex_re(a)); }
 
 #must_use
 fn cx_inv(a) {
@@ -127,21 +127,21 @@ fn cx_sqrt(a) {
 fn cx_powf(a, n) {
     # Squared modulus vs squared tolerance — see cx_div.
     if (f64_lt(cx_norm_sq(a), f64_mul(EPSILON_F64, EPSILON_F64)) == 1) { return cx_zero(); }
-    var r = f64_pow(cx_abs(a), n);
+    var r = ganita_f64_pow(cx_abs(a), n);
     var theta = f64_mul(cx_arg(a), n);
     return cx_from_polar(r, theta);
 }
 
 #must_use
 fn cx_sin(a) {
-    return cx_new(f64_mul(f64_sin(HComplex_re(a)), f64_cosh(HComplex_im(a))),
-      f64_mul(f64_cos(HComplex_re(a)), f64_sinh(HComplex_im(a))));
+    return cx_new(f64_mul(f64_sin(HComplex_re(a)), ganita_f64_cosh(HComplex_im(a))),
+      f64_mul(f64_cos(HComplex_re(a)), ganita_f64_sinh(HComplex_im(a))));
 }
 
 #must_use
 fn cx_cos(a) {
-    return cx_new(f64_mul(f64_cos(HComplex_re(a)), f64_cosh(HComplex_im(a))),
-      f64_neg(f64_mul(f64_sin(HComplex_re(a)), f64_sinh(HComplex_im(a)))));
+    return cx_new(f64_mul(f64_cos(HComplex_re(a)), ganita_f64_cosh(HComplex_im(a))),
+      f64_neg(f64_mul(f64_sin(HComplex_re(a)), ganita_f64_sinh(HComplex_im(a)))));
 }
 
 #must_use
@@ -503,7 +503,7 @@ fn cmat_exp(m) {
         scaled_norm = f64_mul(scaled_norm, F64_HALF);
     }
     # Scale matrix
-    var scale_factor = cx_real(f64_div(F64_ONE, f64_pow(F64_TWO, f64_from(s))));
+    var scale_factor = cx_real(f64_div(F64_ONE, ganita_f64_pow(F64_TWO, f64_from(s))));
     var ms = cmat_scale(m, scale_factor);
     # Taylor: sum = I + M + M^2/2! + M^3/3! + ...
     var result = cmat_identity(n);

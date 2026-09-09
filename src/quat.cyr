@@ -173,7 +173,7 @@ fn hquat_slerp(a, b, t) {
             f64_add(f64_mul(HQuat_w(a), omt), f64_mul(bw, t))
             ));
     }
-    var theta = f64_acos(d);
+    var theta = ganita_f64_acos(d);
     var sin_theta = f64_sin(theta);
     var inv_sin = f64_div(F64_ONE, sin_theta);
     var s0 = f64_mul(f64_sin(f64_mul(f64_sub(F64_ONE, t), theta)), inv_sin);

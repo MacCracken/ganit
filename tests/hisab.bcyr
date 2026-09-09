@@ -1081,25 +1081,25 @@ fn main() {
     }
 
     # 12x12 symmetric-ish matrix for the decompositions.
-    _b_sv_A = mat_new(12, 12);
-    _b_eg_A = mat_new(12, 12);
+    _b_sv_A = ganita_mat_new(12, 12);
+    _b_eg_A = ganita_mat_new(12, 12);
     var mi = 0;
     while (mi < 12) {
         var mj = 0;
         while (mj < 12) {
             var mv = f64_from(((mi * 7 + mj * 13) % 17) + 1);
-            mat_set(_b_sv_A, mi, mj, mv);
+            ganita_mat_set(_b_sv_A, mi, mj, mv);
             var sym = f64_from(((mi * 7 + mj * 13) % 17) + ((mj * 7 + mi * 13) % 17) + 2);
-            mat_set(_b_eg_A, mi, mj, sym);
+            ganita_mat_set(_b_eg_A, mi, mj, sym);
             mj = mj + 1;
         }
         mi = mi + 1;
     }
-    _b_sv_U = mat_new(12, 12);
-    _b_sv_Vt = mat_new(12, 12);
+    _b_sv_U = ganita_mat_new(12, 12);
+    _b_sv_Vt = ganita_mat_new(12, 12);
     _b_sv_S = alloc(12 * 8);
     _b_eg_vals = alloc(12 * 8);
-    _b_eg_vecs = mat_new(12, 12);
+    _b_eg_vecs = ganita_mat_new(12, 12);
 
     # EPA narrowphase fixture (2.8.3): cylinder r=1.8793535667752475,
     # half-height 1.2791168772746317 at the origin, versus a box of half

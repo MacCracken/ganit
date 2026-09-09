@@ -975,10 +975,10 @@ assert_neq(tensor_new(2, inv_ts_ok), 0, "tensor_new: valid shape allocates");
 # invisible because nothing asserted the upstream contract, only hisab's own
 # `mat_new_guarded` wrapper. These four assertions make a vendoring regression
 # fail the suite instead of shipping.
-assert_eq(mat_new(0 - 5, 3), 0, "mat_new (stdlib): negative rows rejected");
-assert_eq(mat_new(0, 5), 0, "mat_new (stdlib): zero rows rejected");
-assert_eq(mat_new(1000000000, 1000000000), 0, "mat_new (stdlib): overflow-prone dims rejected");
-assert_neq(mat_new(3, 3), 0, "mat_new (stdlib): valid dims allocate");
+assert_eq(ganita_mat_new(0 - 5, 3), 0, "mat_new (stdlib): negative rows rejected");
+assert_eq(ganita_mat_new(0, 5), 0, "mat_new (stdlib): zero rows rejected");
+assert_eq(ganita_mat_new(1000000000, 1000000000), 0, "mat_new (stdlib): overflow-prone dims rejected");
+assert_neq(ganita_mat_new(3, 3), 0, "mat_new (stdlib): valid dims allocate");
 
 # ================================================================
 test_group("ivl_div: extended division must ENCLOSE, and enclose tightly");

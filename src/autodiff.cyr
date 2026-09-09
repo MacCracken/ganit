@@ -166,15 +166,15 @@ fn dual_sqrt(a) {
 # (+Inf, -Inf). Pinned in tests/modules.tcyr so it is a checked outcome rather
 # than a discovered one. [measured: 2026-08-21]
 fn _ad_pow(base, n) {
-    if (f64_gt(base, 0) == 1) { return f64_pow(base, n); }
-    if (f64_eq(f64_round(n), n) != 1) { return f64_pow(base, n); }
+    if (f64_gt(base, 0) == 1) { return ganita_f64_pow(base, n); }
+    if (f64_eq(f64_round(n), n) != 1) { return ganita_f64_pow(base, n); }
     var k = f64_to(n);
     var neg = 0;
     if (k < 0) { neg = 1; k = 0 - k; }
     var acc = F64_ONE;
     for (var i = 0; i < k; i = i + 1) { acc = f64_mul(acc, base); }
     if (neg == 1) {
-        if (f64_lt(f64_abs(acc), _AD_F64_TINY) == 1) { return f64_pow(base, n); }
+        if (f64_lt(f64_abs(acc), _AD_F64_TINY) == 1) { return ganita_f64_pow(base, n); }
         return f64_div(F64_ONE, acc);
     }
     return acc;

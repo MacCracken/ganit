@@ -18,14 +18,14 @@ fn srgb_to_linear(c) {
     if (f64_lt(c, _SRGB_THRESHOLD_TO_LINEAR) == 1) {
         return f64_div(c, _SRGB_12_92);
     }
-    return f64_pow(f64_div(f64_add(c, _SRGB_0_055), _SRGB_1_055), _SRGB_2_4);
+    return ganita_f64_pow(f64_div(f64_add(c, _SRGB_0_055), _SRGB_1_055), _SRGB_2_4);
 }
 
 fn linear_to_srgb(c) {
     if (f64_lt(c, _SRGB_THRESHOLD_TO_SRGB) == 1) {
         return f64_mul(c, _SRGB_12_92);
     }
-    return f64_sub(f64_mul(_SRGB_1_055, f64_pow(c, _SRGB_INV_2_4)), _SRGB_0_055);
+    return f64_sub(f64_mul(_SRGB_1_055, ganita_f64_pow(c, _SRGB_INV_2_4)), _SRGB_0_055);
 }
 
 fn srgb_to_linear_vec3(color) {
@@ -165,7 +165,7 @@ fn linearize_depth_reverse_z(ndc, near) {
 fn ev100_to_luminance(ev) {
     var three = f64_from(3);
     var twelve_five = f64_div(f64_from(125), f64_from(10));
-    return f64_div(f64_mul(f64_pow(F64_TWO, f64_sub(ev, three)), twelve_five), F64_PI);
+    return f64_div(f64_mul(ganita_f64_pow(F64_TWO, f64_sub(ev, three)), twelve_five), F64_PI);
 }
 
 fn luminance_to_ev100(luminance) {
@@ -176,7 +176,7 @@ fn luminance_to_ev100(luminance) {
 
 fn ev100_to_exposure(ev) {
     var one_two = f64_div(f64_from(12), f64_from(10));
-    return f64_div(F64_ONE, f64_mul(one_two, f64_pow(F64_TWO, ev)));
+    return f64_div(F64_ONE, f64_mul(one_two, ganita_f64_pow(F64_TWO, ev)));
 }
 
 # ================================================================

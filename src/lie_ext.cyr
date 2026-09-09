@@ -210,7 +210,7 @@ fn so3_log(R) {
     var tr = m3_trace(R);
     var cos_theta = f64_mul(f64_sub(tr, F64_ONE), F64_HALF);
     cos_theta = f64_clamp(cos_theta, f64_neg(F64_ONE), F64_ONE);
-    var theta = f64_acos(cos_theta);
+    var theta = ganita_f64_acos(cos_theta);
 
     if (f64_lt(f64_abs(theta), EPSILON_F64) == 1) {
         return hvec3_new(0, 0, 0);

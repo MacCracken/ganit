@@ -289,7 +289,7 @@ fn expr_eval(e, vars) {
     }
 
     if (t == EXPR_POW) {
-        return f64_pow(expr_eval(expr_left(e), vars),
+        return ganita_f64_pow(expr_eval(expr_left(e), vars),
           expr_eval(expr_right(e), vars));
     }
 
@@ -517,7 +517,7 @@ fn expr_simplify(e) {
         # const ^ const = const
         if (tb == EXPR_CONST) {
             if (te == EXPR_CONST) {
-                return expr_const(f64_pow(expr_const_val(base), expr_const_val(exp)));
+                return expr_const(ganita_f64_pow(expr_const_val(base), expr_const_val(exp)));
             }
         }
         return expr_pow(base, exp);

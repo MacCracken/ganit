@@ -40,7 +40,7 @@ var _MAT_MAX_ELEMS = 16777216;
 fn mat_new_guarded(rows, cols) {
     if (rows <= 0 || cols <= 0) { return 0; }
     if (rows > _MAT_MAX_ELEMS / cols) { return 0; }
-    return mat_new(rows, cols);
+    return ganita_mat_new(rows, cols);
 }
 
 # ================================================================
@@ -75,8 +75,8 @@ fn csr_values(csr)  { return load64(csr + 40); }
 # Drops entries with |value| < EPSILON_F64.
 # Returns pointer to CSR struct.
 fn csr_from_dense(dense_mat) {
-    var nrows = mat_rows(dense_mat);
-    var ncols = mat_cols(dense_mat);
+    var nrows = ganita_mat_rows(dense_mat);
+    var ncols = ganita_mat_cols(dense_mat);
 
     # First pass: count non-zeros
     var count = 0;
@@ -84,7 +84,7 @@ fn csr_from_dense(dense_mat) {
     while (i < nrows) {
         var j = 0;
         while (j < ncols) {
-            var v = mat_get(dense_mat, i, j);
+            var v = ganita_mat_get(dense_mat, i, j);
             if (f64_gt(f64_abs(v), EPSILON_F64) == 1) {
                 count = count + 1;
             }
@@ -103,7 +103,7 @@ fn csr_from_dense(dense_mat) {
     while (i < nrows) {
         var j = 0;
         while (j < ncols) {
-            var v = mat_get(dense_mat, i, j);
+            var v = ganita_mat_get(dense_mat, i, j);
             if (f64_gt(f64_abs(v), EPSILON_F64) == 1) {
                 store64(col_idx + pos * 8, j);
                 store64(values + pos * 8, v);
@@ -669,7 +669,7 @@ fn solve_pgs(A, b, x, n, lo, hi, max_iter) {
         var max_change = f64_from(0);
         var i = 0;
         while (i < n) {
-            var aii = mat_get(A, i, i);
+            var aii = ganita_mat_get(A, i, i);
             if (f64_lt(f64_abs(aii), EPSILON_F64) == 1) {
                 i = i + 1;
                 # skip near-zero diagonal
@@ -678,7 +678,7 @@ fn solve_pgs(A, b, x, n, lo, hi, max_iter) {
                 var j = 0;
                 while (j < n) {
                     if (j != i) {
-                        sigma = f64_sub(sigma, f64_mul(mat_get(A, i, j), load64(x + j * 8)));
+                        sigma = f64_sub(sigma, f64_mul(ganita_mat_get(A, i, j), load64(x + j * 8)));
                     }
                     j = j + 1;
                 }
@@ -710,7 +710,7 @@ fn solve_pgs(A, b, x, n, lo, hi, max_iter) {
 # out_Vt: stdlib matrix (n x n, caller allocates via mat_new).
 # Returns: 0 on success.
 fn svd_compute(A, out_U, out_S, out_Vt) {
-    return mat_svd(A, out_U, out_S, out_Vt);
+    return ganita_mat_svd(A, out_U, out_S, out_Vt);
 }
 
 # Truncated (rank-k) SVD: keep only the top k singular values.
@@ -721,16 +721,16 @@ fn svd_compute(A, out_U, out_S, out_Vt) {
 # out_Vt: stdlib matrix (k x n, caller allocates).
 # Returns: 0 on success, HSB_ERR_INVALID_INPUT if k is invalid.
 fn svd_truncated(A, k, out_U, out_S, out_Vt) {
-    var rows = mat_rows(A);
-    var cols = mat_cols(A);
+    var rows = ganita_mat_rows(A);
+    var cols = ganita_mat_cols(A);
     if (k < 1) { return HSB_ERR_INVALID_INPUT; }
     if (k > cols) { return HSB_ERR_INVALID_INPUT; }
 
     # Compute full SVD into temporaries
-    var full_u  = mat_new(rows, cols);
+    var full_u  = ganita_mat_new(rows, cols);
     var full_s  = alloc(cols * 8);
-    var full_vt = mat_new(cols, cols);
-    mat_svd(A, full_u, full_s, full_vt);
+    var full_vt = ganita_mat_new(cols, cols);
+    ganita_mat_svd(A, full_u, full_s, full_vt);
 
     # Copy top k singular values
     var i = 0;
@@ -744,7 +744,7 @@ fn svd_truncated(A, k, out_U, out_S, out_Vt) {
     while (i < rows) {
         var j = 0;
         while (j < k) {
-            mat_set(out_U, i, j, mat_get(full_u, i, j));
+            ganita_mat_set(out_U, i, j, ganita_mat_get(full_u, i, j));
             j = j + 1;
         }
         i = i + 1;
@@ -755,7 +755,7 @@ fn svd_truncated(A, k, out_U, out_S, out_Vt) {
     while (i < k) {
         var j = 0;
         while (j < cols) {
-            mat_set(out_Vt, i, j, mat_get(full_vt, i, j));
+            ganita_mat_set(out_Vt, i, j, ganita_mat_get(full_vt, i, j));
             j = j + 1;
         }
         i = i + 1;
@@ -796,7 +796,7 @@ fn eigen_power(A, n, max_iter, out_val, out_vec) {
     # iterates on A's leading n x n block and returns 0 with the dominant
     # eigenvalue of a matrix the caller did not pass. Neither is a shape this
     # routine can legitimately answer for, so both are rejected.
-    if (mat_rows(A) != n || mat_cols(A) != n) { return HSB_ERR_INVALID_INPUT; }
+    if (ganita_mat_rows(A) != n || ganita_mat_cols(A) != n) { return HSB_ERR_INVALID_INPUT; }
 
     # Initial guess: unit vector e_0
     var v = alloc(n * 8);
@@ -818,7 +818,7 @@ fn eigen_power(A, n, max_iter, out_val, out_vec) {
             var sum = f64_from(0);
             var j = 0;
             while (j < n) {
-                sum = f64_add(sum, f64_mul(mat_get(A, i, j), load64(v + j * 8)));
+                sum = f64_add(sum, f64_mul(ganita_mat_get(A, i, j), load64(v + j * 8)));
                 j = j + 1;
             }
             store64(w + i * 8, sum);
@@ -899,7 +899,7 @@ fn eigen_power(A, n, max_iter, out_val, out_vec) {
 # unchanged. This is a behaviour change for any caller that read eigen_symmetric's
 # raw Jacobi order -- see CHANGELOG "Breaking".
 fn eigen_symmetric(A, n, out_vals, out_vecs) {
-    var result = mat_eigen_sym(A, out_vals, out_vecs);
+    var result = ganita_mat_eigen_sym(A, out_vals, out_vecs);
     if (result < 0) { return HSB_ERR_NO_CONVERGENCE; }
 
     # Selection sort by descending |eigenvalue|, columns of out_vecs carried
@@ -925,9 +925,9 @@ fn eigen_symmetric(A, n, out_vals, out_vecs) {
             store64(out_vals + max_idx * 8, tmp);
             var k = 0;
             while (k < n) {
-                var tv = mat_get(out_vecs, k, i);
-                mat_set(out_vecs, k, i, mat_get(out_vecs, k, max_idx));
-                mat_set(out_vecs, k, max_idx, tv);
+                var tv = ganita_mat_get(out_vecs, k, i);
+                ganita_mat_set(out_vecs, k, i, ganita_mat_get(out_vecs, k, max_idx));
+                ganita_mat_set(out_vecs, k, max_idx, tv);
                 k = k + 1;
             }
         }
@@ -965,7 +965,7 @@ fn lyapunov_max(A, n, iterations, out) {
     # THE n x n PRECONDITION IS NOW CHECKED, NOT JUST DOCUMENTED. n is a
     # restatement of A's extent and mat_mul(A, Q) conforms only when A is n x n;
     # a mismatch is a caller error with no meaningful answer, so it is rejected.
-    if (mat_rows(A) != n || mat_cols(A) != n) { return HSB_ERR_INVALID_INPUT; }
+    if (ganita_mat_rows(A) != n || ganita_mat_cols(A) != n) { return HSB_ERR_INVALID_INPUT; }
 
     # mat_new_guarded, not mat_new: it propagates the designed 0 for an n this
     # module considers unreasonable instead of allocating it.
@@ -976,7 +976,7 @@ fn lyapunov_max(A, n, iterations, out) {
 
     # Initialize Q to identity
     var i = 0;
-    while (i < n) { mat_set(Q, i, i, f64_from(1)); i = i + 1; }
+    while (i < n) { ganita_mat_set(Q, i, i, f64_from(1)); i = i + 1; }
 
     var sum_log = f64_from(0);
     var count = 0;
@@ -984,16 +984,16 @@ fn lyapunov_max(A, n, iterations, out) {
     var iter = 0;
     while (iter < iterations) {
         # Z = A * Q
-        var Z = mat_mul(A, Q);
+        var Z = ganita_mat_mul(A, Q);
         # mat_mul allocates; a failed allocation is a 0 that mat_qr would read
         # through. Bail with the allocation code rather than store into address 0.
         if (Z == 0) { return HSB_ERR_ALLOC; }
 
         # QR decompose Z -> Q, R
-        mat_qr(Z, Q, R);
+        ganita_mat_qr(Z, Q, R);
 
         # Accumulate log of |R[0][0]| (dominant direction growth)
-        var r00 = f64_abs(mat_get(R, 0, 0));
+        var r00 = f64_abs(ganita_mat_get(R, 0, 0));
         if (f64_gt(r00, EPSILON_F64) == 1) {
             sum_log = f64_add(sum_log, f64_ln(r00));
             count = count + 1;
@@ -1018,10 +1018,10 @@ fn lyapunov_max(A, n, iterations, out) {
 # Returns: 3x3 stdlib matrix.
 fn inertia_sphere(mass, radius) {
     var I = f64_mul(f64_div(f64_from(2), f64_from(5)), f64_mul(mass, f64_mul(radius, radius)));
-    var m = mat_new(3, 3);
-    mat_set(m, 0, 0, I);
-    mat_set(m, 1, 1, I);
-    mat_set(m, 2, 2, I);
+    var m = ganita_mat_new(3, 3);
+    ganita_mat_set(m, 0, 0, I);
+    ganita_mat_set(m, 1, 1, I);
+    ganita_mat_set(m, 2, 2, I);
     return m;
 }
 
@@ -1034,10 +1034,10 @@ fn inertia_box(mass, hx, hy, hz) {
     var d = f64_mul(f64_from(2), hz);
     var c = f64_div(mass, f64_from(12));
 
-    var m = mat_new(3, 3);
-    mat_set(m, 0, 0, f64_mul(c, f64_add(f64_mul(h, h), f64_mul(d, d))));
-    mat_set(m, 1, 1, f64_mul(c, f64_add(f64_mul(w, w), f64_mul(d, d))));
-    mat_set(m, 2, 2, f64_mul(c, f64_add(f64_mul(w, w), f64_mul(h, h))));
+    var m = ganita_mat_new(3, 3);
+    ganita_mat_set(m, 0, 0, f64_mul(c, f64_add(f64_mul(h, h), f64_mul(d, d))));
+    ganita_mat_set(m, 1, 1, f64_mul(c, f64_add(f64_mul(w, w), f64_mul(d, d))));
+    ganita_mat_set(m, 2, 2, f64_mul(c, f64_add(f64_mul(w, w), f64_mul(h, h))));
     return m;
 }
 
@@ -1048,11 +1048,11 @@ fn inertia_box(mass, hx, hy, hz) {
 # Condition number of a square matrix: cond(A) = ||A|| * ||A^-1||
 # Uses Frobenius norm. Returns f64. Returns -1 if singular.
 fn matrix_condition_number(A) {
-    var n = mat_rows(A);
-    var norm_a = mat_frobenius(A);
-    var inv_a = mat_inv(A);
+    var n = ganita_mat_rows(A);
+    var norm_a = ganita_mat_frobenius(A);
+    var inv_a = ganita_mat_inv(A);
     if (inv_a == 0) { return f64_neg(F64_ONE); }
-    var norm_inv = mat_frobenius(inv_a);
+    var norm_inv = ganita_mat_frobenius(inv_a);
     return f64_mul(norm_a, norm_inv);
 }
 

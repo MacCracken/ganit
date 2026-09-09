@@ -167,7 +167,7 @@ fn su2_exp(v) {
 # returning half the correct vector — the log counterpart of the su2_exp bug above.
 fn su2_log(s) {
     var w = f64_clamp(_su2_w(s), f64_neg(F64_ONE), F64_ONE);
-    var half_theta = f64_acos(w);
+    var half_theta = ganita_f64_acos(w);
     var sin_half = f64_sin(half_theta);
     if (f64_lt(f64_abs(sin_half), EPSILON_F64) == 1) {
         return hvec3_new(0, 0, 0);
@@ -351,8 +351,8 @@ fn lorentz_identity() { return m4_identity(); }
 # comment directly contradicted each other.
 # Lambda = [[cosh, sinh, 0, 0], [sinh, cosh, 0, 0], [0,0,1,0], [0,0,0,1]]
 fn lorentz_boost_x(eta) {
-    var ch = f64_cosh(eta);
-    var sh = f64_sinh(eta);
+    var ch = ganita_f64_cosh(eta);
+    var sh = ganita_f64_sinh(eta);
     var m = m4_new();
     m4_set(m, 0, 0, ch);   # Lambda^0_0
     m4_set(m, 1, 0, sh);   # Lambda^0_1
@@ -365,8 +365,8 @@ fn lorentz_boost_x(eta) {
 
 # Pure boost along y-axis with rapidity eta
 fn lorentz_boost_y(eta) {
-    var ch = f64_cosh(eta);
-    var sh = f64_sinh(eta);
+    var ch = ganita_f64_cosh(eta);
+    var sh = ganita_f64_sinh(eta);
     var m = m4_new();
     m4_set(m, 0, 0, ch);
     m4_set(m, 2, 0, sh);   # Lambda^0_2
@@ -379,8 +379,8 @@ fn lorentz_boost_y(eta) {
 
 # Pure boost along z-axis with rapidity eta
 fn lorentz_boost_z(eta) {
-    var ch = f64_cosh(eta);
-    var sh = f64_sinh(eta);
+    var ch = ganita_f64_cosh(eta);
+    var sh = ganita_f64_sinh(eta);
     var m = m4_new();
     m4_set(m, 0, 0, ch);
     m4_set(m, 3, 0, sh);   # Lambda^0_3
@@ -402,8 +402,8 @@ fn lorentz_boost(dir, eta) {
     var inv = f64_div(F64_ONE, norm);
     nx = f64_mul(nx, inv); ny = f64_mul(ny, inv); nz = f64_mul(nz, inv);
 
-    var ch = f64_cosh(eta);
-    var sh = f64_sinh(eta);
+    var ch = ganita_f64_cosh(eta);
+    var sh = ganita_f64_sinh(eta);
     var gm1 = f64_sub(ch, F64_ONE);  # cosh(eta) - 1
 
     var m = m4_new();

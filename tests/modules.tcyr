@@ -4120,7 +4120,7 @@ fn _ad_fd_sweep() {
         _AD_BAD = _AD_BAD + _ad_fd_cmp(Dual_deriv(dual_ln(v)), f64_ln(xl), f64_ln(xh), h);
         _AD_BAD = _AD_BAD + _ad_fd_cmp(Dual_deriv(dual_sqrt(v)), f64_sqrt(xl), f64_sqrt(xh), h);
         _AD_BAD = _AD_BAD + _ad_fd_cmp(Dual_deriv(dual_pow(v, k)),
-          f64_pow(xl, k), f64_pow(xh, k), h);
+          ganita_f64_pow(xl, k), ganita_f64_pow(xh, k), h);
         _AD_BAD = _AD_BAD + _ad_fd_cmp(Dual_deriv(dual_abs(v)), f64_abs(xl), f64_abs(xh), h);
     }
     return 0;
@@ -4461,21 +4461,21 @@ test_group("2.11.2 stdlib: the f64_pow domain moved under us (ganita 1.0.4 -> 1.
 # _ad_pow(-2,4) still exactly 16 -- which is what a control is for. A group where
 # every line flipped would mean the controls were not controls.
 # [measured: 2026-08-21, ganita 1.0.4 vs 1.1.4, same test file]
-assert_eq(f64_eq(f64_pow(f64_neg(F64_TWO), f64_from(3)),
-    f64_pow(f64_neg(F64_TWO), f64_from(3))), 1,
-  "f64_pow(-2,3) is a number, not NaN (was NaN under ganita 1.0.4)");
-assert_eq(f64_to(f64_round(f64_pow(f64_neg(F64_TWO), f64_from(3)))), 0 - 8,
-  "f64_pow(-2,3) rounds to -8");
-assert_eq(f64_to(f64_pow(f64_from(0), f64_from(0))), 1,
-  "f64_pow(0,0) is 1, the conventional value (was NaN)");
-assert_eq(f64_to(f64_pow(f64_neg(F64_TWO), f64_from(0))), 1,
-  "f64_pow(-2,0) is 1 -- x^0 wins over the negative-base case");
+assert_eq(f64_eq(ganita_f64_pow(f64_neg(F64_TWO), f64_from(3)),
+    ganita_f64_pow(f64_neg(F64_TWO), f64_from(3))), 1,
+  "ganita_f64_pow(-2,3) is a number, not NaN (was NaN under ganita 1.0.4)");
+assert_eq(f64_to(f64_round(ganita_f64_pow(f64_neg(F64_TWO), f64_from(3)))), 0 - 8,
+  "ganita_f64_pow(-2,3) rounds to -8");
+assert_eq(f64_to(ganita_f64_pow(f64_from(0), f64_from(0))), 1,
+  "ganita_f64_pow(0,0) is 1, the conventional value (was NaN)");
+assert_eq(f64_to(ganita_f64_pow(f64_neg(F64_TWO), f64_from(0))), 1,
+  "ganita_f64_pow(-2,0) is 1 -- x^0 wins over the negative-base case");
 # ⚠ AND THE CONTROL, same shape as the one above it: the domain must have widened
 # EXACTLY as far as the integers. A non-integral exponent on a negative base has no
 # real value and must still be NaN, or upstream replaced one fabrication with another.
-assert_eq(f64_eq(f64_pow(f64_neg(F64_TWO), F64_HALF),
-    f64_pow(f64_neg(F64_TWO), F64_HALF)), 0,
-  "f64_pow(-2,0.5) is still NaN -- the domain widened to the integers, not past them");
+assert_eq(f64_eq(ganita_f64_pow(f64_neg(F64_TWO), F64_HALF),
+    ganita_f64_pow(f64_neg(F64_TWO), F64_HALF)), 0,
+  "ganita_f64_pow(-2,0.5) is still NaN -- the domain widened to the integers, not past them");
 
 # ⭐ THE STDLIB PATH IS NOW EXACT, AND THE ULP GAP THAT JUSTIFIED _ad_pow IS GONE.
 # ganita 1.2.4 replaced exp(n*ln|base|) with BINARY EXPONENTIATION for an integral
@@ -4491,22 +4491,22 @@ assert_eq(f64_eq(f64_pow(f64_neg(F64_TWO), F64_HALF),
 # f64_pow(-2,3)=0xc020000000000000 (-8.0), f64_pow(2,10)=0x4090000000000000 (1024.0),
 # f64_pow(-2,5)=0xc040000000000000 (-32.0); read 15 and -7 under ganita 1.1.4.
 # [measured: tests/modules.tcyr:4494]
-assert_eq(f64_pow(f64_neg(F64_TWO), f64_from(4)), f64_from(16),
-  "f64_pow(-2,4) is now BIT-EXACT 16.0 -- ganita 1.2.4 binary exponentiation");
+assert_eq(ganita_f64_pow(f64_neg(F64_TWO), f64_from(4)), f64_from(16),
+  "ganita_f64_pow(-2,4) is now BIT-EXACT 16.0 -- ganita 1.2.4 binary exponentiation");
 assert_eq(f64_to(_ad_pow(f64_neg(F64_TWO), f64_from(4))), 16,
   "_ad_pow(-2,4) is exactly 16 -- repeated multiplication");
 # ⚠ _ad_pow now AGREES with the stdlib bit for bit, so this pair no longer
 # discriminates the two implementations. _ad_pow stays because autodiff needs the
 # value AND the derivative from one call, not because it is more accurate.
-assert_eq(f64_pow(f64_neg(F64_TWO), f64_from(4)),
+assert_eq(ganita_f64_pow(f64_neg(F64_TWO), f64_from(4)),
   _ad_pow(f64_neg(F64_TWO), f64_from(4)),
   "f64_pow and _ad_pow now agree bit for bit on (-2)^4");
 # The exactness is not special to one input -- three more integer powers, as bits.
-assert_eq(f64_pow(F64_TWO, f64_from(10)), f64_from(1024), "f64_pow(2,10) bit-exact 1024");
-assert_eq(f64_pow(f64_neg(F64_TWO), f64_from(3)), f64_neg(f64_from(8)),
-  "f64_pow(-2,3) bit-exact -8 (was -7 through the exp/ln path)");
-assert_eq(f64_pow(f64_neg(F64_TWO), f64_from(5)), f64_neg(f64_from(32)),
-  "f64_pow(-2,5) bit-exact -32");
+assert_eq(ganita_f64_pow(F64_TWO, f64_from(10)), f64_from(1024), "ganita_f64_pow(2,10) bit-exact 1024");
+assert_eq(ganita_f64_pow(f64_neg(F64_TWO), f64_from(3)), f64_neg(f64_from(8)),
+  "ganita_f64_pow(-2,3) bit-exact -8 (was -7 through the exp/ln path)");
+assert_eq(ganita_f64_pow(f64_neg(F64_TWO), f64_from(5)), f64_neg(f64_from(32)),
+  "ganita_f64_pow(-2,5) bit-exact -32");
 
 # The one _ad_pow path that inherits the change: acc underflows for a negative
 # exponent and hands off to f64_pow. Was NaN under 1.0.4, is +Inf now -- and +Inf is
@@ -7245,10 +7245,10 @@ assert_eq(load64(csh), load64(csh2), "sh_eval_l2 DC term is direction-independen
 test_group("linalg_ext CSR + ode implicit integrators -- previously untested");
 
 # --- CSR sparse. A = [[1,0,2],[0,3,0],[4,0,5]] ---
-var cs_d = mat_new(3, 3);
-mat_set(cs_d, 0, 0, F64_ONE);       mat_set(cs_d, 0, 2, F64_TWO);
-mat_set(cs_d, 1, 1, f64_from(3));
-mat_set(cs_d, 2, 0, f64_from(4));   mat_set(cs_d, 2, 2, f64_from(5));
+var cs_d = ganita_mat_new(3, 3);
+ganita_mat_set(cs_d, 0, 0, F64_ONE);       ganita_mat_set(cs_d, 0, 2, F64_TWO);
+ganita_mat_set(cs_d, 1, 1, f64_from(3));
+ganita_mat_set(cs_d, 2, 0, f64_from(4));   ganita_mat_set(cs_d, 2, 2, f64_from(5));
 var cs = csr_from_dense(cs_d);
 assert_neq(cs, 0, "csr_from_dense returns a matrix");
 assert_eq(csr_nrows(cs), 3, "csr_nrows = 3");
@@ -7285,12 +7285,12 @@ var ib = inertia_box(f64_from(12), F64_ONE, F64_ONE, F64_ONE);
 assert_neq(ib, 0, "inertia_box returns a tensor");
 # Returns a Mat3, not a vector. Formula uses FULL extents: w = 2*hx, so for
 # m = 12 and half-extents (1,1,1) the box is 2x2x2 and I_xx = (m/12)(h^2+d^2) = 8.
-assert_eq(f64_to(mat_get(ib, 0, 0)), 8, "inertia_box 2x2x2 cube I_xx = (m/12)(h^2+d^2) = 8");
-assert_eq(f64_to(mat_get(ib, 2, 2)), 8, "inertia_box cube is isotropic");
-assert_eq(f64_to(mat_get(ib, 0, 1)), 0, "inertia_box is diagonal for an axis-aligned box");
+assert_eq(f64_to(ganita_mat_get(ib, 0, 0)), 8, "inertia_box 2x2x2 cube I_xx = (m/12)(h^2+d^2) = 8");
+assert_eq(f64_to(ganita_mat_get(ib, 2, 2)), 8, "inertia_box cube is isotropic");
+assert_eq(f64_to(ganita_mat_get(ib, 0, 1)), 0, "inertia_box is diagonal for an axis-aligned box");
 
 # --- matrix_condition_number: identity is perfectly conditioned.
-var mc_i = mat_identity(3);
+var mc_i = ganita_mat_identity(3);
 var mc = matrix_condition_number(mc_i);
 # This uses the FROBENIUS norm, not the 2-norm, so cond(I_3) = sqrt(3)*sqrt(3) = 3,
 # not 1. The doc says ||A|| * ||A^-1|| without naming the norm, so it is
@@ -7298,16 +7298,16 @@ var mc = matrix_condition_number(mc_i);
 assert(f64_lt(f64_abs(f64_sub(mc, f64_from(3))), LOOSE_TOL_M) == 1,
   "cond_F(I_3) = ||I||_F * ||I^-1||_F = 3");
 # A badly-scaled matrix must score worse than the identity.
-var mc_b = mat_new(2, 2);
-mat_set(mc_b, 0, 0, f64_from(1000)); mat_set(mc_b, 1, 1, f64_div(F64_ONE, f64_from(1000)));
+var mc_b = ganita_mat_new(2, 2);
+ganita_mat_set(mc_b, 0, 0, f64_from(1000)); ganita_mat_set(mc_b, 1, 1, f64_div(F64_ONE, f64_from(1000)));
 assert(f64_gt(matrix_condition_number(mc_b), mc) == 1,
   "cond(diag(1000, 0.001)) is far worse than cond(I)");
 
 # --- eigen_symmetric on diag(3,1): eigenvalues 3 and 1.
-var es_A = mat_new(2, 2);
-mat_set(es_A, 0, 0, f64_from(3)); mat_set(es_A, 1, 1, F64_ONE);
+var es_A = ganita_mat_new(2, 2);
+ganita_mat_set(es_A, 0, 0, f64_from(3)); ganita_mat_set(es_A, 1, 1, F64_ONE);
 var es_vals = alloc(16);
-var es_vecs = mat_new(2, 2);
+var es_vecs = ganita_mat_new(2, 2);
 assert_eq(eigen_symmetric(es_A, 2, es_vals, es_vecs), HSB_ERR_NONE, "eigen_symmetric converges");
 assert_eq(f64_to(load64(es_vals)), 3, "eigen_symmetric dominant eigenvalue = 3");
 
@@ -7804,7 +7804,7 @@ assert(f64_lt(f64_abs(f64_sub(as_ln, f64_ln(F64_TWO))), TOL_1EM14) == 1,
 # 0.6702 against a true 0.1471 -- 355% error -- and only adaptivity recovers it.
 var as_pk = calc_adaptive_simpson(&_as_peak, 0, F64_ONE,
   f64_div(F64_ONE, f64_from(100000000000)));
-var as_pk_want = f64_mul(f64_div(F64_ONE, f64_from(10)), f64_atan2(f64_from(10), F64_ONE));
+var as_pk_want = f64_mul(f64_div(F64_ONE, f64_from(10)), ganita_f64_atan2(f64_from(10), F64_ONE));
 assert(f64_lt(f64_abs(f64_sub(as_pk, as_pk_want)), f64_div(F64_ONE, f64_from(100000000000))) == 1,
   "adaptive Simpson resolves a narrow peak: (1/10) atan(10)");
 
@@ -7923,16 +7923,16 @@ assert(f64_lt(f64_abs(load64(c80_ox)), f64_div(F64_ONE, f64_from(1000))) == 1,
   "conjugate gradient finds x* = 0");
 
 # Lyapunov exponent of the identity map is 0 (no expansion).
-var c80_I = mat_identity(2);
+var c80_I = ganita_mat_identity(2);
 var c80_ly = alloc(8);
 assert_eq(lyapunov_max(c80_I, 2, 50, c80_ly), HSB_ERR_NONE, "lyapunov_max runs");
 assert(f64_lt(f64_abs(load64(c80_ly)), LOOSE_TOL_M) == 1, "lyapunov of the identity is 0");
 
 # svd_compute on a diagonal matrix gives its diagonal as the singular values.
-var c80_A = mat_new(2, 2);
-mat_set(c80_A, 0, 0, f64_from(3)); mat_set(c80_A, 1, 1, F64_TWO);
-var c80_U = mat_new(2, 2);
-var c80_V = mat_new(2, 2);
+var c80_A = ganita_mat_new(2, 2);
+ganita_mat_set(c80_A, 0, 0, f64_from(3)); ganita_mat_set(c80_A, 1, 1, F64_TWO);
+var c80_U = ganita_mat_new(2, 2);
+var c80_V = ganita_mat_new(2, 2);
 var c80_S = alloc(16);
 assert_eq(svd_compute(c80_A, c80_U, c80_S, c80_V), HSB_ERR_NONE, "svd_compute succeeds");
 assert(f64_lt(f64_abs(f64_sub(load64(c80_S), f64_from(3))), LOOSE_TOL_M) == 1,

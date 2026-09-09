@@ -1358,11 +1358,11 @@ fn _lp_check_svd(A, m, n, U, S, Vt, label) {
             var acc = f64_from(0);
             var k = 0;
             while (k < n) {
-                acc = f64_add(acc, f64_mul(f64_mul(mat_get(U, i, k), load64(S + k * 8)),
-                    mat_get(Vt, k, j)));
+                acc = f64_add(acc, f64_mul(f64_mul(ganita_mat_get(U, i, k), load64(S + k * 8)),
+                    ganita_mat_get(Vt, k, j)));
                 k = k + 1;
             }
-            if (f64_approx_eq(acc, mat_get(A, i, j), LOOSE_TOL_H) == 0) { bad = bad + 1; }
+            if (f64_approx_eq(acc, ganita_mat_get(A, i, j), LOOSE_TOL_H) == 0) { bad = bad + 1; }
             j = j + 1;
         }
         i = i + 1;
@@ -1381,10 +1381,10 @@ fn _lp_check_eig(A, n, vals, V, label) {
             var av = f64_from(0);
             var k = 0;
             while (k < n) {
-                av = f64_add(av, f64_mul(mat_get(A, i, k), mat_get(V, k, c)));
+                av = f64_add(av, f64_mul(ganita_mat_get(A, i, k), ganita_mat_get(V, k, c)));
                 k = k + 1;
             }
-            if (f64_approx_eq(av, f64_mul(lam, mat_get(V, i, c)), LOOSE_TOL_H) == 0) {
+            if (f64_approx_eq(av, f64_mul(lam, ganita_mat_get(V, i, c)), LOOSE_TOL_H) == 0) {
                 bad = bad + 1;
             }
             i = i + 1;
@@ -1412,12 +1412,14 @@ assert_neq(_ci, 0, "cmat_new(250,250) = 62500 is under the cap");
 assert_eq(cmat_inverse(_ci), 0, "cmat_inverse: augmented 250x500 over cap -> 0 (no segv)");
 
 test_group("linalg_precision: svd_golub_kahan A == U*S*Vt");
-var lps_A = mat_new(3, 3);
-mat_set(lps_A, 0, 0, F64_ONE);      mat_set(lps_A, 0, 1, F64_TWO);      mat_set(lps_A, 0, 2, f64_from(3));
-mat_set(lps_A, 1, 0, f64_from(4));  mat_set(lps_A, 1, 1, f64_from(5));  mat_set(lps_A, 1, 2, f64_from(6));
-mat_set(lps_A, 2, 0, f64_from(7));  mat_set(lps_A, 2, 1, f64_from(8));  mat_set(lps_A, 2, 2, f64_from(10));
-var lps_U = mat_new(3, 3);
-var lps_Vt = mat_new(3, 3);
+var lps_A = ganita_mat_new(3, 3);
+ganita_mat_set(lps_A, 0, 0, F64_ONE); ganita_mat_set(lps_A, 0, 1, F64_TWO); ganita_mat_set(lps_A, 0, 2, f64_from(3));
+ganita_mat_set(lps_A, 1, 0, f64_from(4)); ganita_mat_set(lps_A, 1, 1, f64_from(5));
+ganita_mat_set(lps_A, 1, 2, f64_from(6));
+ganita_mat_set(lps_A, 2, 0, f64_from(7)); ganita_mat_set(lps_A, 2, 1, f64_from(8));
+ganita_mat_set(lps_A, 2, 2, f64_from(10));
+var lps_U = ganita_mat_new(3, 3);
+var lps_Vt = ganita_mat_new(3, 3);
 var lps_S = alloc(24);
 assert_eq(svd_golub_kahan(lps_A, lps_U, lps_S, lps_Vt), HSB_ERR_NONE, "svd returns HSB_ERR_NONE");
 _lp_check_svd(lps_A, 3, 3, lps_U, lps_S, lps_Vt, "svd: A == U*S*Vt (non-symmetric 3x3)");
@@ -1426,22 +1428,22 @@ assert(f64_ge(load64(lps_S + 8), load64(lps_S + 16)) == 1, "svd: S sorted descen
 assert(f64_ge(load64(lps_S + 16), 0) == 1, "svd: singular values non-negative");
 
 test_group("linalg_precision: eigen_qr A*v == lambda*v");
-var lpe_A2 = mat_new(2, 2);
-mat_set(lpe_A2, 0, 0, F64_TWO); mat_set(lpe_A2, 0, 1, F64_ONE);
-mat_set(lpe_A2, 1, 0, F64_ONE); mat_set(lpe_A2, 1, 1, F64_TWO);
+var lpe_A2 = ganita_mat_new(2, 2);
+ganita_mat_set(lpe_A2, 0, 0, F64_TWO); ganita_mat_set(lpe_A2, 0, 1, F64_ONE);
+ganita_mat_set(lpe_A2, 1, 0, F64_ONE); ganita_mat_set(lpe_A2, 1, 1, F64_TWO);
 var lpe_v2 = alloc(16);
-var lpe_V2 = mat_new(2, 2);
+var lpe_V2 = ganita_mat_new(2, 2);
 assert_eq(eigen_qr(lpe_A2, 2, 1000, lpe_v2, lpe_V2), HSB_ERR_NONE, "eigen_qr 2x2 converges");
 assert(f64_approx_eq(load64(lpe_v2), f64_from(3), LOOSE_TOL_H) == 1, "eigen_qr 2x2 lambda0=3");
 assert(f64_approx_eq(load64(lpe_v2 + 8), F64_ONE, LOOSE_TOL_H) == 1, "eigen_qr 2x2 lambda1=1");
 _lp_check_eig(lpe_A2, 2, lpe_v2, lpe_V2, "eigen_qr 2x2: A*v == lambda*v (pairing)");
 
-var lpe_A3 = mat_new(3, 3);
-mat_set(lpe_A3, 0, 0, f64_from(4)); mat_set(lpe_A3, 0, 1, F64_ONE);     mat_set(lpe_A3, 0, 2, 0);
-mat_set(lpe_A3, 1, 0, F64_ONE);     mat_set(lpe_A3, 1, 1, f64_from(3)); mat_set(lpe_A3, 1, 2, F64_ONE);
-mat_set(lpe_A3, 2, 0, 0);           mat_set(lpe_A3, 2, 1, F64_ONE);     mat_set(lpe_A3, 2, 2, F64_TWO);
+var lpe_A3 = ganita_mat_new(3, 3);
+ganita_mat_set(lpe_A3, 0, 0, f64_from(4)); ganita_mat_set(lpe_A3, 0, 1, F64_ONE);     ganita_mat_set(lpe_A3, 0, 2, 0);
+ganita_mat_set(lpe_A3, 1, 0, F64_ONE); ganita_mat_set(lpe_A3, 1, 1, f64_from(3)); ganita_mat_set(lpe_A3, 1, 2, F64_ONE);
+ganita_mat_set(lpe_A3, 2, 0, 0); ganita_mat_set(lpe_A3, 2, 1, F64_ONE); ganita_mat_set(lpe_A3, 2, 2, F64_TWO);
 var lpe_v3 = alloc(24);
-var lpe_V3 = mat_new(3, 3);
+var lpe_V3 = ganita_mat_new(3, 3);
 assert_eq(eigen_qr(lpe_A3, 3, 10000, lpe_v3, lpe_V3), HSB_ERR_NONE,
   "eigen_qr 3x3 CONVERGES (was NO_CONVERGENCE at any iteration count)");
 # 2 + 2*cos(pi/4) = 4.732050807568877, 3, 2 - 2*cos(pi/4) = 1.2679491924311228
@@ -1455,13 +1457,13 @@ _lp_check_eig(lpe_A3, 3, lpe_v3, lpe_V3, "eigen_qr 3x3: A*v == lambda*v");
 # Inertia sphere: I = (2/5)*m*r^2 on diagonal
 var isph = inertia_sphere(f64_from(10), F64_ONE);
 # I = (2/5)*10*1 = 4
-assert_eq(f64_to(mat_get(isph, 0, 0)), 4, "inertia sphere diag");
-assert_eq(f64_to(mat_get(isph, 0, 1)), 0, "inertia sphere off-diag");
+assert_eq(f64_to(ganita_mat_get(isph, 0, 0)), 4, "inertia sphere diag");
+assert_eq(f64_to(ganita_mat_get(isph, 0, 1)), 0, "inertia sphere off-diag");
 
 # Eigen power: dominant eigenvalue of [[2,0],[0,1]] = 2
-var epm = mat_new(2, 2);
-mat_set(epm, 0, 0, f64_from(2));
-mat_set(epm, 1, 1, F64_ONE);
+var epm = ganita_mat_new(2, 2);
+ganita_mat_set(epm, 0, 0, f64_from(2));
+ganita_mat_set(epm, 1, 1, F64_ONE);
 var ep_val = alloc(8);
 var ep_vec = alloc(16);
 # Through 2.6.15: A = diag(2,1) with round(val) == 2, i.e. anything in [1.5,2.5)
@@ -1474,9 +1476,9 @@ var ep_vec = alloc(16);
 # scaled to max-|component| = 1 (this routine's normalization) is
 #   v = (1/phi, 1) = (0.6180339887498949, 1).
 # Convergence ratio |lambda_2/lambda_1| = 0.381966, so 1000 iterations is ample.
-var epm = mat_new(2, 2);
-mat_set(epm, 0, 0, F64_TWO);   mat_set(epm, 0, 1, F64_ONE);
-mat_set(epm, 1, 0, F64_ONE);   mat_set(epm, 1, 1, f64_from(3));
+var epm = ganita_mat_new(2, 2);
+ganita_mat_set(epm, 0, 0, F64_TWO);   ganita_mat_set(epm, 0, 1, F64_ONE);
+ganita_mat_set(epm, 1, 0, F64_ONE);   ganita_mat_set(epm, 1, 1, f64_from(3));
 var ep_val = alloc(8);
 var ep_vec = alloc(16);
 var ep_rc = eigen_power(epm, 2, 1000, ep_val, ep_vec);
@@ -1496,11 +1498,11 @@ assert(f64_lt(f64_abs(f64_sub(f64_add(load64(ep_vec), f64_mul(f64_from(3), load6
 
 # 3x3 with a degenerate trailing spectrum: A = 3I + J (J = all ones).
 # J has eigenvalues (3,0,0), so A has (6,3,3): lambda_1 = 6, v = (1,1,1).
-var ep3 = mat_new(3, 3);
+var ep3 = ganita_mat_new(3, 3);
 for (var ep3i = 0; ep3i < 3; ep3i = ep3i + 1) {
     for (var ep3j = 0; ep3j < 3; ep3j = ep3j + 1) {
-        if (ep3i == ep3j) { mat_set(ep3, ep3i, ep3j, f64_from(4)); }
-        else { mat_set(ep3, ep3i, ep3j, F64_ONE); }
+        if (ep3i == ep3j) { ganita_mat_set(ep3, ep3i, ep3j, f64_from(4)); }
+        else { ganita_mat_set(ep3, ep3i, ep3j, F64_ONE); }
     }
 }
 var ep3_val = alloc(8);
@@ -1515,9 +1517,9 @@ assert(f64_approx_eq(load64(ep3_vec + 16), F64_ONE, EP_TOL), "eigen_power 3x3 v[
 # A = [[1,2],[3,4]]: lambda_1 = (5+sqrt33)/2 = 5.372281323269014.
 #   right dominant eigenvector (max-component normalized) = (0.4574271077563381, 1)
 #   LEFT  dominant eigenvector (what a transposed matvec yields) = (0.6861406616345072, 1)
-var epn = mat_new(2, 2);
-mat_set(epn, 0, 0, F64_ONE);       mat_set(epn, 0, 1, F64_TWO);
-mat_set(epn, 1, 0, f64_from(3));   mat_set(epn, 1, 1, f64_from(4));
+var epn = ganita_mat_new(2, 2);
+ganita_mat_set(epn, 0, 0, F64_ONE);       ganita_mat_set(epn, 0, 1, F64_TWO);
+ganita_mat_set(epn, 1, 0, f64_from(3));   ganita_mat_set(epn, 1, 1, f64_from(4));
 var epn_val = alloc(8);
 var epn_vec = alloc(16);
 assert_eq(eigen_power(epn, 2, 1000, epn_val, epn_vec), 0, "eigen_power nonsym ok");
@@ -1530,9 +1532,9 @@ assert(f64_approx_eq(load64(epn_vec + 8), F64_ONE, EP_TOL), "eigen_power nonsym 
 # GAP 2: both matrices above have a POSITIVE dominant eigenvalue and a positive
 # eigenvector, so max_val = wi -> max_val = f64_abs(wi) is invisible.
 # B = [[-3,1],[1,-2]]: lambda_1 = -(5+sqrt5)/2 = -3.618033988749895, v = (1, -1/phi).
-var epb = mat_new(2, 2);
-mat_set(epb, 0, 0, f64_neg(f64_from(3)));   mat_set(epb, 0, 1, F64_ONE);
-mat_set(epb, 1, 0, F64_ONE);                mat_set(epb, 1, 1, f64_neg(F64_TWO));
+var epb = ganita_mat_new(2, 2);
+ganita_mat_set(epb, 0, 0, f64_neg(f64_from(3)));   ganita_mat_set(epb, 0, 1, F64_ONE);
+ganita_mat_set(epb, 1, 0, F64_ONE);                ganita_mat_set(epb, 1, 1, f64_neg(F64_TWO));
 var epb_val = alloc(8);
 var epb_vec = alloc(16);
 assert_eq(eigen_power(epb, 2, 1000, epb_val, epb_vec), 0, "eigen_power negdom ok");
@@ -1543,9 +1545,9 @@ assert(f64_approx_eq(load64(epb_vec + 8), 0xBFE3C6EF372FE94F, EP_TOL),
   "eigen_power negdom v[1] = -1/phi");
 
 # PGS: solve [[4,1],[1,3]]*x = [1,2] with no bounds
-var pgs_A = mat_new(2, 2);
-mat_set(pgs_A, 0, 0, f64_from(4)); mat_set(pgs_A, 0, 1, F64_ONE);
-mat_set(pgs_A, 1, 0, F64_ONE); mat_set(pgs_A, 1, 1, f64_from(3));
+var pgs_A = ganita_mat_new(2, 2);
+ganita_mat_set(pgs_A, 0, 0, f64_from(4)); ganita_mat_set(pgs_A, 0, 1, F64_ONE);
+ganita_mat_set(pgs_A, 1, 0, F64_ONE); ganita_mat_set(pgs_A, 1, 1, f64_from(3));
 var pgs_b = alloc(16);
 store64(pgs_b, F64_ONE); store64(pgs_b + 8, F64_TWO);
 var pgs_x = alloc(16);
@@ -1559,9 +1561,9 @@ assert_eq(f64_to(f64_mul(load64(pgs_x), f64_from(1000))), 90, "pgs x0 ≈ 0.0909
 assert_eq(f64_to(f64_mul(load64(pgs_x + 8), f64_from(1000))), 636, "pgs x1 ≈ 0.6364 (7/11)");
 
 # Bounds-active LCP: diag(1,1)·x = [5,5] clamped to hi=[2,2] → x = [2,2].
-var pgs2_A = mat_new(2, 2);
-mat_set(pgs2_A, 0, 0, F64_ONE);
-mat_set(pgs2_A, 1, 1, F64_ONE);
+var pgs2_A = ganita_mat_new(2, 2);
+ganita_mat_set(pgs2_A, 0, 0, F64_ONE);
+ganita_mat_set(pgs2_A, 1, 1, F64_ONE);
 var pgs2_b = alloc(16);
 store64(pgs2_b, f64_from(5));
 store64(pgs2_b + 8, f64_from(5));
@@ -2058,18 +2060,18 @@ fn lp_test_relclose(a, b) {
 }
 
 var LP_T_BIG = 0x6974E718D7D7625A;   # 1e200
-var lpo_A = mat_new(3, 3);
-mat_set(lpo_A, 0, 0, f64_mul(F64_ONE, LP_T_BIG));
-mat_set(lpo_A, 0, 1, f64_mul(F64_TWO, LP_T_BIG));
-mat_set(lpo_A, 0, 2, f64_mul(f64_from(3), LP_T_BIG));
-mat_set(lpo_A, 1, 0, f64_mul(f64_from(4), LP_T_BIG));
-mat_set(lpo_A, 1, 1, f64_mul(f64_from(5), LP_T_BIG));
-mat_set(lpo_A, 1, 2, f64_mul(f64_from(6), LP_T_BIG));
-mat_set(lpo_A, 2, 0, f64_mul(f64_from(7), LP_T_BIG));
-mat_set(lpo_A, 2, 1, f64_mul(f64_from(8), LP_T_BIG));
-mat_set(lpo_A, 2, 2, f64_mul(f64_from(10), LP_T_BIG));
-var lpo_U = mat_new(3, 3);
-var lpo_Vt = mat_new(3, 3);
+var lpo_A = ganita_mat_new(3, 3);
+ganita_mat_set(lpo_A, 0, 0, f64_mul(F64_ONE, LP_T_BIG));
+ganita_mat_set(lpo_A, 0, 1, f64_mul(F64_TWO, LP_T_BIG));
+ganita_mat_set(lpo_A, 0, 2, f64_mul(f64_from(3), LP_T_BIG));
+ganita_mat_set(lpo_A, 1, 0, f64_mul(f64_from(4), LP_T_BIG));
+ganita_mat_set(lpo_A, 1, 1, f64_mul(f64_from(5), LP_T_BIG));
+ganita_mat_set(lpo_A, 1, 2, f64_mul(f64_from(6), LP_T_BIG));
+ganita_mat_set(lpo_A, 2, 0, f64_mul(f64_from(7), LP_T_BIG));
+ganita_mat_set(lpo_A, 2, 1, f64_mul(f64_from(8), LP_T_BIG));
+ganita_mat_set(lpo_A, 2, 2, f64_mul(f64_from(10), LP_T_BIG));
+var lpo_U = ganita_mat_new(3, 3);
+var lpo_Vt = ganita_mat_new(3, 3);
 var lpo_S = alloc(24);
 assert_eq(svd_golub_kahan(lpo_A, lpo_U, lpo_S, lpo_Vt), HSB_ERR_NONE,
   "svd @1e200: converges (was HSB_ERR_NO_CONVERGENCE, U all NaN)");
@@ -2078,36 +2080,36 @@ assert(lp_test_relclose(load64(lpo_S), 0x69B6BF80142486CE) == 1,
   "svd @1e200: S[0] == 1.7412505166808593e201");
 
 var LP_T_TINY = 0x16687E92154EF7AC;   # 1e-200
-var lpu_A = mat_new(3, 3);
-mat_set(lpu_A, 0, 0, f64_mul(F64_ONE, LP_T_TINY));
-mat_set(lpu_A, 0, 1, f64_mul(F64_TWO, LP_T_TINY));
-mat_set(lpu_A, 0, 2, f64_mul(f64_from(3), LP_T_TINY));
-mat_set(lpu_A, 1, 0, f64_mul(f64_from(4), LP_T_TINY));
-mat_set(lpu_A, 1, 1, f64_mul(f64_from(5), LP_T_TINY));
-mat_set(lpu_A, 1, 2, f64_mul(f64_from(6), LP_T_TINY));
-mat_set(lpu_A, 2, 0, f64_mul(f64_from(7), LP_T_TINY));
-mat_set(lpu_A, 2, 1, f64_mul(f64_from(8), LP_T_TINY));
-mat_set(lpu_A, 2, 2, f64_mul(f64_from(10), LP_T_TINY));
-var lpu_U = mat_new(3, 3);
-var lpu_Vt = mat_new(3, 3);
+var lpu_A = ganita_mat_new(3, 3);
+ganita_mat_set(lpu_A, 0, 0, f64_mul(F64_ONE, LP_T_TINY));
+ganita_mat_set(lpu_A, 0, 1, f64_mul(F64_TWO, LP_T_TINY));
+ganita_mat_set(lpu_A, 0, 2, f64_mul(f64_from(3), LP_T_TINY));
+ganita_mat_set(lpu_A, 1, 0, f64_mul(f64_from(4), LP_T_TINY));
+ganita_mat_set(lpu_A, 1, 1, f64_mul(f64_from(5), LP_T_TINY));
+ganita_mat_set(lpu_A, 1, 2, f64_mul(f64_from(6), LP_T_TINY));
+ganita_mat_set(lpu_A, 2, 0, f64_mul(f64_from(7), LP_T_TINY));
+ganita_mat_set(lpu_A, 2, 1, f64_mul(f64_from(8), LP_T_TINY));
+ganita_mat_set(lpu_A, 2, 2, f64_mul(f64_from(10), LP_T_TINY));
+var lpu_U = ganita_mat_new(3, 3);
+var lpu_Vt = ganita_mat_new(3, 3);
 var lpu_S = alloc(24);
 assert_eq(svd_golub_kahan(lpu_A, lpu_U, lpu_S, lpu_Vt), HSB_ERR_NONE, "svd @1e-200: returns ERR_NONE");
 # 17.412505166808593 * 1e-200; the underflowed path returned 1e-199 (= raw A[2][2])
 assert(lp_test_relclose(load64(lpu_S), 0x16AAA8257F7EC875) == 1,
   "svd @1e-200: S[0] == 1.7412505166808593e-199 (was 1e-199, the raw A[2][2])");
 
-var lpo_E = mat_new(3, 3);
-mat_set(lpo_E, 0, 0, f64_mul(f64_from(4), LP_T_BIG));
-mat_set(lpo_E, 0, 1, f64_mul(F64_ONE, LP_T_BIG));
-mat_set(lpo_E, 0, 2, f64_from(0));
-mat_set(lpo_E, 1, 0, f64_mul(F64_ONE, LP_T_BIG));
-mat_set(lpo_E, 1, 1, f64_mul(f64_from(3), LP_T_BIG));
-mat_set(lpo_E, 1, 2, f64_mul(F64_ONE, LP_T_BIG));
-mat_set(lpo_E, 2, 0, f64_from(0));
-mat_set(lpo_E, 2, 1, f64_mul(F64_ONE, LP_T_BIG));
-mat_set(lpo_E, 2, 2, f64_mul(F64_TWO, LP_T_BIG));
+var lpo_E = ganita_mat_new(3, 3);
+ganita_mat_set(lpo_E, 0, 0, f64_mul(f64_from(4), LP_T_BIG));
+ganita_mat_set(lpo_E, 0, 1, f64_mul(F64_ONE, LP_T_BIG));
+ganita_mat_set(lpo_E, 0, 2, f64_from(0));
+ganita_mat_set(lpo_E, 1, 0, f64_mul(F64_ONE, LP_T_BIG));
+ganita_mat_set(lpo_E, 1, 1, f64_mul(f64_from(3), LP_T_BIG));
+ganita_mat_set(lpo_E, 1, 2, f64_mul(F64_ONE, LP_T_BIG));
+ganita_mat_set(lpo_E, 2, 0, f64_from(0));
+ganita_mat_set(lpo_E, 2, 1, f64_mul(F64_ONE, LP_T_BIG));
+ganita_mat_set(lpo_E, 2, 2, f64_mul(F64_TWO, LP_T_BIG));
 var lpo_ev = alloc(24);
-var lpo_EV = mat_new(3, 3);
+var lpo_EV = ganita_mat_new(3, 3);
 assert_eq(eigen_qr(lpo_E, 3, 10000, lpo_ev, lpo_EV), HSB_ERR_NONE,
   "eigen_qr @1e200: converges (was HSB_ERR_NO_CONVERGENCE)");
 # 4.732050807568877 * 1e200
@@ -2135,18 +2137,18 @@ assert(f64_lt(f64_abs(HComplex_re(cmat_get(lpc_R, 1, 0))), 0x6761F48EAF234AD4) =
 # scale 1e-10 on a relative reconstruction check. That is SI metres -- a physics
 # consumer got silently wrong singular values, with no error code.
 var LP_T_SI = 0x3DDB7CDFD9D7BDBB;   # 1e-10
-var lps_A = mat_new(3, 3);
-mat_set(lps_A, 0, 0, f64_mul(F64_ONE, LP_T_SI));
-mat_set(lps_A, 0, 1, f64_mul(F64_TWO, LP_T_SI));
-mat_set(lps_A, 0, 2, f64_mul(f64_from(3), LP_T_SI));
-mat_set(lps_A, 1, 0, f64_mul(f64_from(4), LP_T_SI));
-mat_set(lps_A, 1, 1, f64_mul(f64_from(5), LP_T_SI));
-mat_set(lps_A, 1, 2, f64_mul(f64_from(6), LP_T_SI));
-mat_set(lps_A, 2, 0, f64_mul(f64_from(7), LP_T_SI));
-mat_set(lps_A, 2, 1, f64_mul(f64_from(8), LP_T_SI));
-mat_set(lps_A, 2, 2, f64_mul(f64_from(10), LP_T_SI));
-var lps_U = mat_new(3, 3);
-var lps_Vt = mat_new(3, 3);
+var lps_A = ganita_mat_new(3, 3);
+ganita_mat_set(lps_A, 0, 0, f64_mul(F64_ONE, LP_T_SI));
+ganita_mat_set(lps_A, 0, 1, f64_mul(F64_TWO, LP_T_SI));
+ganita_mat_set(lps_A, 0, 2, f64_mul(f64_from(3), LP_T_SI));
+ganita_mat_set(lps_A, 1, 0, f64_mul(f64_from(4), LP_T_SI));
+ganita_mat_set(lps_A, 1, 1, f64_mul(f64_from(5), LP_T_SI));
+ganita_mat_set(lps_A, 1, 2, f64_mul(f64_from(6), LP_T_SI));
+ganita_mat_set(lps_A, 2, 0, f64_mul(f64_from(7), LP_T_SI));
+ganita_mat_set(lps_A, 2, 1, f64_mul(f64_from(8), LP_T_SI));
+ganita_mat_set(lps_A, 2, 2, f64_mul(f64_from(10), LP_T_SI));
+var lps_U = ganita_mat_new(3, 3);
+var lps_Vt = ganita_mat_new(3, 3);
 var lps_S = alloc(24);
 assert_eq(svd_golub_kahan(lps_A, lps_U, lps_S, lps_Vt), HSB_ERR_NONE, "svd @1e-10: returns ERR_NONE");
 # 17.412505166808593e-10. Measured pre-fix on THIS matrix: HSB_ERR_NO_CONVERGENCE
@@ -2174,12 +2176,12 @@ assert(lp_test_relclose(load64(lps_S), 0x3E1DEA19CB65B491) == 1,
 
 test_group("svd_golub_kahan: rank-deficient input has a well-defined SVD");
 
-var A1 = mat_new(3, 3);
-mat_set(A1, 0, 0, f64_from(1)); mat_set(A1, 0, 1, f64_from(2)); mat_set(A1, 0, 2, f64_from(3));
-mat_set(A1, 1, 0, f64_from(2)); mat_set(A1, 1, 1, f64_from(4)); mat_set(A1, 1, 2, f64_from(6));
-mat_set(A1, 2, 0, f64_from(3)); mat_set(A1, 2, 1, f64_from(6)); mat_set(A1, 2, 2, f64_from(9));
-var U1 = mat_new(3, 3);
-var V1 = mat_new(3, 3);
+var A1 = ganita_mat_new(3, 3);
+ganita_mat_set(A1, 0, 0, f64_from(1)); ganita_mat_set(A1, 0, 1, f64_from(2)); ganita_mat_set(A1, 0, 2, f64_from(3));
+ganita_mat_set(A1, 1, 0, f64_from(2)); ganita_mat_set(A1, 1, 1, f64_from(4)); ganita_mat_set(A1, 1, 2, f64_from(6));
+ganita_mat_set(A1, 2, 0, f64_from(3)); ganita_mat_set(A1, 2, 1, f64_from(6)); ganita_mat_set(A1, 2, 2, f64_from(9));
+var U1 = ganita_mat_new(3, 3);
+var V1 = ganita_mat_new(3, 3);
 var S1 = alloc(24);
 assert_eq(svd_golub_kahan(A1, U1, S1, V1), HSB_ERR_NONE, "svd rank-1 3x3: converges");
 assert(f64_approx_eq(load64(S1), f64_from(14), LOOSE_TOL_H) == 1, "svd rank-1 3x3: s0 == 14");
@@ -2190,32 +2192,32 @@ assert(f64_lt(f64_abs(load64(S1 + 8)), EPSILON_F64) == 1, "svd rank-1 3x3: s1 ==
 assert(f64_lt(f64_abs(load64(S1 + 16)), EPSILON_F64) == 1, "svd rank-1 3x3: s2 == 0");
 
 # rectangular, rank-2: column 3 = 3 * column 1
-var A5 = mat_new(4, 3);
-mat_set(A5, 0, 0, f64_from(1)); mat_set(A5, 0, 1, f64_from(2)); mat_set(A5, 0, 2, f64_from(3));
-mat_set(A5, 1, 0, f64_from(2)); mat_set(A5, 1, 1, f64_from(4)); mat_set(A5, 1, 2, f64_from(6));
-mat_set(A5, 2, 0, f64_from(0)); mat_set(A5, 2, 1, f64_from(1)); mat_set(A5, 2, 2, f64_from(0));
-mat_set(A5, 3, 0, f64_from(0)); mat_set(A5, 3, 1, f64_from(2)); mat_set(A5, 3, 2, f64_from(0));
-var U5 = mat_new(4, 3);
-var V5 = mat_new(3, 3);
+var A5 = ganita_mat_new(4, 3);
+ganita_mat_set(A5, 0, 0, f64_from(1)); ganita_mat_set(A5, 0, 1, f64_from(2)); ganita_mat_set(A5, 0, 2, f64_from(3));
+ganita_mat_set(A5, 1, 0, f64_from(2)); ganita_mat_set(A5, 1, 1, f64_from(4)); ganita_mat_set(A5, 1, 2, f64_from(6));
+ganita_mat_set(A5, 2, 0, f64_from(0)); ganita_mat_set(A5, 2, 1, f64_from(1)); ganita_mat_set(A5, 2, 2, f64_from(0));
+ganita_mat_set(A5, 3, 0, f64_from(0)); ganita_mat_set(A5, 3, 1, f64_from(2)); ganita_mat_set(A5, 3, 2, f64_from(0));
+var U5 = ganita_mat_new(4, 3);
+var V5 = ganita_mat_new(3, 3);
 var S5 = alloc(24);
 assert_eq(svd_golub_kahan(A5, U5, S5, V5), HSB_ERR_NONE, "svd 4x3 rank-2: converges");
 _lp_check_svd(A5, 4, 3, U5, S5, V5, "svd 4x3 rank-2: A == U*S*Vt");
 
 # 5x4 rank-3 (col 3 = 2 * col 1) -- exercises an interior zero diagonal, and
 # checks that the fix keeps U and Vt orthogonal rather than merely reconstructing.
-var A7 = mat_new(5, 4);
-mat_set(A7, 0, 0, f64_from(1)); mat_set(A7, 0, 1, f64_from(5));
-mat_set(A7, 0, 2, f64_from(2)); mat_set(A7, 0, 3, f64_from(2));
-mat_set(A7, 1, 0, f64_from(3)); mat_set(A7, 1, 1, f64_from(1));
-mat_set(A7, 1, 2, f64_from(6)); mat_set(A7, 1, 3, f64_from(6));
-mat_set(A7, 2, 0, f64_from(7)); mat_set(A7, 2, 1, f64_from(2));
-mat_set(A7, 2, 2, f64_from(14)); mat_set(A7, 2, 3, f64_from(4));
-mat_set(A7, 3, 0, f64_from(0)); mat_set(A7, 3, 1, f64_from(4));
-mat_set(A7, 3, 2, f64_from(0)); mat_set(A7, 3, 3, f64_from(9));
-mat_set(A7, 4, 0, f64_from(2)); mat_set(A7, 4, 1, f64_from(2));
-mat_set(A7, 4, 2, f64_from(4)); mat_set(A7, 4, 3, f64_from(1));
-var U7 = mat_new(5, 4);
-var V7 = mat_new(4, 4);
+var A7 = ganita_mat_new(5, 4);
+ganita_mat_set(A7, 0, 0, f64_from(1)); ganita_mat_set(A7, 0, 1, f64_from(5));
+ganita_mat_set(A7, 0, 2, f64_from(2)); ganita_mat_set(A7, 0, 3, f64_from(2));
+ganita_mat_set(A7, 1, 0, f64_from(3)); ganita_mat_set(A7, 1, 1, f64_from(1));
+ganita_mat_set(A7, 1, 2, f64_from(6)); ganita_mat_set(A7, 1, 3, f64_from(6));
+ganita_mat_set(A7, 2, 0, f64_from(7)); ganita_mat_set(A7, 2, 1, f64_from(2));
+ganita_mat_set(A7, 2, 2, f64_from(14)); ganita_mat_set(A7, 2, 3, f64_from(4));
+ganita_mat_set(A7, 3, 0, f64_from(0)); ganita_mat_set(A7, 3, 1, f64_from(4));
+ganita_mat_set(A7, 3, 2, f64_from(0)); ganita_mat_set(A7, 3, 3, f64_from(9));
+ganita_mat_set(A7, 4, 0, f64_from(2)); ganita_mat_set(A7, 4, 1, f64_from(2));
+ganita_mat_set(A7, 4, 2, f64_from(4)); ganita_mat_set(A7, 4, 3, f64_from(1));
+var U7 = ganita_mat_new(5, 4);
+var V7 = ganita_mat_new(4, 4);
 var S7 = alloc(32);
 assert_eq(svd_golub_kahan(A7, U7, S7, V7), HSB_ERR_NONE, "svd 5x4 rank-3: converges");
 assert(f64_lt(f64_abs(load64(S7 + 24)), EPSILON_F64) == 1, "svd 5x4 rank-3: s3 == 0");
@@ -2236,11 +2238,11 @@ _lp_check_svd(A7, 5, 4, U7, S7, V7, "svd 5x4 rank-3: A == U*S*Vt");
 
 test_group("svd_golub_kahan: m < n is rejected, not silently mis-solved");
 
-var Aw = mat_new(2, 3);
-mat_set(Aw, 0, 0, F64_TWO); mat_set(Aw, 0, 1, 0);       mat_set(Aw, 0, 2, 0);
-mat_set(Aw, 1, 0, 0);       mat_set(Aw, 1, 1, F64_ONE); mat_set(Aw, 1, 2, 0);
-var Uw = mat_new(2, 3);
-var Vw = mat_new(3, 3);
+var Aw = ganita_mat_new(2, 3);
+ganita_mat_set(Aw, 0, 0, F64_TWO); ganita_mat_set(Aw, 0, 1, 0);       ganita_mat_set(Aw, 0, 2, 0);
+ganita_mat_set(Aw, 1, 0, 0);       ganita_mat_set(Aw, 1, 1, F64_ONE); ganita_mat_set(Aw, 1, 2, 0);
+var Uw = ganita_mat_new(2, 3);
+var Vw = ganita_mat_new(3, 3);
 var Sw = alloc(24);
 assert_eq(svd_golub_kahan(Aw, Uw, Sw, Vw), HSB_ERR_INVALID_INPUT,
   "svd 2x3 wide: rejected with HSB_ERR_INVALID_INPUT (was ERR_NONE + wrong S)");
@@ -2252,22 +2254,22 @@ assert_eq(load64(Sw + 16), 0, "svd 2x3 wide: out_S left untouched (s2)");
 # case whose spectrum is exact: A = [[3,4,0],[0,0,5]] has A A^T = 25 I, hence
 # singular values exactly 5 and 5 and ||A||_F^2 = 50. The pre-2.8.3 code got
 # this one right, which is why "it sometimes works" was never a defence.
-var Aw2 = mat_new(2, 3);
-mat_set(Aw2, 0, 0, f64_from(3)); mat_set(Aw2, 0, 1, f64_from(4)); mat_set(Aw2, 0, 2, 0);
-mat_set(Aw2, 1, 0, 0);           mat_set(Aw2, 1, 1, 0);           mat_set(Aw2, 1, 2, f64_from(5));
-var Uw2 = mat_new(2, 3);
-var Vw2 = mat_new(3, 3);
+var Aw2 = ganita_mat_new(2, 3);
+ganita_mat_set(Aw2, 0, 0, f64_from(3)); ganita_mat_set(Aw2, 0, 1, f64_from(4)); ganita_mat_set(Aw2, 0, 2, 0);
+ganita_mat_set(Aw2, 1, 0, 0);           ganita_mat_set(Aw2, 1, 1, 0);           ganita_mat_set(Aw2, 1, 2, f64_from(5));
+var Uw2 = ganita_mat_new(2, 3);
+var Vw2 = ganita_mat_new(3, 3);
 var Sw2 = alloc(24);
 assert_eq(svd_golub_kahan(Aw2, Uw2, Sw2, Vw2), HSB_ERR_INVALID_INPUT,
   "svd 2x3 wide (A A^T = 25I): rejected too -- the contract, not the luck");
 
 # Square and tall stay accepted: the guard must not be a blanket refusal.
-var An = mat_new(3, 3);
-mat_set(An, 0, 0, F64_ONE); mat_set(An, 0, 1, 0);       mat_set(An, 0, 2, 0);
-mat_set(An, 1, 0, 0);       mat_set(An, 1, 1, F64_TWO); mat_set(An, 1, 2, 0);
-mat_set(An, 2, 0, 0);       mat_set(An, 2, 1, 0);       mat_set(An, 2, 2, f64_from(3));
-var Un = mat_new(3, 3);
-var Vn = mat_new(3, 3);
+var An = ganita_mat_new(3, 3);
+ganita_mat_set(An, 0, 0, F64_ONE); ganita_mat_set(An, 0, 1, 0);       ganita_mat_set(An, 0, 2, 0);
+ganita_mat_set(An, 1, 0, 0);       ganita_mat_set(An, 1, 1, F64_TWO); ganita_mat_set(An, 1, 2, 0);
+ganita_mat_set(An, 2, 0, 0);       ganita_mat_set(An, 2, 1, 0);       ganita_mat_set(An, 2, 2, f64_from(3));
+var Un = ganita_mat_new(3, 3);
+var Vn = ganita_mat_new(3, 3);
 var Sn = alloc(24);
 assert_eq(svd_golub_kahan(An, Un, Sn, Vn), HSB_ERR_NONE,
   "svd 3x3 square: still accepted");
@@ -2290,16 +2292,16 @@ assert(f64_approx_eq(load64(Sn + 16), F64_ONE, LOOSE_TOL_H) == 1,
 
 test_group("eigen_qr: converges on a moderately-conditioned symmetric 4x4");
 
-var eqA = mat_new(4, 4);
-mat_set(eqA, 0, 0, 0x40389DF1BD110222); mat_set(eqA, 0, 1, 0x3FEE5D20F4B120C8);
-mat_set(eqA, 0, 2, 0x40120E8FDA90FA03); mat_set(eqA, 0, 3, 0x40204BE315F598A5);
-mat_set(eqA, 1, 0, 0x3FEE5D20F4B120C8); mat_set(eqA, 1, 1, 0x3FD1056459266190);
-mat_set(eqA, 1, 2, 0x3FD3E631F1B3FC40); mat_set(eqA, 1, 3, 0x3FA4745F80EE7C17);
-mat_set(eqA, 2, 0, 0x40120E8FDA90FA03); mat_set(eqA, 2, 1, 0x3FD3E631F1B3FC40);
-mat_set(eqA, 2, 2, 0x3FB6AF52BAD29C05); mat_set(eqA, 2, 3, 0x3FA4220EB3E9F39D);
-mat_set(eqA, 3, 0, 0x40204BE315F598A5); mat_set(eqA, 3, 1, 0x3FA4745F80EE7C17);
-mat_set(eqA, 3, 2, 0x3FA4220EB3E9F39D); mat_set(eqA, 3, 3, 0x3FBFD313FB35F280);
-var eqV = mat_new(4, 4);
+var eqA = ganita_mat_new(4, 4);
+ganita_mat_set(eqA, 0, 0, 0x40389DF1BD110222); ganita_mat_set(eqA, 0, 1, 0x3FEE5D20F4B120C8);
+ganita_mat_set(eqA, 0, 2, 0x40120E8FDA90FA03); ganita_mat_set(eqA, 0, 3, 0x40204BE315F598A5);
+ganita_mat_set(eqA, 1, 0, 0x3FEE5D20F4B120C8); ganita_mat_set(eqA, 1, 1, 0x3FD1056459266190);
+ganita_mat_set(eqA, 1, 2, 0x3FD3E631F1B3FC40); ganita_mat_set(eqA, 1, 3, 0x3FA4745F80EE7C17);
+ganita_mat_set(eqA, 2, 0, 0x40120E8FDA90FA03); ganita_mat_set(eqA, 2, 1, 0x3FD3E631F1B3FC40);
+ganita_mat_set(eqA, 2, 2, 0x3FB6AF52BAD29C05); ganita_mat_set(eqA, 2, 3, 0x3FA4220EB3E9F39D);
+ganita_mat_set(eqA, 3, 0, 0x40204BE315F598A5); ganita_mat_set(eqA, 3, 1, 0x3FA4745F80EE7C17);
+ganita_mat_set(eqA, 3, 2, 0x3FA4220EB3E9F39D); ganita_mat_set(eqA, 3, 3, 0x3FBFD313FB35F280);
+var eqV = ganita_mat_new(4, 4);
 var eqL = alloc(32);
 assert_eq(eigen_qr(eqA, 4, 1000, eqL, eqV), HSB_ERR_NONE,
   "eigen_qr 4x4 cond 240: converges (was NO_CONVERGENCE at max_iter 1e6)");
@@ -2332,7 +2334,7 @@ test_group("eigen_symmetric / eigen_qr: one documented eigenvalue order");
 
 fn _eso_zero3(M) {
     for (var i = 0; i < 3; i = i + 1) {
-        for (var j = 0; j < 3; j = j + 1) { mat_set(M, i, j, f64_from(0)); }
+        for (var j = 0; j < 3; j = j + 1) { ganita_mat_set(M, i, j, f64_from(0)); }
     }
     return 0;
 }
@@ -2343,9 +2345,9 @@ fn _eso_zero3(M) {
 # after the permutation. `label` is only used to keep the failures readable.
 fn _eso_agree(M, label) {
     var sv = alloc(24);
-    var sV = mat_new(3, 3);
+    var sV = ganita_mat_new(3, 3);
     var qv = alloc(24);
-    var qV = mat_new(3, 3);
+    var qV = ganita_mat_new(3, 3);
     assert_eq(eigen_symmetric(M, 3, sv, sV), HSB_ERR_NONE, label);
     assert_eq(eigen_qr(M, 3, 1000, qv, qV), HSB_ERR_NONE, label);
     var bad_order = 0;
@@ -2372,19 +2374,19 @@ fn _eso_agree(M, label) {
 
 # A = [[2,0,0],[0,3,1],[0,1,3]], spectrum {4, 2, 2}. This is the matrix the two
 # routines disagreed on: sym gave 2, 4, 2 and qr gave 4, 2, 2.
-var eso_A = mat_new(3, 3);
+var eso_A = ganita_mat_new(3, 3);
 _eso_zero3(eso_A);
-mat_set(eso_A, 0, 0, F64_TWO);
-mat_set(eso_A, 1, 1, f64_from(3)); mat_set(eso_A, 1, 2, F64_ONE);
-mat_set(eso_A, 2, 1, F64_ONE);     mat_set(eso_A, 2, 2, f64_from(3));
+ganita_mat_set(eso_A, 0, 0, F64_TWO);
+ganita_mat_set(eso_A, 1, 1, f64_from(3)); ganita_mat_set(eso_A, 1, 2, F64_ONE);
+ganita_mat_set(eso_A, 2, 1, F64_ONE);     ganita_mat_set(eso_A, 2, 2, f64_from(3));
 _eso_agree(eso_A, "eigen_symmetric/eigen_qr agree: [[2,0,0],[0,3,1],[0,1,3]]");
-assert_eq(eigen_symmetric(eso_A, 3, alloc(24), mat_new(3, 3)), HSB_ERR_NONE,
+assert_eq(eigen_symmetric(eso_A, 3, alloc(24), ganita_mat_new(3, 3)), HSB_ERR_NONE,
   "eigen_symmetric returns HSB_ERR_NONE, and takes NO max_iter -- the doc named one");
 
 # The exact post-sort values for that matrix, so a regression that reorders
 # WITHOUT reordering the sibling is still caught by this file alone.
 var eso_v = alloc(24);
-var eso_V = mat_new(3, 3);
+var eso_V = ganita_mat_new(3, 3);
 eigen_symmetric(eso_A, 3, eso_v, eso_V);
 assert_eq(load64(eso_v), f64_from(4), "eigen_symmetric: lambda0 == 4 (was 2 -- unsorted)");
 assert_eq(load64(eso_v + 8), F64_TWO, "eigen_symmetric: lambda1 == 2");
@@ -2392,34 +2394,35 @@ assert_eq(load64(eso_v + 16), F64_TWO, "eigen_symmetric: lambda2 == 2");
 
 # diag(1,5,3): Jacobi has nothing to rotate, so this is the input order verbatim
 # unless the sort runs. sym returned 1, 5, 3 before the fix.
-var eso_B = mat_new(3, 3);
+var eso_B = ganita_mat_new(3, 3);
 _eso_zero3(eso_B);
-mat_set(eso_B, 0, 0, F64_ONE); mat_set(eso_B, 1, 1, f64_from(5)); mat_set(eso_B, 2, 2, f64_from(3));
+ganita_mat_set(eso_B, 0, 0, F64_ONE); ganita_mat_set(eso_B, 1, 1, f64_from(5));
+ganita_mat_set(eso_B, 2, 2, f64_from(3));
 _eso_agree(eso_B, "eigen_symmetric/eigen_qr agree: diag(1,5,3)");
 var eso_bv = alloc(24);
-var eso_bV = mat_new(3, 3);
+var eso_bV = ganita_mat_new(3, 3);
 eigen_symmetric(eso_B, 3, eso_bv, eso_bV);
 assert_eq(load64(eso_bv), f64_from(5), "eigen_symmetric diag(1,5,3): lambda0 == 5 (was 1)");
 assert_eq(load64(eso_bv + 8), f64_from(3), "eigen_symmetric diag(1,5,3): lambda1 == 3 (was 5)");
 assert_eq(load64(eso_bv + 16), F64_ONE, "eigen_symmetric diag(1,5,3): lambda2 == 1 (was 3)");
 
 # Dense, no zero structure to lean on.
-var eso_C = mat_new(3, 3);
-mat_set(eso_C, 0, 0, f64_from(4)); mat_set(eso_C, 0, 1, F64_ONE);     mat_set(eso_C, 0, 2, F64_TWO);
-mat_set(eso_C, 1, 0, F64_ONE);     mat_set(eso_C, 1, 1, f64_from(3)); mat_set(eso_C, 1, 2, 0);
-mat_set(eso_C, 2, 0, F64_TWO);     mat_set(eso_C, 2, 1, 0);           mat_set(eso_C, 2, 2, f64_from(6));
+var eso_C = ganita_mat_new(3, 3);
+ganita_mat_set(eso_C, 0, 0, f64_from(4)); ganita_mat_set(eso_C, 0, 1, F64_ONE); ganita_mat_set(eso_C, 0, 2, F64_TWO);
+ganita_mat_set(eso_C, 1, 0, F64_ONE);     ganita_mat_set(eso_C, 1, 1, f64_from(3)); ganita_mat_set(eso_C, 1, 2, 0);
+ganita_mat_set(eso_C, 2, 0, F64_TWO); ganita_mat_set(eso_C, 2, 1, 0); ganita_mat_set(eso_C, 2, 2, f64_from(6));
 _eso_agree(eso_C, "eigen_symmetric/eigen_qr agree: dense [[4,1,2],[1,3,0],[2,0,6]]");
 
 # diag(-5,1,3) separates "descending |lambda|" from "descending lambda": -5 leads.
 # If either routine ever sorts by signed value this fails, and the doc says |.|.
-var eso_D = mat_new(3, 3);
+var eso_D = ganita_mat_new(3, 3);
 _eso_zero3(eso_D);
-mat_set(eso_D, 0, 0, f64_neg(f64_from(5)));
-mat_set(eso_D, 1, 1, F64_ONE);
-mat_set(eso_D, 2, 2, f64_from(3));
+ganita_mat_set(eso_D, 0, 0, f64_neg(f64_from(5)));
+ganita_mat_set(eso_D, 1, 1, F64_ONE);
+ganita_mat_set(eso_D, 2, 2, f64_from(3));
 _eso_agree(eso_D, "eigen_symmetric/eigen_qr agree: diag(-5,1,3)");
 var eso_dv = alloc(24);
-var eso_dV = mat_new(3, 3);
+var eso_dV = ganita_mat_new(3, 3);
 eigen_symmetric(eso_D, 3, eso_dv, eso_dV);
 assert_eq(load64(eso_dv), f64_neg(f64_from(5)),
   "eigen_symmetric: the order is descending |lambda|, so -5 leads 3 and 1");
@@ -2545,18 +2548,18 @@ test_group("svd_golub_kahan: rows < cols must be rejected, not written past");
 
 # out_U is 2 x 16 = 32 data slots. The block that follows it in the bump
 # allocator is a 64-slot canary; anything stored past out_U lands in it.
-var wA = mat_new(2, 16);
+var wA = ganita_mat_new(2, 16);
 var wj = 0;
 while (wj < 16) {
-    mat_set(wA, 0, wj, f64_from(wj + 1));
-    mat_set(wA, 1, wj, f64_from(2 * wj + 3));
+    ganita_mat_set(wA, 0, wj, f64_from(wj + 1));
+    ganita_mat_set(wA, 1, wj, f64_from(2 * wj + 3));
     wj = wj + 1;
 }
-var wU = mat_new(2, 16);
+var wU = ganita_mat_new(2, 16);
 var wCan = alloc(64 * 8);
 var wi = 0;
 while (wi < 64) { store64(wCan + wi * 8, 0x5A5A5A5A5A5A5A5A); wi = wi + 1; }
-var wVt = mat_new(16, 16);
+var wVt = ganita_mat_new(16, 16);
 var wS = alloc(16 * 8);
 assert_eq(svd_golub_kahan(wA, wU, wS, wVt), HSB_ERR_INVALID_INPUT,
   "svd 2x16 (m < n): HSB_ERR_INVALID_INPUT");
@@ -2567,7 +2570,7 @@ while (wi < 64) {
     wi = wi + 1;
 }
 assert_eq(wClob, 0, "svd 2x16: canary past out_U untouched (was 4 slots clobbered)");
-assert_eq(svd_golub_kahan(mat_new(3, 4), mat_new(3, 4), alloc(32), mat_new(4, 4)),
+assert_eq(svd_golub_kahan(ganita_mat_new(3, 4), ganita_mat_new(3, 4), alloc(32), ganita_mat_new(4, 4)),
   HSB_ERR_INVALID_INPUT, "svd 3x4 (m < n): HSB_ERR_INVALID_INPUT");
 # A null handle is the designed 0 that mat_new returns above its own cap.
 assert_eq(svd_golub_kahan(0, wU, wS, wVt), HSB_ERR_INVALID_INPUT, "svd: A = 0 rejected");
@@ -2579,13 +2582,13 @@ assert_eq(svd_golub_kahan(wA, wU, wS, 0), HSB_ERR_INVALID_INPUT, "svd: out_Vt = 
 # sum of their squares must equal trace(A^T A), an exact integer over Z.
 test_group("svd_golub_kahan: m >= n singular values vs numpy/LAPACK");
 
-var tA = mat_new(4, 3);
-mat_set(tA, 0, 0, F64_ONE); mat_set(tA, 0, 1, 0);           mat_set(tA, 0, 2, F64_TWO);
-mat_set(tA, 1, 0, 0);       mat_set(tA, 1, 1, f64_from(3)); mat_set(tA, 1, 2, F64_ONE);
-mat_set(tA, 2, 0, F64_TWO); mat_set(tA, 2, 1, F64_ONE);     mat_set(tA, 2, 2, 0);
-mat_set(tA, 3, 0, F64_ONE); mat_set(tA, 3, 1, F64_ONE);     mat_set(tA, 3, 2, F64_ONE);
-var tU = mat_new(4, 3);
-var tVt = mat_new(3, 3);
+var tA = ganita_mat_new(4, 3);
+ganita_mat_set(tA, 0, 0, F64_ONE); ganita_mat_set(tA, 0, 1, 0);           ganita_mat_set(tA, 0, 2, F64_TWO);
+ganita_mat_set(tA, 1, 0, 0);       ganita_mat_set(tA, 1, 1, f64_from(3)); ganita_mat_set(tA, 1, 2, F64_ONE);
+ganita_mat_set(tA, 2, 0, F64_TWO); ganita_mat_set(tA, 2, 1, F64_ONE);     ganita_mat_set(tA, 2, 2, 0);
+ganita_mat_set(tA, 3, 0, F64_ONE); ganita_mat_set(tA, 3, 1, F64_ONE);     ganita_mat_set(tA, 3, 2, F64_ONE);
+var tU = ganita_mat_new(4, 3);
+var tVt = ganita_mat_new(3, 3);
 var tS = alloc(24);
 assert_eq(svd_golub_kahan(tA, tU, tS, tVt), HSB_ERR_NONE, "svd 4x3: HSB_ERR_NONE");
 assert(f64_approx_eq(load64(tS), 0x400F0F919D925D83, LOOSE_TOL_H), "svd 4x3 s0 = 3.882601958302702");

@@ -55,7 +55,7 @@ fn _lp_vec_norm(arr, start, len) {
 
 # Largest |entry| of a stdlib matrix (0 for the zero matrix).
 fn _lp_mat_max_abs(A) {
-    var total = mat_rows(A) * mat_cols(A);
+    var total = ganita_mat_rows(A) * ganita_mat_cols(A);
     var mx = f64_from(0);
     var i = 0;
     while (i < total) {
@@ -78,9 +78,9 @@ fn _lp_pow2_floor(s) {
 # Fresh copy of A with every entry divided by s (s > 0). Divide, never multiply
 # by 1/s: a subnormal s makes 1/s overflow to +Inf.
 fn _lp_mat_div_scalar(A, s) {
-    var B = mat_copy(A);
+    var B = ganita_mat_copy(A);
     if (B == 0) { return 0; }
-    var total = mat_rows(A) * mat_cols(A);
+    var total = ganita_mat_rows(A) * ganita_mat_cols(A);
     var i = 0;
     while (i < total) {
         store64(B + 16 + i * 8, f64_div(load64(B + 16 + i * 8), s));
@@ -132,7 +132,7 @@ fn _lp_vec_copy(dst, src, n) {
 
 # Copy matrix data: dst = src (same dimensions assumed)
 fn _lp_mat_copy_into(dst, src) {
-    var n = mat_rows(src) * mat_cols(src);
+    var n = ganita_mat_rows(src) * ganita_mat_cols(src);
     var i = 0;
     while (i < n) {
         store64(dst + 16 + i * 8, load64(src + 16 + i * 8));
@@ -170,7 +170,7 @@ fn _lp_mat_copy_into(dst, src) {
 #   - Vt_acc: n x n orthogonal matrix (right Householder product transposed)
 fn _lp_bidiagonalize(A, m, n, diag, superdiag, U_acc, Vt_acc) {
     # Work on a copy of A
-    var W = mat_copy(A);
+    var W = ganita_mat_copy(A);
 
     # Initialize U_acc to m x n slice of identity
     var i = 0;
@@ -180,7 +180,7 @@ fn _lp_bidiagonalize(A, m, n, diag, superdiag, U_acc, Vt_acc) {
     }
     i = 0;
     while (i < n) {
-        mat_set(U_acc, i, i, F64_ONE);
+        ganita_mat_set(U_acc, i, i, F64_ONE);
         i = i + 1;
     }
 
@@ -192,7 +192,7 @@ fn _lp_bidiagonalize(A, m, n, diag, superdiag, U_acc, Vt_acc) {
     }
     i = 0;
     while (i < n) {
-        mat_set(Vt_acc, i, i, F64_ONE);
+        ganita_mat_set(Vt_acc, i, i, F64_ONE);
         i = i + 1;
     }
 
@@ -217,7 +217,7 @@ fn _lp_bidiagonalize(A, m, n, diag, superdiag, U_acc, Vt_acc) {
         # Extract column k, rows k..m
         i = 0;
         while (i < len_l) {
-            store64(v_l + i * 8, mat_get(W, k + i, k));
+            store64(v_l + i * 8, ganita_mat_get(W, k + i, k));
             i = i + 1;
         }
 
@@ -248,14 +248,14 @@ fn _lp_bidiagonalize(A, m, n, diag, superdiag, U_acc, Vt_acc) {
                     i = 0;
                     while (i < len_l) {
                         dot = f64_add(dot, f64_mul(load64(v_l + i * 8),
-                            mat_get(W, k + i, j)));
+                            ganita_mat_get(W, k + i, j)));
                         i = i + 1;
                     }
                     var coeff = f64_mul(two_over_vtv, dot);
                     i = 0;
                     while (i < len_l) {
-                        var wij = mat_get(W, k + i, j);
-                        mat_set(W, k + i, j,
+                        var wij = ganita_mat_get(W, k + i, j);
+                        ganita_mat_set(W, k + i, j,
                           f64_sub(wij, f64_mul(coeff, load64(v_l + i * 8))));
                         i = i + 1;
                     }
@@ -280,7 +280,7 @@ fn _lp_bidiagonalize(A, m, n, diag, superdiag, U_acc, Vt_acc) {
             # Extract row k, cols (k+1)..n
             i = 0;
             while (i < len_r) {
-                store64(v_r + i * 8, mat_get(W, k, k + 1 + i));
+                store64(v_r + i * 8, ganita_mat_get(W, k, k + 1 + i));
                 i = i + 1;
             }
 
@@ -308,15 +308,15 @@ fn _lp_bidiagonalize(A, m, n, diag, superdiag, U_acc, Vt_acc) {
                         var dot = f64_from(0);
                         i = 0;
                         while (i < len_r) {
-                            dot = f64_add(dot, f64_mul(mat_get(W, ri, k + 1 + i),
+                            dot = f64_add(dot, f64_mul(ganita_mat_get(W, ri, k + 1 + i),
                                 load64(v_r + i * 8)));
                             i = i + 1;
                         }
                         var coeff = f64_mul(two_over_vtv_r, dot);
                         i = 0;
                         while (i < len_r) {
-                            var wij = mat_get(W, ri, k + 1 + i);
-                            mat_set(W, ri, k + 1 + i,
+                            var wij = ganita_mat_get(W, ri, k + 1 + i);
+                            ganita_mat_set(W, ri, k + 1 + i,
                               f64_sub(wij, f64_mul(coeff, load64(v_r + i * 8))));
                             i = i + 1;
                         }
@@ -330,14 +330,14 @@ fn _lp_bidiagonalize(A, m, n, diag, superdiag, U_acc, Vt_acc) {
                         i = 0;
                         while (i < len_r) {
                             dot = f64_add(dot, f64_mul(load64(v_r + i * 8),
-                                mat_get(Vt_acc, k + 1 + i, j)));
+                                ganita_mat_get(Vt_acc, k + 1 + i, j)));
                             i = i + 1;
                         }
                         var coeff = f64_mul(two_over_vtv_r, dot);
                         i = 0;
                         while (i < len_r) {
-                            var vtij = mat_get(Vt_acc, k + 1 + i, j);
-                            mat_set(Vt_acc, k + 1 + i, j,
+                            var vtij = ganita_mat_get(Vt_acc, k + 1 + i, j);
+                            ganita_mat_set(Vt_acc, k + 1 + i, j,
                               f64_sub(vtij, f64_mul(coeff, load64(v_r + i * 8))));
                             i = i + 1;
                         }
@@ -366,14 +366,14 @@ fn _lp_bidiagonalize(A, m, n, diag, superdiag, U_acc, Vt_acc) {
                 i = 0;
                 while (i < blen) {
                     bdot = f64_add(bdot, f64_mul(load64(lv_store + (k * m + i) * 8),
-                        mat_get(U_acc, k + i, bj)));
+                        ganita_mat_get(U_acc, k + i, bj)));
                     i = i + 1;
                 }
                 var bcoeff = f64_mul(btwo, bdot);
                 i = 0;
                 while (i < blen) {
-                    var buij = mat_get(U_acc, k + i, bj);
-                    mat_set(U_acc, k + i, bj,
+                    var buij = ganita_mat_get(U_acc, k + i, bj);
+                    ganita_mat_set(U_acc, k + i, bj,
                       f64_sub(buij, f64_mul(bcoeff, load64(lv_store + (k * m + i) * 8))));
                     i = i + 1;
                 }
@@ -386,12 +386,12 @@ fn _lp_bidiagonalize(A, m, n, diag, superdiag, U_acc, Vt_acc) {
     # Extract bidiagonal entries from W
     i = 0;
     while (i < n) {
-        store64(diag + i * 8, mat_get(W, i, i));
+        store64(diag + i * 8, ganita_mat_get(W, i, i));
         i = i + 1;
     }
     i = 0;
     while (i < n - 1) {
-        store64(superdiag + i * 8, mat_get(W, i, i + 1));
+        store64(superdiag + i * 8, ganita_mat_get(W, i, i + 1));
         i = i + 1;
     }
 
@@ -483,10 +483,10 @@ fn _lp_split_zero_diag(diag, superdiag, n, m, U_acc, Vt_acc, p_lo, p_hi) {
             # same G = [[cs, -sn], [sn, cs]] convention as the bulge chase.
             var t = 0;
             while (t < m) {
-                var u0 = mat_get(U_acc, t, hit);
-                var u1 = mat_get(U_acc, t, j);
-                mat_set(U_acc, t, hit, f64_sub(f64_mul(cs, u0), f64_mul(sn, u1)));
-                mat_set(U_acc, t, j, f64_add(f64_mul(sn, u0), f64_mul(cs, u1)));
+                var u0 = ganita_mat_get(U_acc, t, hit);
+                var u1 = ganita_mat_get(U_acc, t, j);
+                ganita_mat_set(U_acc, t, hit, f64_sub(f64_mul(cs, u0), f64_mul(sn, u1)));
+                ganita_mat_set(U_acc, t, j, f64_add(f64_mul(sn, u0), f64_mul(cs, u1)));
                 t = t + 1;
             }
             j = j + 1;
@@ -517,10 +517,10 @@ fn _lp_split_zero_diag(diag, superdiag, n, m, U_acc, Vt_acc, p_lo, p_hi) {
         # Right rotation on columns (c, p_hi) of B == rows (c, p_hi) of Vt.
         var t2 = 0;
         while (t2 < n) {
-            var v0 = mat_get(Vt_acc, c, t2);
-            var v1 = mat_get(Vt_acc, p_hi, t2);
-            mat_set(Vt_acc, c, t2, f64_sub(f64_mul(cs2, v0), f64_mul(sn2, v1)));
-            mat_set(Vt_acc, p_hi, t2, f64_add(f64_mul(sn2, v0), f64_mul(cs2, v1)));
+            var v0 = ganita_mat_get(Vt_acc, c, t2);
+            var v1 = ganita_mat_get(Vt_acc, p_hi, t2);
+            ganita_mat_set(Vt_acc, c, t2, f64_sub(f64_mul(cs2, v0), f64_mul(sn2, v1)));
+            ganita_mat_set(Vt_acc, p_hi, t2, f64_add(f64_mul(sn2, v0), f64_mul(cs2, v1)));
             t2 = t2 + 1;
         }
         c = c - 1;
@@ -674,11 +674,11 @@ fn _lp_bidiag_qr(diag, superdiag, n, m, U_acc, Vt_acc, max_iter) {
                 # Accumulate right rotation into Vt_acc (rows k, k+1)
                 var j = 0;
                 while (j < n) {
-                    var vk  = mat_get(Vt_acc, k, j);
-                    var vk1 = mat_get(Vt_acc, k + 1, j);
-                    mat_set(Vt_acc, k, j,
+                    var vk  = ganita_mat_get(Vt_acc, k, j);
+                    var vk1 = ganita_mat_get(Vt_acc, k + 1, j);
+                    ganita_mat_set(Vt_acc, k, j,
                       f64_add(f64_mul(cs, vk), f64_mul(f64_neg(sn), vk1)));
-                    mat_set(Vt_acc, k + 1, j,
+                    ganita_mat_set(Vt_acc, k + 1, j,
                       f64_add(f64_mul(sn, vk), f64_mul(cs, vk1)));
                     j = j + 1;
                 }
@@ -720,11 +720,11 @@ fn _lp_bidiag_qr(diag, superdiag, n, m, U_acc, Vt_acc, max_iter) {
                 # Accumulate left rotation into U_acc (columns k, k+1)
                 j = 0;
                 while (j < m) {
-                    var uk  = mat_get(U_acc, j, k);
-                    var uk1 = mat_get(U_acc, j, k + 1);
-                    mat_set(U_acc, j, k,
+                    var uk  = ganita_mat_get(U_acc, j, k);
+                    var uk1 = ganita_mat_get(U_acc, j, k + 1);
+                    ganita_mat_set(U_acc, j, k,
                       f64_add(f64_mul(cs, uk), f64_mul(f64_neg(sn), uk1)));
-                    mat_set(U_acc, j, k + 1,
+                    ganita_mat_set(U_acc, j, k + 1,
                       f64_add(f64_mul(sn, uk), f64_mul(cs, uk1)));
                     j = j + 1;
                 }
@@ -755,8 +755,8 @@ fn svd_golub_kahan(A, out_U, out_S, out_Vt) {
     # element cap; mat_rows(0) is a null dereference, so guard before reading dims.
     if (A == 0 || out_U == 0) { return HSB_ERR_INVALID_INPUT; }
     if (out_S == 0 || out_Vt == 0) { return HSB_ERR_INVALID_INPUT; }
-    var m = mat_rows(A);
-    var n = mat_cols(A);
+    var m = ganita_mat_rows(A);
+    var n = ganita_mat_cols(A);
 
     # THE m >= n PRECONDITION IS NOW CHECKED, NOT JUST DOCUMENTED.
     #
@@ -806,7 +806,7 @@ fn svd_golub_kahan(A, out_U, out_S, out_Vt) {
             # Flip sign of corresponding U column
             var j = 0;
             while (j < m) {
-                mat_set(out_U, j, i, f64_neg(mat_get(out_U, j, i)));
+                ganita_mat_set(out_U, j, i, f64_neg(ganita_mat_get(out_U, j, i)));
                 j = j + 1;
             }
         }
@@ -834,17 +834,17 @@ fn svd_golub_kahan(A, out_U, out_S, out_Vt) {
             # Swap U columns i and max_idx
             var k = 0;
             while (k < m) {
-                var tu = mat_get(out_U, k, i);
-                mat_set(out_U, k, i, mat_get(out_U, k, max_idx));
-                mat_set(out_U, k, max_idx, tu);
+                var tu = ganita_mat_get(out_U, k, i);
+                ganita_mat_set(out_U, k, i, ganita_mat_get(out_U, k, max_idx));
+                ganita_mat_set(out_U, k, max_idx, tu);
                 k = k + 1;
             }
             # Swap Vt rows i and max_idx
             k = 0;
             while (k < n) {
-                var tv = mat_get(out_Vt, i, k);
-                mat_set(out_Vt, i, k, mat_get(out_Vt, max_idx, k));
-                mat_set(out_Vt, max_idx, k, tv);
+                var tv = ganita_mat_get(out_Vt, i, k);
+                ganita_mat_set(out_Vt, i, k, ganita_mat_get(out_Vt, max_idx, k));
+                ganita_mat_set(out_Vt, max_idx, k, tv);
                 k = k + 1;
             }
         }
@@ -898,14 +898,14 @@ fn svd_golub_kahan(A, out_U, out_S, out_Vt) {
 # Q: n x n matrix (caller allocates, receives orthogonal transform).
 fn _lp_tridiagonalize(A, n, diag, offdiag, Q) {
     # Work on a copy
-    var W = mat_copy(A);
+    var W = ganita_mat_copy(A);
 
     # Initialize Q to identity
     var i = 0;
     var total = n * n;
     while (i < total) { store64(Q + 16 + i * 8, f64_from(0)); i = i + 1; }
     i = 0;
-    while (i < n) { mat_set(Q, i, i, F64_ONE); i = i + 1; }
+    while (i < n) { ganita_mat_set(Q, i, i, F64_ONE); i = i + 1; }
 
     var k = 0;
     while (k < n - 2) {
@@ -914,7 +914,7 @@ fn _lp_tridiagonalize(A, n, diag, offdiag, Q) {
         var v = _lp_vec_new(len);
         i = 0;
         while (i < len) {
-            store64(v + i * 8, mat_get(W, k + 1 + i, k));
+            store64(v + i * 8, ganita_mat_get(W, k + 1 + i, k));
             i = i + 1;
         }
 
@@ -943,7 +943,7 @@ fn _lp_tridiagonalize(A, n, diag, offdiag, Q) {
                     var sum = f64_from(0);
                     var j = 0;
                     while (j < len) {
-                        sum = f64_add(sum, f64_mul(mat_get(W, k + 1 + i, k + 1 + j),
+                        sum = f64_add(sum, f64_mul(ganita_mat_get(W, k + 1 + i, k + 1 + j),
                             load64(v + j * 8)));
                         j = j + 1;
                     }
@@ -974,23 +974,23 @@ fn _lp_tridiagonalize(A, n, diag, offdiag, Q) {
                 while (i < len) {
                     var j = 0;
                     while (j < len) {
-                        var wij = mat_get(W, k + 1 + i, k + 1 + j);
+                        var wij = ganita_mat_get(W, k + 1 + i, k + 1 + j);
                         var update = f64_add(
                           f64_mul(load64(v + i * 8), load64(q + j * 8)),
                           f64_mul(load64(q + i * 8), load64(v + j * 8)));
-                        mat_set(W, k + 1 + i, k + 1 + j, f64_sub(wij, update));
+                        ganita_mat_set(W, k + 1 + i, k + 1 + j, f64_sub(wij, update));
                         j = j + 1;
                     }
                     i = i + 1;
                 }
 
                 # Update the tridiagonal entries in column/row k
-                mat_set(W, k, k + 1, f64_neg(f64_mul(sgn, norm)));
-                mat_set(W, k + 1, k, f64_neg(f64_mul(sgn, norm)));
+                ganita_mat_set(W, k, k + 1, f64_neg(f64_mul(sgn, norm)));
+                ganita_mat_set(W, k + 1, k, f64_neg(f64_mul(sgn, norm)));
                 i = 2;
                 while (i < len + 1) {
-                    mat_set(W, k, k + i, f64_from(0));
-                    mat_set(W, k + i, k, f64_from(0));
+                    ganita_mat_set(W, k, k + i, f64_from(0));
+                    ganita_mat_set(W, k + i, k, f64_from(0));
                     i = i + 1;
                 }
 
@@ -1000,15 +1000,15 @@ fn _lp_tridiagonalize(A, n, diag, offdiag, Q) {
                     var dot = f64_from(0);
                     i = 0;
                     while (i < len) {
-                        dot = f64_add(dot, f64_mul(mat_get(Q, j, k + 1 + i),
+                        dot = f64_add(dot, f64_mul(ganita_mat_get(Q, j, k + 1 + i),
                             load64(v + i * 8)));
                         i = i + 1;
                     }
                     var coeff = f64_mul(two_over_vtv, dot);
                     i = 0;
                     while (i < len) {
-                        var qij = mat_get(Q, j, k + 1 + i);
-                        mat_set(Q, j, k + 1 + i,
+                        var qij = ganita_mat_get(Q, j, k + 1 + i);
+                        ganita_mat_set(Q, j, k + 1 + i,
                           f64_sub(qij, f64_mul(coeff, load64(v + i * 8))));
                         i = i + 1;
                     }
@@ -1023,12 +1023,12 @@ fn _lp_tridiagonalize(A, n, diag, offdiag, Q) {
     # Extract tridiagonal entries
     i = 0;
     while (i < n) {
-        store64(diag + i * 8, mat_get(W, i, i));
+        store64(diag + i * 8, ganita_mat_get(W, i, i));
         i = i + 1;
     }
     i = 0;
     while (i < n - 1) {
-        store64(offdiag + (i + 1) * 8, mat_get(W, i + 1, i));
+        store64(offdiag + (i + 1) * 8, ganita_mat_get(W, i + 1, i));
         i = i + 1;
     }
     store64(offdiag, f64_from(0));
@@ -1170,10 +1170,10 @@ fn _lp_tridiag_qr(diag, offdiag, n, Q, max_iter) {
                 # Accumulate Givens into Q (columns k, k+1)
                 var j = 0;
                 while (j < n) {
-                    var qk  = mat_get(Q, j, k);
-                    var qk1 = mat_get(Q, j, k + 1);
-                    mat_set(Q, j, k,     f64_add(f64_mul(cs, qk), f64_mul(sn, qk1)));
-                    mat_set(Q, j, k + 1, f64_add(f64_mul(f64_neg(sn), qk),
+                    var qk  = ganita_mat_get(Q, j, k);
+                    var qk1 = ganita_mat_get(Q, j, k + 1);
+                    ganita_mat_set(Q, j, k,     f64_add(f64_mul(cs, qk), f64_mul(sn, qk1)));
+                    ganita_mat_set(Q, j, k + 1, f64_add(f64_mul(f64_neg(sn), qk),
                         f64_mul(cs, qk1)));
                     j = j + 1;
                 }
@@ -1224,12 +1224,12 @@ fn eigen_qr(A, n, max_iter, out_vals, out_vecs) {
     # "the eigendecomposition of a non-square A", so this is rejected rather than
     # handled. out_vecs takes mat_set(out_vecs, i, j) for i, j < n and is bounded
     # the same way.
-    if (mat_rows(A) != n || mat_cols(A) != n) { return HSB_ERR_INVALID_INPUT; }
-    if (mat_rows(out_vecs) < n || mat_cols(out_vecs) < n) { return HSB_ERR_INVALID_INPUT; }
+    if (ganita_mat_rows(A) != n || ganita_mat_cols(A) != n) { return HSB_ERR_INVALID_INPUT; }
+    if (ganita_mat_rows(out_vecs) < n || ganita_mat_cols(out_vecs) < n) { return HSB_ERR_INVALID_INPUT; }
 
     if (n == 1) {
-        store64(out_vals, mat_get(A, 0, 0));
-        mat_set(out_vecs, 0, 0, F64_ONE);
+        store64(out_vals, ganita_mat_get(A, 0, 0));
+        ganita_mat_set(out_vecs, 0, 0, F64_ONE);
         return HSB_ERR_NONE;
     }
 
@@ -1284,9 +1284,9 @@ fn eigen_qr(A, n, max_iter, out_vals, out_vecs) {
             # Swap eigenvector columns in out_vecs
             var k = 0;
             while (k < n) {
-                var tv = mat_get(out_vecs, k, i);
-                mat_set(out_vecs, k, i, mat_get(out_vecs, k, max_idx));
-                mat_set(out_vecs, k, max_idx, tv);
+                var tv = ganita_mat_get(out_vecs, k, i);
+                ganita_mat_set(out_vecs, k, i, ganita_mat_get(out_vecs, k, max_idx));
+                ganita_mat_set(out_vecs, k, max_idx, tv);
                 k = k + 1;
             }
         }

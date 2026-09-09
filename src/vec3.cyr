@@ -177,5 +177,5 @@ fn hvec3_angle(a, b) {
     var lb = hvec3_length(b);
     var denom = f64_mul(la, lb);
     if (f64_lt(denom, EPSILON_F64) == 1) { return 0; }
-    return f64_acos(f64_clamp(f64_div(d, denom), f64_neg(F64_ONE), F64_ONE));
+    return ganita_f64_acos(f64_clamp(f64_div(d, denom), f64_neg(F64_ONE), F64_ONE));
 }
