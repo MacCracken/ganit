@@ -146,22 +146,46 @@ fn dual_sqrt(a) {
 # premise above is no longer true and a reader checking it against today's stdlib
 # would find the comment lying.
 #
-# ⭐ THE CONCLUSION SURVIVES ON A DIFFERENT AND MEASURED GROUND: PRECISION. The
-# upstream fix computes the magnitude as `exp(n * ln|base|)` and then applies the
-# sign, so it inherits the transcendental round-trip's error. Measured on ganita
-# 1.1.4: `f64_pow(-2, 3)` is 0xC01FFFFFFFFFFFFE (-7.99999999999999982) where
-# repeated multiplication gives 0xC020000000000000, exactly -8. `f64_to` TRUNCATES,
-# so a caller reading (-2)^4 as an integer gets 15 from the stdlib path and 16 from
-# this one. [measured: this file's probe, 2026-08-21; see CHANGELOG 2.11.2]
+# ⚠ AND THEN THE REPLACEMENT REASON DIED TOO, IN 2.11.4. 2.11.2 rewrote the
+# paragraph above onto PRECISION: ganita 1.1.4 took the magnitude from
+# `exp(n * ln|base|)` and applied the sign, so `f64_pow(-2, 3)` was
+# 0xC01FFFFFFFFFFFFE (-7.99999999999999982) against an exact 0xC020000000000000
+# here, and a caller reading (-2)^4 through the truncating `f64_to` got 15 from the
+# stdlib and 16 from this function. **ganita 1.2.4 replaced that path with BINARY
+# EXPONENTIATION for integral exponents with |n| <= 1024, and the gap is gone**:
+# 665 of 665 comparisons agree BIT FOR BIT (integral n in -12..12 over bases
+# -12..12, plus half-exponents over bases -20..19). (-2)^4 now reads 16 both ways.
+# [measured: scratch harness, not reproducible in-tree, 2026-09-09; ganita 1.2.4]
+#
+# ⭐ A THIRD GROUND SURVIVES, AND IT IS THE OPPOSITE OF THE SECOND. Squaring
+# amplifies relative error geometrically, so binary exponentiation loses accuracy
+# exactly where it wins speed — at LARGE integral exponents. Measured against a
+# 60-digit reference:
+# [measured: scratch harness, not reproducible in-tree, 2026-09-09; ganita 1.2.4]
+#
+#     (-0.999)^1000   inside ganita's +-1024 window (binary exponentiation)
+#                     _ad_pow    4 ulp from truth      <- this function wins
+#                     ganita    58 ulp from truth
+#     (-0.999)^1101   past the window (exp/ln fallback)
+#                     _ad_pow    3 ulp from truth
+#                     ganita     1 ulp from truth      <- the stdlib wins
+#
+# So the honest statement is narrow: repeated multiplication is exact-or-better for
+# small n, MORE accurate than the stdlib for large n inside the window, and WORSE
+# than it past the window — at O(n) multiplies against O(log n). It is no longer
+# obviously the right default, and whether to keep it is a real question rather
+# than a settled one. Filed, not decided.
+# [measured: scratch harness, not reproducible in-tree, 2026-09-09; ganita 1.2.4]
 #
 # So: integer exponents go through repeated multiplication, which is exact and has
-# no domain restriction; everything else defers to `f64_pow`, including its NaN for
-# cases like (-2)^0.5 where NaN is the right answer -- verified still NaN on 1.1.4,
-# because a fix that widened the domain THERE would be a new fabrication.
+# no domain restriction; everything else defers to the stdlib, including its NaN for
+# cases like (-2)^0.5 where NaN is the right answer -- re-verified still NaN on
+# ganita 1.2.4, because a fix that widened the domain THERE would be a new
+# fabrication.
 #
 # ⚠ One path's behaviour did move with the stdlib, and it is the fallback below:
 # when `acc` underflows to zero for a negative exponent this hands off to
-# `f64_pow`, so `_ad_pow(0, -1)` was NaN under 1.0.4 and is +Inf under 1.1.4.
+# `ganita_f64_pow`, so `_ad_pow(0, -1)` was NaN under 1.0.4 and is +Inf from 1.1.4 on.
 # +Inf is the IEEE-754 answer for pow(0, -1); dual_pow(0, -1) is correspondingly
 # (+Inf, -Inf). Pinned in tests/modules.tcyr so it is a checked outcome rather
 # than a discovered one. [measured: 2026-08-21]

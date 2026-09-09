@@ -5,8 +5,14 @@
 # Note: `f64_le` / `f64_ge` used to live here — they are now provided
 # (NaN-correctly) by the stdlib `math` module as of Cyrius 6.2.x, so the
 # local copies were removed to avoid a duplicate-definition collision.
-# Transcendentals (`f64_acos`, `f64_pow`, `f64_atan2`, `f64_cosh`,
-# `f64_sinh`, …) now come from the stdlib `ganita` module.
+# Transcendentals (`ganita_f64_acos`, `ganita_f64_pow`, `ganita_f64_atan2`,
+# `ganita_f64_cosh`, `ganita_f64_sinh`, …) come from the stdlib `ganita` module.
+#
+# ⚠ CALL THEM BY THEIR `ganita_` NAMES. ganita 1.2.4 marks the bare `f64_*` and
+# `mat_*` spellings **deprecated aliases, migration window only**; 2.11.4 moved all
+# 536 hisab call sites off them. Comments that name a bare `f64_pow` / `mat_new`
+# elsewhere in this tree are deliberate HISTORY -- they describe what a past ganita
+# version did, under the name it had then -- and are not call sites.
 
 # tan(x) = sin(x) / cos(x)
 fn f64_tan(x) {

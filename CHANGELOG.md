@@ -2,6 +2,100 @@
 
 ## [Unreleased]
 
+## [2.11.4] - 2026-09-09 — off the deprecated ganita aliases, and the 28% that was hiding behind them
+
+ganita 1.2.4 marks the bare `mat_*` and `f64_*` spellings **deprecated aliases, migration window
+only**. All hisab call sites now use the `ganita_*` names. Suite **3532/3532**, unchanged; every
+gate green; **zero** deprecated call sites left in `dist/hisab.cyr`, so consumers get a clean bundle.
+
+⚠ **2.11.3 estimated this at 8 call sites. It is 536.** That estimate came from grepping only the
+transcendentals named in ganita's changelog paragraph; the deprecation block is **53 aliases**, and
+hisab was on **20** of them — including `f64_pow` (36 sites) and the entire `mat_*` surface
+(`mat_set` 265, `mat_new` 121, `mat_get` 59). **A scope estimate taken from the release notes rather
+than from the code was off by 67x.**
+
+### Changed
+
+- **536 call sites across 20 alias names and 17 files migrated to the `ganita_*` spellings.**
+  Verified three ways rather than by inspection: the migrator is string-literal aware (it renames
+  assertion messages, which name the function under test, but never comment prose); a re-scan finds
+  **0 residual** call sites; and every one of the 20 targets was checked to be a **real definition**
+  rather than a further forwarding layer (the two one-line ones, `ganita_mat_rows`/`_cols`, are
+  genuine `load64` bodies).
+
+  ⭐ **The 5 suites produce BYTE-IDENTICAL output before and after** — 3532 assertions, captured and
+  diffed, not merely re-counted. The aliases are literal one-line forwarders, so semantic
+  equivalence is a property of the change rather than a hope, and the diff confirms it.
+
+  8 lines crossed the 120-char lint limit under the 7-character rename; 5 were fixed by collapsing
+  alignment padding and 3 by splitting, so `lint` stays at 0 warnings.
+
+### Performance
+
+The aliases were **real function calls, not free**: cycc's `#inline` requires **2 or fewer
+parameters**, and `ganita_mat_get` takes 3, `ganita_mat_set` takes 4. Every matrix access in
+`linalg_precision.cyr`'s SVD and eigen inner loops (37 `mat_get` + 31 `mat_set`) was paying a
+`call`/`ret` pair for nothing.
+
+| benchmark | 2.11.3 | 2.11.4 | change |
+|---|---:|---:|---|
+| `svd_golub_kahan_12` | 158,905 ns | 114,653 ns | **−27.85%** |
+| `eigen_qr_12` | 119,704 ns | 86,578 ns | **−27.67%** |
+
+⚠ **Both figures are the mean of two post-migration runs, against a noise floor measured on this
+host in this session, not quoted from a previous release.** Two back-to-back runs of the *identical*
+binary spread by a **median 2.10%** and a **worst 9.13%** across the 23 benchmarks whose `net` is at
+least 10x the timer floor — so −28% is roughly **3x the worst noise and 13x the median**, and it
+lands on exactly the two benchmarks the mechanism predicts.
+
+**No other movement is claimed.** The remaining 21 trustworthy benchmarks drifted **+0.07% to
++6.99%**, all inside that 9.13% band and all in geometry/collision code containing **zero** matrix
+calls — there is no mechanism for a regression there, and the drift is the host. The other 49
+benchmarks remain floor-dominated and carry no claim at all (see
+[`issues/2026-09-09-bench-net-below-timer-floor.md`](docs/development/issues/2026-09-09-bench-net-below-timer-floor.md)).
+
+### Fixed
+
+- **Two assertions had gone vacuous, and neither could ever have failed to tell us.** 2.11.3 caught
+  the two tests that *failed* when ganita 1.2.4 fixed what they had pinned. These two compare
+  through a **tolerance** and a **round**, so when the defect they were written against was repaired
+  they kept passing while the property they claimed to test evaporated:
+  - `tests/abuse.tcyr` asserted `dual_pow: (-2)^3 -> -8 exactly` with the message
+    *"truncation-discriminating: the stdlib path gives -7"*. The stdlib path now returns
+    `0xC020000000000000` — exactly −8, truncating to −8 — so the pair **no longer discriminates
+    anything**. False claim removed, the check kept.
+  - `tests/modules.tcyr` said *"f64_pow goes through exp/ln, so 2^3 is 7.999… — tolerance, not
+    equality"* and used `LOOSE_TOL_M`. `dual_pow(2,3)` is now `0x4020000000000000`, **exactly 8**;
+    the tolerance was hiding the improvement *and* admitting any future regression up to
+    `LOOSE_TOL_M`. Now asserted as bits.
+
+  ⭐ **An assertion written against a defect cannot fail when the defect is repaired — it just stops
+  testing anything.** The failing kind announces itself; this kind does not, and only re-reading the
+  rationale finds it.
+
+### Notes
+
+- ⚠ **`_ad_pow`'s reason to exist has now collapsed twice, and the comment beside it said so about
+  the first collapse while being wrong about the second.** Its DOMAIN rationale died in 2.11.2
+  (ganita 1.1.4); 2.11.2 rewrote it onto PRECISION; ganita 1.2.4's binary exponentiation killed that
+  too — **665 of 665 comparisons now agree bit for bit**, and `(-2)^4` reads 16 through both paths.
+  ⭐ **A third ground survives and it is the opposite of the second**: squaring amplifies relative
+  error, so binary exponentiation loses accuracy exactly where it wins speed. Against a 60-digit
+  reference, `(-0.999)^1000` is **4 ulp** from truth through `_ad_pow` and **58 ulp** through ganita
+  — while past ganita's ±1024 window the ranking inverts (3 ulp vs 1 ulp). The comment now states
+  that measured position instead of a rationale that stopped being true two releases ago; whether to
+  keep, delete or narrow the function is filed as
+  [`issues/2026-09-09-ad-pow-rationale-collapsed-twice.md`](docs/development/issues/2026-09-09-ad-pow-rationale-collapsed-twice.md),
+  which records that **no test currently exercises the one regime `_ad_pow` still wins**.
+- **Comments were NOT renamed wholesale, and the split is deliberate.** 21 present-tense API
+  descriptions (`caller allocates via ganita_mat_new`, `the matvec reads ganita_mat_get(A, i, j)`)
+  were corrected so a reader can grep from the comment to the call. The ~45 remaining bare mentions
+  are **history** — they describe what a past ganita version did, under the name it had then, and
+  renaming them would falsify the record. `src/f64_util.cyr` now states that convention in one place
+  so the mixture is legible rather than looking like a missed rename.
+- `mat_new_guarded` is **hisab's own** wrapper and is untouched; the migrator anchors on `name(`, so
+  it could not be caught by the `mat_new` rename.
+
 ## [2.11.3] - 2026-09-09 — the toolchain catch-up that hit a wrong-code regression
 
 cyrius **6.5.33 → 6.6.1** (forty-odd releases, crossing a minor), sakshi 2.4.11 → **2.5.1**, and

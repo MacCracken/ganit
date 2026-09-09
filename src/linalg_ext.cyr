@@ -655,7 +655,7 @@ fn solve_bicgstab(A_fn, b, x0, n, tol, max_iter) {
 
 # Projected Gauss-Seidel (PGS) for contact/constraint solvers.
 # Solves A*x = b subject to lo[i] <= x[i] <= hi[i].
-# A:   stdlib matrix (n x n, via mat_get/mat_set).
+# A:   stdlib matrix (n x n, via ganita_mat_get/ganita_mat_set).
 # b:   flat f64 array of length n.
 # x:   flat f64 array of length n (initial guess, modified in place).
 # n:   system dimension.
@@ -700,14 +700,14 @@ fn solve_pgs(A, b, x, n, lo, hi, max_iter) {
 }
 
 # ================================================================
-# Section 3 -- SVD (thin wrappers around linalg.cyr mat_svd)
+# Section 3 -- SVD (thin wrappers around ganita's ganita_mat_svd)
 # ================================================================
 
 # Full SVD: A = U * diag(S) * Vt.
 # A:      stdlib matrix (m x n).
-# out_U:  stdlib matrix (m x n, caller allocates via mat_new).
+# out_U:  stdlib matrix (m x n, caller allocates via ganita_mat_new).
 # out_S:  flat f64 array of length n (caller allocates via alloc(n*8)).
-# out_Vt: stdlib matrix (n x n, caller allocates via mat_new).
+# out_Vt: stdlib matrix (n x n, caller allocates via ganita_mat_new).
 # Returns: 0 on success.
 fn svd_compute(A, out_U, out_S, out_Vt) {
     return ganita_mat_svd(A, out_U, out_S, out_Vt);
@@ -779,7 +779,7 @@ fn svd_truncated(A, k, out_U, out_S, out_Vt) {
 #           match n, HSB_ERR_ALLOC if the working vectors cannot be allocated.
 fn eigen_power(A, n, max_iter, out_val, out_vec) {
     # NULL HANDLES. A may be the designed 0 that mat_new_guarded returns above
-    # its element cap, and mat_rows(0) is a null dereference.
+    # its element cap, and ganita_mat_rows(0) is a null dereference.
     if (A == 0 || out_val == 0) { return HSB_ERR_INVALID_INPUT; }
     if (out_vec == 0) { return HSB_ERR_INVALID_INPUT; }
 
@@ -791,7 +791,7 @@ fn eigen_power(A, n, max_iter, out_val, out_vec) {
     if (n <= 0) { return HSB_ERR_INVALID_INPUT; }
 
     # THE n x n PRECONDITION IS NOW CHECKED, NOT JUST DOCUMENTED. `n` is a
-    # restatement of A's own extent: the matvec below reads mat_get(A, i, j) for
+    # restatement of A's own extent: the matvec below reads ganita_mat_get(A, i, j) for
     # i, j < n, so n > A's extent is an out-of-bounds read and n < it silently
     # iterates on A's leading n x n block and returns 0 with the dominant
     # eigenvalue of a matrix the caller did not pass. Neither is a shape this
@@ -868,7 +868,7 @@ fn eigen_power(A, n, max_iter, out_val, out_vec) {
 }
 
 # Symmetric eigendecomposition via Jacobi rotation.
-# Wrapper around ganita's mat_eigen_sym with hisab API convention.
+# Wrapper around ganita_mat_eigen_sym with hisab API convention.
 # A:        stdlib matrix (n x n, must be symmetric).
 # n:        matrix dimension.
 # out_vals: flat f64 array of length n (caller allocates, receives eigenvalues,
@@ -963,11 +963,11 @@ fn lyapunov_max(A, n, iterations, out) {
     if (n <= 0) { return HSB_ERR_INVALID_INPUT; }
 
     # THE n x n PRECONDITION IS NOW CHECKED, NOT JUST DOCUMENTED. n is a
-    # restatement of A's extent and mat_mul(A, Q) conforms only when A is n x n;
+    # restatement of A's extent and ganita_mat_mul(A, Q) conforms only when A is n x n;
     # a mismatch is a caller error with no meaningful answer, so it is rejected.
     if (ganita_mat_rows(A) != n || ganita_mat_cols(A) != n) { return HSB_ERR_INVALID_INPUT; }
 
-    # mat_new_guarded, not mat_new: it propagates the designed 0 for an n this
+    # mat_new_guarded, not ganita_mat_new: it propagates the designed 0 for an n this
     # module considers unreasonable instead of allocating it.
     var Q = mat_new_guarded(n, n);
     if (Q == 0) { return HSB_ERR_ALLOC; }
@@ -985,7 +985,7 @@ fn lyapunov_max(A, n, iterations, out) {
     while (iter < iterations) {
         # Z = A * Q
         var Z = ganita_mat_mul(A, Q);
-        # mat_mul allocates; a failed allocation is a 0 that mat_qr would read
+        # ganita_mat_mul allocates; a failed allocation is a 0 that ganita_mat_qr would read
         # through. Bail with the allocation code rather than store into address 0.
         if (Z == 0) { return HSB_ERR_ALLOC; }
 

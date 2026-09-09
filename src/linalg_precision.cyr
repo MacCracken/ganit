@@ -751,8 +751,8 @@ fn _lp_bidiag_qr(diag, superdiag, n, m, U_acc, Vt_acc, max_iter) {
 # Returns: HSB_ERR_NONE on success, HSB_ERR_NO_CONVERGENCE on failure,
 #          HSB_ERR_INVALID_INPUT if m < n or either dimension is non-positive.
 fn svd_golub_kahan(A, out_U, out_S, out_Vt) {
-    # Any of these may be the designed 0 that mat_new returns above its own
-    # element cap; mat_rows(0) is a null dereference, so guard before reading dims.
+    # Any of these may be the designed 0 that ganita_mat_new returns above its own
+    # element cap; ganita_mat_rows(0) is a null dereference -- guard before reading dims.
     if (A == 0 || out_U == 0) { return HSB_ERR_INVALID_INPUT; }
     if (out_S == 0 || out_Vt == 0) { return HSB_ERR_INVALID_INPUT; }
     var m = ganita_mat_rows(A);
@@ -1200,8 +1200,8 @@ fn _lp_tridiag_qr(diag, offdiag, n, Q, max_iter) {
 # Returns:  HSB_ERR_NONE on success, HSB_ERR_NO_CONVERGENCE if max_iter exceeded,
 #           HSB_ERR_INVALID_INPUT on a null handle or a shape that does not match n.
 fn eigen_qr(A, n, max_iter, out_vals, out_vecs) {
-    # Any of these may be the designed 0 that mat_new / mat_new_guarded returns
-    # above its own element cap; mat_rows(0) is a null dereference, so guard
+    # Any of these may be the designed 0 that ganita_mat_new / mat_new_guarded returns
+    # above its own element cap; ganita_mat_rows(0) is a null dereference, so guard
     # before reading dims. This is svd_golub_kahan's idiom (:753) applied to the
     # one routine in this file that still lacked it: through 2.8.4 a null A,
     # out_vals or out_vecs was stored through and SIGSEGV'd (exit 139, measured).
@@ -1215,14 +1215,14 @@ fn eigen_qr(A, n, max_iter, out_vals, out_vecs) {
     # THE n x n PRECONDITION IS NOW CHECKED, NOT JUST DOCUMENTED.
     #
     # `n` is a restatement of A's own extent, and every read below is
-    # mat_get(A, i, j) for i, j < n -- so an n larger than A is an out-of-bounds
+    # ganita_mat_get(A, i, j) for i, j < n -- so an n larger than A is an out-of-bounds
     # read, and an n SMALLER than A is a silently different problem: the routine
     # would return HSB_ERR_NONE carrying the spectrum of A's leading n x n block,
     # which is not the spectrum of A. The balancing above compounds it --
-    # _lp_mat_max_abs(A) scans mat_rows(A) * mat_cols(A) entries, so the scale is
+    # _lp_mat_max_abs(A) scans ganita_mat_rows(A) * ganita_mat_cols(A) entries, so the scale is
     # drawn from a matrix the decomposition never looks at. There is no reading of
     # "the eigendecomposition of a non-square A", so this is rejected rather than
-    # handled. out_vecs takes mat_set(out_vecs, i, j) for i, j < n and is bounded
+    # handled. out_vecs takes ganita_mat_set(out_vecs, i, j) for i, j < n and is bounded
     # the same way.
     if (ganita_mat_rows(A) != n || ganita_mat_cols(A) != n) { return HSB_ERR_INVALID_INPUT; }
     if (ganita_mat_rows(out_vecs) < n || ganita_mat_cols(out_vecs) < n) { return HSB_ERR_INVALID_INPUT; }

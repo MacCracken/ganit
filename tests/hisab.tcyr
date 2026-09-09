@@ -1512,7 +1512,7 @@ assert(f64_approx_eq(load64(ep3_val), f64_from(6), EP_TOL), "eigen_power 3x3 lam
 assert(f64_approx_eq(load64(ep3_vec), F64_ONE, EP_TOL), "eigen_power 3x3 v[0] = 1");
 assert(f64_approx_eq(load64(ep3_vec + 8), F64_ONE, EP_TOL), "eigen_power 3x3 v[1] = 1");
 assert(f64_approx_eq(load64(ep3_vec + 16), F64_ONE, EP_TOL), "eigen_power 3x3 v[2] = 1");
-# GAP 1: both matrices above are SYMMETRIC, so mat_get(A, i, j) -> mat_get(A, j, i)
+# GAP 1: both matrices above are SYMMETRIC, so ganita_mat_get(A,i,j) -> ganita_mat_get(A,j,i)
 # (power iteration on A^T, i.e. the LEFT eigenvector) is invisible to them.
 # A = [[1,2],[3,4]]: lambda_1 = (5+sqrt33)/2 = 5.372281323269014.
 #   right dominant eigenvector (max-component normalized) = (0.4574271077563381, 1)
@@ -2538,7 +2538,7 @@ assert(_gmb_calls <= 10, "gmres budget=10 restart=10 spends at most 10 matvecs")
 # ================================================================
 #
 # _lp_bidiagonalize seeds out_U with the m x n slice of the identity via
-# mat_set(U_acc, i, i) for i < n. On an m x n matrix that store lands at flat
+# ganita_mat_set(U_acc, i, i) for i < n. On an m x n matrix that store lands at flat
 # slot i*n + i, so with m < n every i >= m writes past the m*n slots the caller
 # allocated. The QR sweep afterwards also produces wrong singular values,
 # because rows m..n-1 of B are never formed.
@@ -2572,7 +2572,7 @@ while (wi < 64) {
 assert_eq(wClob, 0, "svd 2x16: canary past out_U untouched (was 4 slots clobbered)");
 assert_eq(svd_golub_kahan(ganita_mat_new(3, 4), ganita_mat_new(3, 4), alloc(32), ganita_mat_new(4, 4)),
   HSB_ERR_INVALID_INPUT, "svd 3x4 (m < n): HSB_ERR_INVALID_INPUT");
-# A null handle is the designed 0 that mat_new returns above its own cap.
+# A null handle is the designed 0 that ganita_mat_new returns above its own cap.
 assert_eq(svd_golub_kahan(0, wU, wS, wVt), HSB_ERR_INVALID_INPUT, "svd: A = 0 rejected");
 assert_eq(svd_golub_kahan(wA, 0, wS, wVt), HSB_ERR_INVALID_INPUT, "svd: out_U = 0 rejected");
 assert_eq(svd_golub_kahan(wA, wU, 0, wVt), HSB_ERR_INVALID_INPUT, "svd: out_S = 0 rejected");

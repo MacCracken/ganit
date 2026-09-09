@@ -7669,9 +7669,13 @@ assert_eq(Dual_deriv(dq), F64_HALF, "dual_div derivative = 1/2");
 # d/dx x^3 at x=2 is 12.
 # n is a plain f64, not an integer -- a raw 3 is a subnormal ~1.5e-323.
 var dp = dual_pow(dual_var(F64_TWO), f64_from(3));
-# f64_pow goes through exp/ln, so 2^3 is 7.999... -- tolerance, not equality.
-assert(f64_lt(f64_abs(f64_sub(Dual_val(dp), f64_from(8))), LOOSE_TOL_M) == 1,
-  "dual_pow value 2^3 = 8");
+# ⭐ EXACT, NOT A TOLERANCE, SINCE ganita 1.2.4. This read "f64_pow goes through
+# exp/ln, so 2^3 is 7.999... -- tolerance, not equality" and used a tolerance. Binary
+# exponentiation made it exact, so the tolerance was hiding the improvement AND
+# admitting any future regression up to LOOSE_TOL_M. Asserted as BITS now:
+# dual_pow(2,3).val is 0x4020000000000000, identical to f64_from(8).
+# [measured: scratch harness, not reproducible in-tree, 2026-09-09; ganita 1.2.4]
+assert_eq(Dual_val(dp), f64_from(8), "dual_pow value 2^3 = 8, bit-exact");
 assert(f64_lt(f64_abs(f64_sub(Dual_deriv(dp), f64_from(12))), LOOSE_TOL_M) == 1,
   "dual_pow derivative 3x^2 = 12");
 # |x| at x=-5 is 5 with derivative -1.

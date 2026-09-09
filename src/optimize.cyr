@@ -674,7 +674,7 @@ fn opt_levenberg_marquardt(residuals, jacobian, x0, n_params, n_residuals, tol, 
     # allocated per iteration through 2.6.14 while `j_buf` above was already
     # hoisted — the audit measured 5.35 MB of unreclaimed bump scratch over 200
     # iterations. Every one is fully overwritten at the top of each iteration
-    # (jtj by the JtJ fill, rhs by the negation loop, lu/piv by mat_lu), so
+    # (jtj by the JtJ fill, rhs by the negation loop, lu/piv by ganita_mat_lu), so
     # reusing them is safe; in particular the `+lambda` added to jtj's diagonal
     # cannot accumulate because the fill rewrites every element first.
     var jtj = ganita_mat_new(np, np);

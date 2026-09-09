@@ -36,12 +36,14 @@ Tracked dependency version constraints and upgrade paths.
   `cyrius/docs/development/issues/2026-09-09-hisab-derive-accessor-simd-dst-slot.md`, with a
   self-validating repro in `repros/` — exit 0 on 6.5.70, exit 139 on 6.6.1.
 
-  ⚠ **`f64_acos` / `f64_atan2` and their siblings are now DEPRECATED ALIASES** ("migration window
-  only") for `ganita_f64_acos` / `ganita_f64_atan2`. hisab uses `f64_acos` **5x** and `f64_atan2`
-  **3x** in `src/`. They still resolve on 1.2.4, so nothing was changed in 2.11.3 — but this is the
-  one item in this file with a **deadline attached to it**, and it should be migrated before the
-  window closes rather than discovered by a failing build. The same block deprecates the whole
-  `mat_*` family in favour of `ganita_mat_*`; hisab calls `ganita_mat_*` already.
+  ⭐ **DEPRECATED ALIASES: MIGRATED IN 2.11.4, and the estimate in this paragraph was wrong by 67x.**
+  It read "hisab uses `f64_acos` 5x and `f64_atan2` 3x" and closed with "hisab calls `ganita_mat_*`
+  already". Both were false. The real figure is **536 call sites over 20 of the 53 deprecated
+  names**, `mat_set` alone accounting for 265 — and every `ganita_*` occurrence in the tree at the
+  time was in a **comment**, not a call. ⚠ **The estimate was taken from the names ganita's changelog
+  paragraph happened to mention, not from hisab's code**; the deprecation block is a 53-entry table
+  further down the same file. Scope a migration from the dependency's *surface*, never from its
+  release notes. All 536 are now on the `ganita_*` spellings, `dist/hisab.cyr` included.
 
   - **`ganita_f64_pow` (1.2.4)** — integral exponents now go through **binary exponentiation**
     instead of `exp(n·ln|base|)`, because the transcendental round trip returned

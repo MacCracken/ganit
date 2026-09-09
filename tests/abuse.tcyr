@@ -1109,7 +1109,7 @@ assert_eq(_ab_clob(ab_hal_can, 16), 0, "num_halton_2d: canary clean for -5 / 0 /
 
 # --- svd_golub_kahan on a rejected shape (fresh dims, not hisab.tcyr's 2x16) ---
 # out_U is 3 x 9 = 27 data slots; the bidiagonalisation seeds the identity with
-# mat_set(U, i, i) for i < n, so on m < n every i >= m lands past the buffer.
+# ganita_mat_set(U, i, i) for i < n, so on m < n every i >= m lands past the buffer.
 var ab_sA = ganita_mat_new(3, 9);
 var ab_sj = 0;
 while (ab_sj < 9) {
@@ -2248,11 +2248,26 @@ assert_eq(f64_to(Dual_val(dual_pow(dual_var(0), 0))), 1, "dual_pow: 0^0 -> 1, th
 # still discriminating: the stdlib path now returns -7.99999999999999982, which
 # f64_to TRUNCATES to -7, so this still fails if _ad_pow's exact integer path goes.
 assert_eq(f64_to(Dual_val(dual_pow(dual_var(f64_neg(F64_TWO)), f64_from(3)))), 0 - 8,
-  "dual_pow: (-2)^3 -> -8 exactly (truncation-discriminating: the stdlib path gives -7)");
+  "dual_pow: (-2)^3 -> -8 exactly");
 assert_eq(f64_to(Dual_deriv(dual_pow(dual_var(f64_neg(F64_TWO)), f64_from(3)))), 12,
   "dual_pow: d/dx x^3 at -2 -> 12, not NaN");
-# Rounded: f64_pow routes through exp/ln, so 2^3 lands a few ulp below 8 and a
-# bare f64_to would truncate to 7.
+# ⚠ THIS PAIR NO LONGER DISCRIMINATES, AND THAT IS RECORDED RATHER THAN QUIETLY
+# LEFT. The message above used to end "(truncation-discriminating: the stdlib path
+# gives -7)" and the comment here used to say f64_pow routes through exp/ln so 2^3
+# lands a few ulp below 8. Both were true of ganita <= 1.1.4 and are FALSE on 1.2.4,
+# which uses binary exponentiation for integral exponents: the stdlib now returns
+# 0xC020000000000000 for (-2)^3 -- exactly -8, truncating to -8 -- and 2^3 is exactly
+# 8. Measured across 665 comparisons, `_ad_pow` and `ganita_f64_pow` agree BIT FOR BIT
+# on every small integral and half-integral case.
+# [measured: scratch harness, not reproducible in-tree, 2026-09-09; ganita 1.2.4]
+#
+# ⭐ THE WHOLE CLASS IS THE POINT. 2.11.3 caught the two assertions that FAILED when
+# upstream fixed what they had pinned. These two did not fail -- they compare through
+# a tolerance and a round -- so they kept passing while the property they claimed to
+# test evaporated. **An assertion written against a defect cannot fail when the defect
+# is repaired; it just stops testing anything.** Kept as correctness checks on
+# `_ad_pow`, with the false discrimination claim removed.
+# [measured: tests/modules.tcyr:4494 pins the bit-exact stdlib values]
 assert_eq(f64_to(f64_round(Dual_val(dual_pow(dual_var(F64_TWO), f64_from(3))))), 8,
   "dual_pow: 2^3 = 8 (control for the degenerate exponent above)");
 

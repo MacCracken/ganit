@@ -74,6 +74,38 @@ the same binary put the median avg spread at 3.5% (worst 6.9%, none over 20%), a
 
 ## Testing Patterns
 
+### ⚠ An assertion written against a defect stops testing anything once the defect is fixed
+
+Added 2.11.4, from two live examples. When a test pins a *dependency's* bug as expected behaviour,
+the upstream repair is what breaks it — and how it breaks depends entirely on how the assertion
+compares:
+
+| assertion style | what happens when upstream fixes the defect |
+|---|---|
+| exact / bit compare | **FAILS loudly.** You are told. |
+| tolerance, round, or truncate | **KEEPS PASSING**, silently, while the property it claimed to test evaporates |
+
+2.11.3 caught two assertions of the first kind (`f64_pow(-2,4)` read 15, upstream made it 16;
+`cx_exp(-inf)` returned NaN, upstream made it +0). 2.11.4 found two of the second kind that had been
+green the whole time:
+
+- `tests/abuse.tcyr` asserted `(-2)^3 -> -8` and labelled it *"truncation-discriminating: the stdlib
+  path gives -7"*. ganita 1.2.4's binary exponentiation makes the stdlib return exactly −8, so the
+  pair discriminates **nothing** — but it compares through `f64_to`, so it still passed.
+- `tests/modules.tcyr` compared `dual_pow(2,3)` against 8 through `LOOSE_TOL_M`, with a comment
+  explaining that `f64_pow` goes through exp/ln so the value is 7.999…. It is now exactly 8. The
+  tolerance hid the improvement **and** would have admitted any future regression up to the
+  tolerance.
+
+**The rule:** if an assertion's comment explains *why* the value is imprecise, that comment is a
+dependency claim with an expiry date. Prefer a bit-exact compare wherever the value is genuinely
+exact, and when a tolerance is truly needed, say what sets its size — so the next reader can tell a
+loosened bound from a required one. Neither of these was found by running the suite; both were found
+by re-reading the rationale beside them.
+
+⚠ Related and already measured: the 2026-08-11 audit found **836 of 3510 assertions (23.8%) compare
+through `f64_to`, which TRUNCATES**. That is the same hazard at scale.
+
 ### Approximate equality
 
 ```cyrius
