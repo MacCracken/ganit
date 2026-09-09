@@ -4477,14 +4477,36 @@ assert_eq(f64_eq(f64_pow(f64_neg(F64_TWO), F64_HALF),
     f64_pow(f64_neg(F64_TWO), F64_HALF)), 0,
   "f64_pow(-2,0.5) is still NaN -- the domain widened to the integers, not past them");
 
-# ⚠ THE STDLIB PATH IS NOT EXACT, WHICH IS WHY _ad_pow STAYS. The upstream fix takes
-# the magnitude from exp(n*ln|base|) and applies the sign, so it carries the
-# transcendental round-trip's error; f64_to TRUNCATES, so the two paths disagree by a
-# whole integer. Measured 2026-08-21: stdlib -> -7 and 15, hisab -> -8 and 16.
-assert_eq(f64_to(f64_pow(f64_neg(F64_TWO), f64_from(4))), 15,
-  "f64_pow(-2,4) truncates to 15 -- the stdlib path is a few ulp low");
+# ⭐ THE STDLIB PATH IS NOW EXACT, AND THE ULP GAP THAT JUSTIFIED _ad_pow IS GONE.
+# ganita 1.2.4 replaced exp(n*ln|base|) with BINARY EXPONENTIATION for an integral
+# exponent with |exp| <= 1024, in its own words because "pow(7,2) came back
+# 48.99999999999999296, so a caller who floored it got 48" and pow(10,15) was "up to
+# 47 ulps out". Squaring is exact while the result is representable, and it handles a
+# negative base for free because it never takes a logarithm.
+#
+# So the assertion that USED to read 15 now reads 16, and the two paths agree BIT FOR
+# BIT rather than merely to a tolerance. This is a stdlib defect this suite had pinned
+# as expected behaviour: the upstream FIX is what failed the test.
+# Values on ganita 1.2.4: f64_pow(-2,4)=0x4030000000000000 (exactly 16.0),
+# f64_pow(-2,3)=0xc020000000000000 (-8.0), f64_pow(2,10)=0x4090000000000000 (1024.0),
+# f64_pow(-2,5)=0xc040000000000000 (-32.0); read 15 and -7 under ganita 1.1.4.
+# [measured: tests/modules.tcyr:4494]
+assert_eq(f64_pow(f64_neg(F64_TWO), f64_from(4)), f64_from(16),
+  "f64_pow(-2,4) is now BIT-EXACT 16.0 -- ganita 1.2.4 binary exponentiation");
 assert_eq(f64_to(_ad_pow(f64_neg(F64_TWO), f64_from(4))), 16,
-  "_ad_pow(-2,4) is exactly 16 -- repeated multiplication, the reason it survives");
+  "_ad_pow(-2,4) is exactly 16 -- repeated multiplication");
+# ⚠ _ad_pow now AGREES with the stdlib bit for bit, so this pair no longer
+# discriminates the two implementations. _ad_pow stays because autodiff needs the
+# value AND the derivative from one call, not because it is more accurate.
+assert_eq(f64_pow(f64_neg(F64_TWO), f64_from(4)),
+  _ad_pow(f64_neg(F64_TWO), f64_from(4)),
+  "f64_pow and _ad_pow now agree bit for bit on (-2)^4");
+# The exactness is not special to one input -- three more integer powers, as bits.
+assert_eq(f64_pow(F64_TWO, f64_from(10)), f64_from(1024), "f64_pow(2,10) bit-exact 1024");
+assert_eq(f64_pow(f64_neg(F64_TWO), f64_from(3)), f64_neg(f64_from(8)),
+  "f64_pow(-2,3) bit-exact -8 (was -7 through the exp/ln path)");
+assert_eq(f64_pow(f64_neg(F64_TWO), f64_from(5)), f64_neg(f64_from(32)),
+  "f64_pow(-2,5) bit-exact -32");
 
 # The one _ad_pow path that inherits the change: acc underflows for a negative
 # exponent and hands off to f64_pow. Was NaN under 1.0.4, is +Inf now -- and +Inf is

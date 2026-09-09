@@ -35,7 +35,7 @@ For expression evaluation and unit conversion, see [abaco](https://github.com/Ma
 name        = "your-project"
 version     = "${file:VERSION}"
 language    = "cyrius"
-cyrius      = "6.5.33"
+cyrius      = "6.6.1"
 
 [deps]
 # `ganita` (Cyrius 6.2.x) provides the transcendentals (acos/asin/atan2/pow/
@@ -46,7 +46,7 @@ stdlib = ["string", "fmt", "alloc", "vec", "str", "math", "ganita", "tagged", "f
 
 [deps.hisab]
 git     = "https://github.com/MacCracken/hisab.git"
-tag     = "2.11.2"
+tag     = "2.11.3"
 modules = ["dist/hisab.cyr"]   # ~875 KB self-contained bundle (all 35 modules)
 # `dist/hisab.deps` is tracked as of 2.9.2 -- `cyrius deps` reads that sidecar and
 # pulls in hisab's own 15 stdlib leaves, so the `stdlib` list above only has to
@@ -118,15 +118,15 @@ See [docs/architecture/overview.md](docs/architecture/overview.md) for the full 
 
 | Metric | Value |
 |--------|-------|
-| Version | 2.11.2 |
+| Version | 2.11.3 |
 | Library | 35 modules, ~23,182 lines of Cyrius |
-| Tests | 3526 assertions across 5 suites |
+| Tests | 3532 assertions across 5 suites |
 | Benchmarks | 72 operations |
 | Fuzz targets | 5 with invariant checks |
 | CLI binary | ~219 KB static ELF (`build/hisab` — version smoke test only) |
-| Toolchain | Cyrius 6.5.33 |
-| Dependencies | 1 (sakshi 2.4.11); no third-party, no FFI/libc |
-| Security | P(-1) audit (2026-04-15) + hardening pass (2026-05-29); [2026-08-03](docs/audit/2026-08-03.md) sweep (70 findings, 2 critical) discharged in 2.6.12–2.6.15; [2026-08-04](docs/audit/2026-08-04.md) re-audit (42 confirmed, 0 critical) discharged in 2.7.0; [2026-08-04 v2.8.0 full sweep](docs/audit/2026-08-04-v2.8.0-full.md) (42 confirmed, 4 critical) **42 FIXED / 0 OPEN** as of 2.9.1; `tests/abuse.tcyr` (2.9.0) found 11 defects on public entry points, all fixed; [2026-08-11 v2.11.0 full sweep](docs/audit/2026-08-11-v2.11.0-full.md) (**52 reproduced, 21 confirmed, 2 refuted — and 28 reproduced but never verified, recorded as such**) with four repairs shipped in 2.11.1 and the rest scheduled on the roadmap. **3 open filings** in [docs/development/issues/](docs/development/issues/), 23 archived beside them: two are upstream cyrius items (one partially fixed in 6.5.17 and re-verified on 6.5.18, one deliberately never re-tested because its reproducer is destructive) and one is hisab's own — the EPA seed/certificate question, re-diagnosed in 2.9.3 |
+| Toolchain | Cyrius 6.6.1 |
+| Dependencies | 1 (sakshi 2.5.1); no third-party, no FFI/libc |
+| Security | P(-1) audit (2026-04-15) + hardening pass (2026-05-29); [2026-08-03](docs/audit/2026-08-03.md) sweep (70 findings, 2 critical) discharged in 2.6.12–2.6.15; [2026-08-04](docs/audit/2026-08-04.md) re-audit (42 confirmed, 0 critical) discharged in 2.7.0; [2026-08-04 v2.8.0 full sweep](docs/audit/2026-08-04-v2.8.0-full.md) (42 confirmed, 4 critical) **42 FIXED / 0 OPEN** as of 2.9.1; `tests/abuse.tcyr` (2.9.0) found 11 defects on public entry points, all fixed; [2026-08-11 v2.11.0 full sweep](docs/audit/2026-08-11-v2.11.0-full.md) (**52 reproduced, 21 confirmed, 2 refuted — and 28 reproduced but never verified, recorded as such**) with four repairs shipped in 2.11.1 and the rest scheduled on the roadmap. **2 open filings** in [docs/development/issues/](docs/development/issues/), 25 archived filings beside them (26 counting the note added for the two reproducer fixtures) — the EPA seed/certificate question re-diagnosed in 2.9.3, and 41 of 72 benchmarks reporting a `net` value below the timer floor they subtract. ⚠ **Cyrius bugs are filed in the cyrius repo**, not here; 2.11.3 filed one there (a `#derive(accessors)` getter passed to an `f64v_*` intrinsic leaves the intrinsic's destination stack slot unwritten — **wrong code**, bisected to cycc 6.5.71, worked around by a load-bearing hoist in `src/mat4.cyr`) and **closed two** by re-testing them on 6.6.1: the CLI source-clobber data-loss risk is now guarded fail-closed, and a syntax error in an uncalled function is finally rejected by `lint` |
 
 ## License
 

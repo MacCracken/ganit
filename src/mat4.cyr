@@ -104,14 +104,34 @@ fn m4_mul(a, b) {
 }
 
 # Mat4 * Vec4 — SIMD: result = Σ_k v[k]·M_col_k (M's columns contiguous).
+#
+# ⛔ THE HOIST OF vx..vw IS LOAD-BEARING, NOT STYLE. A `#derive(accessors)`
+# getter passed DIRECTLY as an `f64v_*` argument miscompiles on cycc >= 6.5.71:
+# the intrinsic's expansion reads its destination pointer from a stack slot that
+# the accessor's inline-replay path leaves UNWRITTEN, so the packed store goes to
+# whatever garbage the slot held. `movupd %xmm0,(%rdx,%rsi,8)` with %rdx = 12,
+# read from -0x50(%rbp), a slot no instruction in the function ever stores to —
+# while the src and scalar slots ARE stored. Bisected: 6.5.70 OK, 6.5.71 broken
+# (that release made derive accessors reach the inline-replay path, callq 7 -> 3,
+# removing the call that had incidentally forced the spill). Reproduced on 6.5.71,
+# 6.5.72, 6.5.73, 6.6.0, 6.6.1; three of five suites SIGSEGV'd before this hoist.
+# [measured: scratch harness, not reproducible in-tree -- see the issue doc]
+# Same file, same context: a plain fn accessor and a raw `load64` both compile
+# correctly — only the derived getter as a direct argument fails.
+# `m3_mul_vec3` has always hoisted; this function was the lone inconsistency.
+# Filed upstream: cyrius/docs/development/issues/2026-09-09-hisab-derive-accessor-simd-dst-slot.md
 #must_use
 fn m4_mul_vec4(m, v) {
     var r = alloc(32);
     var tmp = alloc(32);
-    f64v_scale(r, m + 0, HVec4_x(v), 4);
-    f64v_scale(tmp, m + 32, HVec4_y(v), 4); f64v_add(r, r, tmp, 4);
-    f64v_scale(tmp, m + 64, HVec4_z(v), 4); f64v_add(r, r, tmp, 4);
-    f64v_scale(tmp, m + 96, HVec4_w(v), 4); f64v_add(r, r, tmp, 4);
+    var vx = HVec4_x(v);
+    var vy = HVec4_y(v);
+    var vz = HVec4_z(v);
+    var vw = HVec4_w(v);
+    f64v_scale(r, m + 0, vx, 4);
+    f64v_scale(tmp, m + 32, vy, 4); f64v_add(r, r, tmp, 4);
+    f64v_scale(tmp, m + 64, vz, 4); f64v_add(r, r, tmp, 4);
+    f64v_scale(tmp, m + 96, vw, 4); f64v_add(r, r, tmp, 4);
     return r;
 }
 

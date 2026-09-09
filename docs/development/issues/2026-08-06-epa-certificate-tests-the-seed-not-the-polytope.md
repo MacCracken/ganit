@@ -144,3 +144,38 @@ numbers.
 overlaps fall back, plus a negative control proving the counter is not unconditional. **When this
 is fixed those assertions will FAIL, and that is the intended signal.** Update them then and say so
 in the CHANGELOG.
+
+---
+
+## ⚠ 2026-09-09 (v2.11.3) — THE 19.4% FIGURE IS STALE. Re-measure before judging the trade.
+
+Nothing about the diagnosis above changed, and the code is still unchanged. But the **cost side of
+the trade-off was measured against a baseline that no longer exists**, and this file is the only
+place that number is recorded — so a later reader would weigh a 2026-09 decision with a 2026-08
+price tag.
+
+cyrius 6.5.71 put `#derive(accessors)` getters on the inline-replay path, and hisab's narrowphase is
+built almost entirely out of those getters. `gjk_epa_sphere_box` moved on the toolchain bump alone,
+no source change:
+
+| | `gjk_epa_sphere_box` |
+|---|---|
+| baseline when 19.4% was measured (2.9.3) | **125.6 us** |
+| baseline at 2.11.2 (cyrius 6.5.33) | 111.5 us |
+| baseline at 2.11.3 (cyrius 6.6.1) | **78.5 us** |
+
+[measured: bench-history.csv, benchmark `gjk_epa_sphere_box`, runs 2026-08-21 and 2026-09-09]
+
+⛔ **Do not rescale the old percentage — re-measure both halves.** It is tempting to reason that the
+repair adds a roughly constant amount of work (one extra Minkowski support evaluation per seed), so
+against a baseline that fell 125.6 -> 78.5 us the same absolute addition would now cost ~32% rather
+than 19.4%, making the trade *worse*. That is an inference, not a measurement, and it is probably
+wrong in detail: the added support evaluation is itself accessor-heavy geometry and will have been
+sped up by the same inlining, so the ratio may be roughly preserved. **The two halves moved for the
+same reason and neither was measured after the move.** The honest statement is that the percentage
+is unknown as of 2.11.3.
+
+**Close condition unchanged**, with one addition: whoever takes the sphere-family cycle must
+re-measure the strict-seed variant on the *current* pin before deciding, rather than reading 19.4%
+off this file. The whole 2.11.3 release was an exercise in numbers that were written down once and
+then trusted; this is one of them, caught here rather than after the decision.

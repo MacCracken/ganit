@@ -84,3 +84,31 @@ The reproducer above should error with `unknown flag '-v'` (or similar) and exit
 None — this is purely a CLI hardening item. Hisab uses the `CYRIUS_VERBOSE` env var which is unaffected.
 
 This file gets removed once the CLI rejects unknown flags.
+
+---
+
+## 🟢 CLOSED — ARCHIVED 2026-09-09 (v2.11.3), on cycc 6.6.1
+
+**Fixed upstream, fail-closed, and finally safe to re-test.** This filing was carried for four
+months as "deliberately never re-tested" because the reproducer destroys a source file. On 6.6.1
+it can be run safely, because the destruction is now *guarded* rather than merely *unlikely*:
+
+```
+$ cyrius -v build victim.cyr <output>
+error: refusing to write build output over a .cyr source file: victim.cyr
+```
+
+Run in a throwaway scratch package, never in this tree. `victim.cyr` was **byte-identical**
+before and after (same SHA256, 59 B), across three argument shapes — `build src src`,
+`--bogus build src src`, and the original `-v build src <out>` — so the guard keys on the
+**output path being a `.cyr` source**, not on one particular misparse.
+
+⚠ **The exit code was checked separately, and the first check was wrong.** `cyrius ... | tail`
+reports `rc=0` because `$?` after a pipe is *tail's* status, not cyrius's — the same probe defect
+this repo recorded in 2.11.2. Measured without the pipe: the refusal exits **1**, and a normal
+build of the same file exits **0**. So it is a real failure, not a warning that scores green.
+
+This closes the ambiguity recorded in the 2026-08-09 note above: the upstream filing sat in
+`archived/` with `Status: Open` and no resolution paragraph, so its location could not be read as
+evidence. It no longer has to be — the behaviour itself was measured on the current pin.
+[measured: scratch harness, not reproducible in-tree — the reproducer is destructive by construction]

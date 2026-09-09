@@ -2,20 +2,35 @@
 # Usage: include "lib/tagged.cyr"
 # Requires: alloc.cyr, fmt.cyr (for option_print/result_print)
 #
-# A tagged union is a heap-allocated pair: { tag: i64, value: i64 }
-# The tag identifies which variant, the value carries the payload.
-# This is the foundation for Option, Result, and error handling.
+# ⭐ v6.6.0 — THE VALUE FORM. `Option` and `Either` are declared `: stack` alongside `Result`
+# (lib/result.cyr, included below). A payload variant returns a REGISTER PAIR — tag in rax,
+# payload in rdx — and allocates ZERO bytes. There is no longer a heap box, so there is no
+# longer a `tag at +0 / value at +8` layout to read; the two halves ARE the two bound variables.
 #
-# Layout: tag at offset 0, value at offset 8. Total: 16 bytes.
+#     var t, v = f();                  # bind BOTH halves — the only correct receive
+#     is_none(t) / is_some(t)          # 1 arg: arg 1 receives rax, which IS the tag
+#     is_left(t) / is_right(t)
+#     unwrap(t, v)                     # 2 args
+#     unwrap_or(t, v, fallback)        # 3 args
+#     option_print(t, v)               # 2 args
 #
-# v5.8.28 (2026-05-03) — Result<T, E> + its helpers (is_ok,
-# is_err_result, result_unwrap, result_unwrap_or, err_code_of,
-# result_print) carved out into `lib/result.cyr` with the typed
-# generic shape. Transitively included below so existing
-# consumers (lib/net.cyr, lib/ws_server.cyr, lib/sandhi.cyr,
-# tests/tcyr/stdlib/tagged.tcyr) keep working without an explicit
-# include of lib/result.cyr. New code should `include
-# "lib/result.cyr"` directly when it only needs Result.
+# ⛔ `payload(t)` IS DELETED, and it has no 1-argument replacement — rdx never reaches a
+# parameter, so no function can receive a Result/Option in one argument and read its payload.
+# Under the value form the payload is already a plain variable: `payload(r)` becomes `r`.
+# ⛔ `tagged_new(tag, value)` IS DELETED. It built a raw 16-byte box, and the only things that
+# could read that box were `tag()` / `payload()`. Nothing in the ecosystem called it (verified
+# across all 12 sibling stdlibs at the v6.6.0 cut), and leaving it would be a trap: a box you
+# can construct and cannot read.
+#
+# ⚠ A NULLARY variant carries no payload, so it needs no second register: `None()` returns its
+# tag ALONE and is correctly NOT pair-returning. A function that returns `None()` on one path
+# and `Some(v)` on another IS pair-returning (the flag propagates through `return`), and on the
+# None path the payload register is simply not read — the tag says there is nothing there.
+#
+# History: v5.8.23 migrated Option/Either from hand-rolled tags to compiler-generated sum types;
+# v5.8.28 carved Result out into lib/result.cyr; v6.5.55 shipped the `: stack` capability;
+# v6.5.67 made it safe and allowed nullary variants; v6.5.74 taught `?` to propagate the pair.
+# CHANGELOG [6.6.0].
 
 include "lib/result.cyr"
 
@@ -23,53 +38,37 @@ include "lib/result.cyr"
 # Core tagged union operations
 # ================================================================
 
-# Create a tagged value (heap-allocated)
-fn tagged_new(tag, value): i64 {
-    var t = alloc(16);
-    store64(t, tag);
-    store64(t + 8, value);
+# Get the discriminant tag. Under the value form the tag is already the first bound half, so
+# this is the identity — kept because it reads well at call sites that were written as
+# `tag(x) == Some` and because a single argument receives rax, which IS the tag.
+fn tag(t): i64 {
     return t;
 }
 
-# Get the discriminant tag
-fn tag(t): i64 {
-    return load64(t);
-}
-
-# Get the payload value
-fn payload(t): i64 {
-    return load64(t + 8);
-}
-
-# Check if tag matches
+# Check if tag matches. Unchanged: it always took the tag, and still does.
 fn is_tag(t, expected): i64 {
-    if (load64(t) == expected) { return 1; }
+    if (t == expected) { return 1; }
     return 0;
 }
 
 # ================================================================
 # Option type: None() | Some(value)
 # ================================================================
-# v5.8.23 bite #2 — migrated from hand-rolled `enum OptionTag` +
-# `fn None()` + `fn Some(value)` to compiler-generated sum type.
-# `None()` is a true nullary tagged variant (8-byte alloc, tag at
-# +0, no payload). `Some(v)` is a 16-byte alloc (tag at +0,
-# payload at +8). Tag values match the prior NONE = 0 / SOME = 1
-# convention so existing helper logic + downstream tcyr consumers
-# stay functional.
-enum Option {
+# Tag values match the historical NONE = 0 / SOME = 1 convention, so any code comparing a tag
+# against a literal keeps working. `None()` is nullary — tag only, no payload register.
+enum Option: stack {
     None();
     Some(v);
 }
 
-# Return 1 if option is None
-fn is_none(opt): i64 {
-    return is_tag(opt, None);
+# Return 1 if option is None. Takes the TAG.
+fn is_none(t): i64 {
+    return is_tag(t, None);
 }
 
-# Return 1 if option is Some
-fn is_some(opt): i64 {
-    return is_tag(opt, Some);
+# Return 1 if option is Some. Takes the TAG.
+fn is_some(t): i64 {
+    return is_tag(t, Some);
 }
 
 # v6.0.56: target-aware fatal exit (agnos exit = syscall(0), not Linux's
@@ -85,58 +84,56 @@ fn _tagged_die(): i64 {
     return 0;
 }
 
-# Unwrap: return value or abort if None
-fn unwrap(opt): i64 {
-    if (is_none(opt) == 1) {
+# Unwrap: return value or abort if None. Takes BOTH halves.
+fn unwrap(t, v): i64 {
+    if (is_none(t) == 1) {
         syscall(1, 2, "unwrap called on None\n", 22);
         _tagged_die();
     }
-    return payload(opt);
+    return v;
 }
 
-# Unwrap with default: return value if Some, default if None
-fn unwrap_or(opt, fallback): i64 {
-    if (is_none(opt) == 1) { return fallback; }
-    return payload(opt);
+# Unwrap with default: return value if Some, default if None. Takes both halves plus fallback.
+fn unwrap_or(t, v, fallback): i64 {
+    if (is_none(t) == 1) { return fallback; }
+    return v;
 }
 
 # ================================================================
 # Result type: Ok(value) | Err(code)
 # ================================================================
 # v5.8.28 — moved to lib/result.cyr (transitively included above).
-# Result<T, E> uses v5.8.21 generic-parameter syntax there.
 
 # ================================================================
 # Either type: Left(a) | Right(b)
 # ================================================================
-# v5.8.23 bite #2 — compiler-generated sum type. Tag values match
-# the prior LEFT = 0 / RIGHT = 1 convention.
-enum Either {
+# Tag values match the historical LEFT = 0 / RIGHT = 1 convention.
+enum Either: stack {
     Left(v);
     Right(v);
 }
 
-# Return 1 if either is Left
-fn is_left(e): i64 {
-    return is_tag(e, Left);
+# Return 1 if either is Left. Takes the TAG.
+fn is_left(t): i64 {
+    return is_tag(t, Left);
 }
 
-# Return 1 if either is Right
-fn is_right(e): i64 {
-    return is_tag(e, Right);
+# Return 1 if either is Right. Takes the TAG.
+fn is_right(t): i64 {
+    return is_tag(t, Right);
 }
 
 # ================================================================
 # Print helpers
 # ================================================================
 
-# Print an Option value as "None" or "Some(n)"
-fn option_print(opt): i64 {
-    if (is_none(opt) == 1) {
+# Print an Option value as "None" or "Some(n)". Takes both halves.
+fn option_print(t, v): i64 {
+    if (is_none(t) == 1) {
         syscall(1, 1, "None", 4);
     } else {
         syscall(1, 1, "Some(", 5);
-        fmt_int(payload(opt));
+        fmt_int(v);
         syscall(1, 1, ")", 1);
     }
     return 0;

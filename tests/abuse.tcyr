@@ -2192,12 +2192,31 @@ assert_eq(f64_to(HComplex_re(cx_powf(cx_zero(), 0))), 0, "cx_powf: 0^0 -> re 0 (
 assert_eq(cx_is_zero(cx_zero(), EPSILON_F64), 1, "cx_is_zero: exact zero");
 assert_eq(f64_to(HComplex_re(cx_exp(cx_zero()))), 1, "cx_exp: exp(0) = 1");
 
-# exp(-inf + 0i) is the product of a 0 magnitude with cos/sin of the angle; the
-# ganita exp polyfill returns an infinity of the wrong sign here, so the product
-# is 0 * inf = NaN. Recorded as a NaN rather than silently accepted as 0 -- a
-# fabricated 0 would be indistinguishable from a correct answer at the call site.
-assert_eq(_ab_is_nan(HComplex_re(cx_exp(cx_new(_AB_NINF, 0)))), 1,
-  "cx_exp: exp(-inf) -> NaN, not a fabricated 0");
+# exp(-inf + 0i) is the product of a 0 magnitude with cos/sin of the angle.
+#
+# ⭐ THIS NOW RETURNS EXACTLY 0, AND 0 IS THE CORRECT ANSWER -- changed by cyrius
+# 6.6.1, not by hisab. `lib/math.cyr`'s exp polyfill had NO infinity guard, so the
+# range reduction computed inf - inf = NaN and the 2^n bit-pack read a SATURATED
+# f64_to(inf); it handed back an infinity of the WRONG SIGN and cx_exp's 0 * inf
+# came out NaN. 6.6.1 added the IEEE-754 guard (exp(+inf) = +inf, exp(-inf) = +0),
+# so e^(-inf) * (cos 0 + i sin 0) = 0 * 1 = 0 exactly. The old assertion pinned the
+# UPSTREAM DEFECT as expected behaviour, so the upstream fix failed it.
+#
+# ⚠ AND THAT IS WHY THE +inf LINE IS HERE. The value this now expects (0) is the
+# same value the fabricated-guard defect class produces -- the class recorded in
+# `src/complex.cyr:58`, which `cx_div` is still an instance of two assertions
+# above. A blanket "any infinity -> 0" guard would satisfy both -inf lines and
+# FAIL the +inf line, so the three together discriminate the IEEE limit from a
+# fabrication. Compared as BITS, not through f64_to, which truncates.
+# Values on 6.6.1 / ganita 1.2.4: f64_exp(-inf)=0x0, f64_exp(+inf)=0x7ff0000000000000,
+# cx_exp(-inf+0i)=(0x0,0x0), cx_exp(+inf+0i).re=0x7ff0000000000000, cx_exp(0).re=0x3ff0000000000000.
+# [measured: tests/abuse.tcyr:2214]
+assert_eq(HComplex_re(cx_exp(cx_new(_AB_NINF, 0))), 0,
+  "cx_exp: exp(-inf) -> exactly +0, the IEEE limit (6.6.1 added the guard)");
+assert_eq(HComplex_im(cx_exp(cx_new(_AB_NINF, 0))), 0,
+  "cx_exp: exp(-inf) -> im exactly +0");
+assert_eq(HComplex_re(cx_exp(cx_new(_AB_PINF, 0))), _AB_PINF,
+  "cx_exp: exp(+inf) -> +inf -- discriminates the IEEE limit from a blanket zero guard");
 
 assert_eq(f64_to(Dual_deriv(dual_div(dual_var(F64_ONE), dual_const(0)))), 0,
   "dual_div: by a zero constant -> derivative 0, not NaN");

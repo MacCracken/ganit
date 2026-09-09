@@ -123,3 +123,38 @@ code that never runs is a large part of what a linter is for. Whether that is in
 rather than assumed.
 
 hisab needs no workaround either way — its build and check gates are the ones that now catch it.
+
+---
+
+## 🟢 CLOSED — ARCHIVED 2026-09-09 (v2.11.3), on cycc 6.6.1
+
+**Fixed upstream.** Re-run on the 6.6.1 pin, the underscore discriminator is gone and the
+specifically-open half — `lint` — now catches it too. Six names, everything else held fixed,
+`[deps] stdlib = ["syscalls"]`, same reproducer as the Symptom section:
+
+| name | has `_` | `build` | `check --with-deps` | `lint` |
+|---|---|---|---|---|
+| `gg` | no | **1** | **1** | **1** |
+| `victim` | no | **1** | **1** | **1** |
+| `abcdefghij` | no | **1** | **1** | **1** |
+| `broken_fn` | yes | 1 | 1 | **1** |
+| `victim_x` | yes | 1 | 1 | **1** |
+
+`lint` now emits the real diagnostic rather than 0 warnings:
+
+```
+error:<source>:1:19: unexpected ';'
+    fn gg() { var x = ; this is not cyrius at all ]] ((
+                      ^
+```
+
+⚠ **The control was run, because "everything fails" would look identical to "the bug is fixed".**
+A *clean* file with an uncalled, no-underscore `fn gg()` still passes all three
+(`build=0 lint=0 vet=0`), so the probe discriminates rather than merely reddening.
+
+**One behaviour deliberately NOT claimed as fixed:** `cyrius vet` still exits 0 on a file that does
+not parse. That is arguably correct scope — `vet` is the dependency auditor (`=== cyaudit vet ===`,
+`no dependencies`), not a syntax gate — and the filing's complaint was that *every* gate was green.
+Three of the four now reject it, including the one this issue was left open for.
+[measured: scratch harness, not reproducible in-tree — needs a throwaway package with a
+deliberately unparseable source]

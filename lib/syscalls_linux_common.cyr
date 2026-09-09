@@ -153,6 +153,25 @@ fn sys_fchmod(fd, mode): i64 {
     return syscall(SYS_FCHMOD, fd, mode);
 }
 
+# ioctl(fd, request, argp) — device control. Filed by kybernet (PID 1 for AGNOS), which
+# needs TCGETS/TCSETS on /dev/console to stop an emergency-shell password echoing; darshana
+# hand-rolled the same call. `SYS_IOCTL` has been defined on every peer for years with no
+# wrapper, so it was the ONE place in an otherwise fully-wrapped surface where consumer code
+# had to reach for bare `syscall()` — which reads like a violation of the no-raw-syscall rule
+# those repos audit against, and invited the shadowing bug darshana filed separately.
+#
+# ⚠ THE NUMBER IS PER-ARCH AND MUST STAY THE PEER'S NATIVE ONE: x86_64 16, aarch64 29,
+# Darwin 29 (routed 29→54 by ESYSXLAT's Mach-O arm). Do NOT "normalise" these to the x86
+# value — on ELF-aarch64 a literal 16 is not translated at all (there is no 16→29 row), so a
+# consumer that hardcodes the x86 number silently issues a different, valid syscall. That is
+# the exact defect `2026-08-23-darshana-aarch64-syscall-shadow-no-diagnostic` reports.
+#
+# The third argument is untyped by design: it is a pointer for TCGETS/TCSETS and an integer
+# for many drivers, and the kernel's interpretation is request-specific.
+fn sys_ioctl(fd, request, argp): i64 {
+    return syscall(SYS_IOCTL, fd, request, argp);
+}
+
 # ================================================================
 # Process lifecycle
 # ================================================================

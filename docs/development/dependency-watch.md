@@ -4,7 +4,7 @@ Tracked dependency version constraints and upgrade paths.
 
 ## Cyrius Toolchain
 
-**Status:** Pinned to **6.5.33** via `cyrius.cyml [package].cyrius` (legacy `.cyrius-toolchain` removed; CI/release grep the manifest directly).
+**Status:** Pinned to **6.6.1** via `cyrius.cyml [package].cyrius` (legacy `.cyrius-toolchain` removed; CI/release grep the manifest directly).
 
 **Note:** Cyrius stdlib provides dense LU, Cholesky, QR, SVD, eigendecomposition. As of 6.2.x these live in the new **`ganita`** umbrella module (which re-exports the former `matrix`/`linalg` API in full and also hosts the transcendentals). This is a critical dependency — hisab's `linalg_ext.cyr` wraps these functions. The `[deps] stdlib` list pulls `ganita` (not `matrix`/`linalg` — listing those alongside `ganita` collides).
 
@@ -20,6 +20,48 @@ Tracked dependency version constraints and upgrade paths.
 - 6.0.2: lockfile/vendoring fix — `cyrius deps` now hashes all `.cyr` under `lib/` and writes a real lock (the empty 0-byte `cyrius.lock` bug present since 5.11.8); vendored deps are regular file-copies, not the dangling symlinks that broke CI.
 - **6.0.14**: clean build/test (901/901 as of v2.4.6). Migration was manifest-only (pin bump + sakshi resolution); the 34 math modules moved `lib/`→`src/` so the committed `lib/` no longer shadows the toolchain's version-pinned stdlib snapshot.
 - **6.2.11** (v2.6.6): stdlib math reorg. The transcendentals (`f64_acos`/`f64_asin`/`f64_atan2`/`f64_pow`/`f64_sinh`/`f64_cosh`/`f64_tanh` + hyperbolic inverses) moved out of `math` into the new **`ganita`** module, which also subsumes `matrix`/`linalg` (re-exports their full API). `math` now ships NaN-correct `f64_le`/`f64_ge` (hisab dropped its local copies). `[deps] stdlib`: `+ganita`, `−matrix`, `−linalg`. Clean build, 957/957 tests, all gates green. Tracked-issue re-verify: **3 of 5 fixed** (modules-substring, 18-arg-fn scramble, lint rc-as-count → all archived); for-empty-clauses still open. Vendored `lib/` re-resolved via `cyrius deps` (30 files — **not** the full-snapshot `cyrius lib sync`, which over-vendors unused platform variants and breaks `deps --verify` on a spurious `process_agnos.cyr` entry); `cyrius.lock` 30 deps, verify 30/30.
+- **6.6.1** (current pin, v2.11.3): **forty-odd releases from 6.5.33, crossing a minor.** Not
+  compiler-only: **ganita 1.1.4 → 1.2.4**, plus `io.cyr`, `math.cyr`, `result.cyr`, `tagged.cyr`
+  and four syscalls variants. sakshi 2.4.11 → **2.5.1** alongside it. All 30 `lib/` files are
+  byte-identical to `~/.cyrius/versions/6.6.1/lib`, checked file by file against **the pin's own
+  snapshot** — not old-pin vs new-pin, the shortcut that hid a stale ganita three times.
+
+  ⛔ **THIS BUMP MISCOMPILES HISAB, AND THE REGRESSION IS UPSTREAM.** A `#derive(accessors)` getter
+  passed directly as an `f64v_*` intrinsic argument makes the intrinsic read its **destination
+  pointer from a stack slot nothing writes**. `m4_mul_vec4` SIGSEGV'd on every call; three of five
+  suites died at rc=139. **Bisected: 6.5.70 clean, 6.5.71 broken** — the release that put derive
+  accessors on the inline-replay path (`callq` 7 → 3), removing the call that had incidentally
+  forced the spill. Worked around in `src/mat4.cyr` by hoisting the accessors into locals (what
+  `m3_mul_vec3` always did). **Do not remove that hoist.** **Filed in the cyrius repo** (that is where the language agent reads them):
+  `cyrius/docs/development/issues/2026-09-09-hisab-derive-accessor-simd-dst-slot.md`, with a
+  self-validating repro in `repros/` — exit 0 on 6.5.70, exit 139 on 6.6.1.
+
+  ⚠ **`f64_acos` / `f64_atan2` and their siblings are now DEPRECATED ALIASES** ("migration window
+  only") for `ganita_f64_acos` / `ganita_f64_atan2`. hisab uses `f64_acos` **5x** and `f64_atan2`
+  **3x** in `src/`. They still resolve on 1.2.4, so nothing was changed in 2.11.3 — but this is the
+  one item in this file with a **deadline attached to it**, and it should be migrated before the
+  window closes rather than discovered by a failing build. The same block deprecates the whole
+  `mat_*` family in favour of `ganita_mat_*`; hisab calls `ganita_mat_*` already.
+
+  - **`ganita_f64_pow` (1.2.4)** — integral exponents now go through **binary exponentiation**
+    instead of `exp(n·ln|base|)`, because the transcendental round trip returned
+    `pow(7,2) = 48.99999999999999296` and `pow(10,15)` up to 47 ulps out. **This changed a hisab
+    public API result**: `f64_pow(-2,4)` read **15** through the truncating `f64_to` and now reads
+    a bit-exact **16**. `tests/modules.tcyr` had pinned the old value, so the upstream *fix* failed
+    the suite. It also removes `_ad_pow`'s precision advantage — the two paths now agree bit for bit.
+  - **`lib/math.cyr` (6.6.1)** — `_f64_exp_polyfill` and its `exp2` twin gained the missing
+    infinity guard (`exp(+inf) = +inf`, `exp(-inf) = +0`). Previously the range reduction computed
+    `inf - inf` and the `2^n` bit-pack read a saturated `f64_to(inf)`. **Also changed a hisab
+    result**: `cx_exp(-inf + 0i)` returned NaN and now returns exactly +0, which is correct;
+    `tests/abuse.tcyr` had pinned the NaN.
+  - **`lib/io.cyr` (6.5.36/6.5.45)** — `getenv` now reads `/proc/self/environ` to EOF into a heap
+    buffer and caches it, instead of scanning a fixed 8 KB stack window on every call. Nothing in
+    the vendored subset calls `getenv`, so hisab is unaffected either way.
+  - ⚠ **Two compiler ceilings moved, and neither is the one this repo had written down.** Expanded
+    source **8 MB → 24 MB**; token count **1,048,576 → 4,194,304**. See the corrected comment in
+    `cyrius.cyml` — the retired "16 MB `input_buf`" figure described `_SRC_CAP`, which is not what
+    rejects a consumer's build.
+
 - **6.5.33** (current pin, v2.11.2): **fifteen-release bump from 6.5.18** — the largest gap this
   file has recorded. Not compiler-only: **ganita 1.0.4 → 1.1.4**, plus `fmt.cyr`, `assert.cyr`,
   `bench.cyr` and three syscalls variants. sakshi 2.4.10 → **2.4.11** alongside it.
@@ -137,7 +179,15 @@ The rows above are exactly the 15 names in `cyrius.cyml [deps] stdlib` (three ro
 
 ## sakshi (first-party dependency)
 
-**Status:** `sakshi` **2.4.11** via git, modules path `dist/sakshi.cyr` (bumped 2.4.10 → 2.4.11 in v2.11.2; commit-pinned in `cyrius.lock`, and byte-identical to what cyrius 6.5.33 folds into its own `lib/`). Its shipped surface still links only `fnptr` + `atomic`.
+**Status:** `sakshi` **2.5.1** via git, modules path `dist/sakshi.cyr` (bumped 2.4.11 → 2.5.1 in v2.11.3; commit-pinned in `cyrius.lock`, and byte-identical to what cyrius 6.6.1 folds into its own `lib/` — same SHA256, 76,277 B, so the vendored copy and the pinned dep agree rather than one shadowing the other). Its shipped surface still links only `fnptr` + `atomic`.
+
+**2.5.0 / 2.5.1 change no public surface.** Diffing the exported `fn` list across the bump shows
+only private helpers moving: `_sk_bin_read_hdr`, `_sk_bin_write_hdr`, `_sk_memset` and `_sk_ring_put`
+removed (2.5.0's "four dead functions"), `_sk_aring_dropped_count` added. Every `sakshi_*` entry
+point is unchanged, so the bump is safe for hisab by inspection as well as by test. The releases
+themselves are audit-and-fix work — a P(-1) sweep (50 findings, 14 refuted, 12 repaired), a Windows
+PE clock that emitted timestamp 0 and could stall 10 ms per log call, an oversized ring event that
+overwrote its own header, and AGNOS timestamps frozen for a whole program run.
 
 **Nothing in hisab calls sakshi.** It is declared, vendored and version-tracked, but there is no `sakshi_*` call site in `src/`, `tests/` or `examples/`, and no emit hook is registered — so every release below is recorded for the dependency trail, not because a behaviour reached this repo.
 

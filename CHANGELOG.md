@@ -2,6 +2,167 @@
 
 ## [Unreleased]
 
+## [2.11.3] - 2026-09-09 — the toolchain catch-up that hit a wrong-code regression
+
+cyrius **6.5.33 → 6.6.1** (forty-odd releases, crossing a minor), sakshi 2.4.11 → **2.5.1**, and
+vendored with the toolchain **ganita 1.1.4 → 1.2.4**. Suite **3526 → 3532**, all passing; constant
+gate 159/159, lint/fmt/vet clean, fuzz clean, lock 30/30, consumer-build gate OK.
+
+**This bump did not land quietly: the new toolchain miscompiles hisab.** Three of five suites
+SIGSEGV'd on the first run under 6.6.1, and the cause was a cycc wrong-code regression, not
+anything in this repo. The other two findings are the usual shape for a catch-up release — two
+tests that had pinned an *upstream defect* as expected behaviour, and a manifest constant that was
+wrong about which limit it even described.
+
+### Fixed
+
+- **`m4_mul_vec4` SIGSEGV'd on every call under cycc >= 6.5.71** — a `#derive(accessors)` getter
+  passed directly as an `f64v_*` intrinsic argument makes the intrinsic's inline expansion read its
+  **destination pointer from a stack slot that nothing ever writes**, then issue a 128-bit packed
+  store through it. `movupd %xmm0,(%rdx,%rsi,8)` with `%rdx = 12`, loaded from `-0x50(%rbp)`, a slot
+  read once and written zero times in the function — while the `src` and `scalar` slots *are*
+  written. Fixed here by hoisting the four accessor reads into locals, which is what the sibling
+  `m3_mul_vec3` has always done; mat4 was the lone inconsistency. The hoist is load-bearing and
+  carries a comment saying so. **Filed upstream in the cyrius repo**, where the language agent can see it:
+  `cyrius/docs/development/issues/2026-09-09-hisab-derive-accessor-simd-dst-slot.md`, with a
+  self-validating reproducer beside it in `repros/` (exit 0 on 6.5.70, exit 139 on 6.6.1).
+
+  ⚠ **Bisected to 6.5.71, and the trigger is narrower than "inlining".** 6.5.70 is clean; 6.5.71,
+  6.5.72, 6.5.73, 6.6.0 and 6.6.1 are not. Three functions of identical shape in one file
+  discriminate it: a plain `fn` accessor compiles correctly, a raw `load64` compiles correctly, and
+  only the **derived getter** fails. 6.5.71 is the release that made derive accessors reach the
+  inline-replay path (`callq` 7 → 3); before it the accessor was a real call, and the call
+  incidentally forced the spill the expansion depends on. **The intrinsic bug is older than 6.5.71 —
+  that release only stopped hiding it.**
+
+  ⚠ **It is a wrong-code bug, not merely a crash.** The store goes through whatever the
+  uninitialised slot holds; it faults only because that value happens to be unmapped. Mutation-proven
+  both ways: reverting the hoist returns all three suites to rc=139, restoring it returns 3532/3532,
+  and the restore was confirmed by grep rather than assumed.
+
+### Changed
+
+- **Two tests updated because upstream FIXED the defects they had pinned.** Both suites were
+  asserting a dependency's bug as expected behaviour, so the upstream repair is what failed them.
+  - `f64_pow(-2,4)` truncated to **15**; it is now bit-exact **16**. ganita 1.2.4 replaced
+    `exp(n·ln|base|)` with **binary exponentiation** for integral exponents (|exp| <= 1024), in its
+    own words because `pow(7,2)` returned `48.99999999999999296` and `pow(10,15)` was up to 47 ulps
+    out. Verified as bits, not through the truncating `f64_to`: `f64_pow(-2,4)` =
+    `0x4030000000000000`, `(-2)^3` = `-8.0`, `2^10` = `1024.0`, `(-2)^5` = `-32.0`.
+    ⚠ **The rationale that comment carried is now void**: `_ad_pow` no longer wins on precision — the
+    two paths agree bit for bit — so the comment now says `_ad_pow` stays because autodiff needs the
+    value and the derivative from one call. Four assertions added, including the agreement check.
+  - `cx_exp(-inf + 0i)` returned **NaN**; it now returns exactly **+0**, which is the correct answer.
+    cyrius 6.6.1 gave `lib/math.cyr`'s exp polyfill its missing infinity guard (`exp(+inf) = +inf`,
+    `exp(-inf) = +0`); previously the range reduction computed `inf - inf` and the `2^n` bit-pack read
+    a saturated `f64_to(inf)`, so it returned an infinity of the wrong sign and `0 * inf` came out NaN.
+    ⚠ **The replacement assertion had to be made discriminating**, because the value it now expects
+    (0) is exactly what the fabricated-guard defect class produces — the class recorded in
+    `complex.cyr:58`, which `cx_div` is still an instance of two assertions above it. `exp(+inf)` is
+    now asserted beside it: a blanket "any infinity → 0" guard would satisfy the `-inf` lines and fail
+    the `+inf` line.
+
+- **`cyrius.cyml`'s bundle-weight comment described a limit that does not gate this path.** It read
+  "5.4% of cycc 6.5.33's 16 MB `input_buf`" (and before 2.11.2, "76.8% of a 1 MB `input_buf`"). Both
+  figures describe `_SRC_CAP`, the raw read buffer — but what actually rejects a consumer's build is
+  the **expanded-source** cap, and a **token** cap can bind before either:
+
+  | ceiling         | 6.5.33    | 6.6.1     |
+  |-----------------|-----------|-----------|
+  | expanded source | 8 MB      | **24 MB** |
+  | token count     | 1,048,576 | **4,194,304** |
+
+  Measured as a **pair**, which is the point: a generated 9,002,640 B source is *rejected* by 6.5.33
+  with `expanded source exceeds 8MB` and compiles *clean* on 6.6.1. A one-sided "it compiled" — the
+  shortcut the retired 16 MB figure rested on — proves only that the cap exceeds that one file.
+  ⭐ **And the token cap bit first**: an 8,202,798 B source under 6.5.33 died on `token limit
+  exceeded: needed 1048577, cap is 1048576` without ever reaching the byte check, so a bytes-only
+  headroom claim is the wrong instrument. Third consecutive release in which one of these numbers
+  moved.
+
+### Performance
+
+Geometry and collision workloads got materially faster, and the cause is upstream: 6.5.71 inlines
+`#derive(accessors)` getters, which hisab uses on every vector and quaternion component.
+
+| benchmark | 2.11.2 | 2.11.3 | change |
+|---|---:|---:|---|
+| `bvh_query_ray_200x4k` | 1,769,000 ns | 945,832 ns | **−46.5%** |
+| `bvh_degenerate_4k` | 3,304,000 ns | 2,300,000 ns | **−30.4%** |
+| `gjk_epa_sphere_box` | 111,531 ns | 78,477 ns | **−29.6%** |
+| `gjk_epa_3d_cyl_box` | 109,327 ns | 79,609 ns | **−27.2%** |
+| `gjk_epa_spheres` | 536,604 ns | 405,228 ns | **−24.5%** |
+| `grad_fwd_16` | 58,180 ns | 43,980 ns | **−24.4%** |
+| `bvh_scatter_4k` | 5,806,000 ns | 4,666,000 ns | **−19.6%** |
+| `spatial_hash_query_2k` | 428,040 ns | 366,498 ns | −14.4% |
+| `delaunay_2d_400` | 1,583,000 ns | 1,388,000 ns | −12.3% |
+
+⚠ **These are drawn only from the 23 benchmarks whose `net` is at least 10x the subtracted timer
+floor.** Same instrument as 2.11.2 (`regime=net`, floor 1343 → 1329 ns), so the comparison is
+like-for-like — and the flat rows *inside the trustworthy tier* are the control proving the
+instrument did not shift: `svd_golub_kahan_12` +0.1%, `eigen_qr_12` +0.4%, `num_dct_1023` +1.0%,
+`num_is_prime` −0.2%. Those are the numeric kernels that work on raw offsets rather than accessors,
+which is exactly where an accessor-inlining win should *not* appear. No regression anywhere in the
+tier; the worst movement is +1.0%.
+
+**No claim is made from the other 49 rows** — see below.
+
+### Notes
+
+- ⚠ **41 of 72 benchmarks report a `net` value smaller than the floor they subtract** (worst:
+  `ease_in_out` at 7 ns against a 1329 ns floor, a ratio of **0.01x**; 48 of 72 are below 10x). Their
+  run-to-run movement is dominated by host noise — this release's `ray_aabb` −55.9% and `vec3_cross`
+  −55.6% are in that tier and are **not** evidence of anything. Same class as 2.10.0's "17 of 60
+  benchmarks measuring `clock_gettime`": subtracting the floor fixed the *bias* but not the
+  *resolution*. Filed rather than fixed, with a suggested gate, in
+  [`issues/2026-09-09-bench-net-below-timer-floor.md`](docs/development/issues/2026-09-09-bench-net-below-timer-floor.md).
+- ⚠ **The enum Critical the 6.6.1 launcher warns about does not reach hisab, and that was checked
+  rather than assumed.** 6.5.33 and earlier mis-read enum constants >= 2^62 as −1; hisab declares
+  constants as enums by policy, and every hex f64 bit pattern for a value >= 2.0 exceeds that
+  threshold, so the exposure looked plausible. A scan of all **936 enum constants** across `src/`,
+  `lib/` and `dist/` found **none** at or above 2^62 — the seven enums in `src/` top out at 128.
+- **ganita 1.2.4 marks `f64_acos`, `f64_atan2` and their siblings deprecated** ("migration window
+  only") in favour of `ganita_f64_*`. hisab uses `f64_acos` 5x and `f64_atan2` 3x. They still
+  resolve, so nothing is changed here; recorded in `dependency-watch.md` as an actionable item
+  rather than folded silently into a toolchain release.
+- **sakshi 2.4.11 → 2.5.1 changes no public surface** — diffing the exported `fn` list shows only
+  private `_sk_*` helpers moving (four dead functions removed, one added). The 6.6.1 stdlib ships a
+  `sakshi.cyr` that is **byte-identical** to the 2.5.1 git dep (same SHA256, 76,277 B), so the
+  vendored copy and the pinned dep agree rather than shadowing each other.
+- **Issue triage: the open queue went 5 → 2, and two upstream bugs were closed by re-testing them.**
+  ⚠ **Cyrius bugs now go to the cyrius repo** (`cyrius/docs/development/issues/`), which is where the
+  language agent reads them — not into hisab's tree. The derive-accessor miscompile was filed there
+  with a self-validating reproducer in `repros/` that exits **0 on 6.5.70** and **139 on 6.6.1**, so
+  it proves its own bisect rather than asserting it.
+  - `2026-04-26-cyrius-cli-arg-clobbers-source.md` — 🟢 **archived, fixed upstream.** Carried for
+    four months as "deliberately never re-tested" because the reproducer destroys a source file. It
+    is now guarded: `error: refusing to write build output over a .cyr source file`, exit **1**,
+    source byte-identical across three argument shapes, verified in a throwaway package rather than
+    in this tree. ⚠ The exit code needed a second look — `cyrius … | tail` reports 0, because `$?`
+    after a pipe is *tail's* status. Same probe defect this repo recorded in 2.11.2, hit again.
+  - `2026-08-09-cyrius-dead-fn-bodies-are-never-syntax-checked.md` — 🟢 **archived, fixed upstream.**
+    The underscore discriminator is gone and **`lint` — the specific half this was left open for —
+    now reports the real diagnostic** instead of 0 warnings. ⚠ **The control was run**, because
+    "everything fails" and "the bug is fixed" look identical from the exit codes alone: a *clean*
+    uncalled no-underscore function still passes `build`/`lint`/`vet`. `vet` still exits 0 on
+    unparseable input and that is deliberately **not** claimed as fixed — it is the dependency
+    auditor, not a syntax gate.
+  - Two orphaned `incircle` reproducer fixtures were sitting in the **open** issues directory after
+    both parent filings had been archived, implying live defects. Re-run before moving rather than
+    moved on the assumption that an archived parent means a fixed child: both report **0**
+    disagreements against the exact reference (of 40 and of 30 cases). ⚠ Their own output is
+    misleading — `println(fmt_int(n))` prints the count *and* `fmt_int`'s return, so 0 renders as
+    `00`; noted beside them so the next reader does not misread a nonzero count.
+  - `2026-08-06-epa-certificate-…` stays open — a genuine design question whose two proposed repairs
+    are already measured and rejected. ⚠ **But its cost figure went stale under this bump**: the
+    "+19.4%" trade was priced against a `gjk_epa_sphere_box` baseline of 125.6 us, which now reads
+    **78.5 us**. Annotated rather than rescaled — both the baseline and the added work moved for the
+    same reason (accessor inlining) and neither was measured after the move, so the honest answer is
+    that the percentage is currently **unknown**.
+- **CI gains a toolchain-verify assertion** for the 6.6.x layout, and all 30 `lib/` files were
+  byte-checked against the **6.6.1 snapshot itself**, not old-pin vs new-pin — the shortcut that hid
+  a stale ganita for three releases.
+
 ## [2.11.2] - 2026-08-21 — the toolchain catch-up, and the three stale constants it found
 
 Fifteen toolchain releases in one bump — cyrius **6.5.18 → 6.5.33** — plus sakshi 2.4.10 → 2.4.11
