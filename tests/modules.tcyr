@@ -53,6 +53,10 @@ var TOL_1EM12 = 0x3D719799812DEA11;  # 1e-12 (== EPSILON_F64)  # 1e-15
 # whose measured boost drift is 7.105e-15 (4 ulp of 16).
 var IVL_TOL_M = 0x3D3C25C268497682;  # 1e-13
 
+# Distance in ULPs between two positive finite f64s. Their bit patterns are
+# monotonic in value, so the difference of the patterns IS the ULP count.
+fn _tc_ulp_gap(a, b) { var d = a - b; if (d < 0) { d = 0 - d; } return d; }
+
 fn _tc_x2(x) { return f64_mul(x, x); }
 fn _tc_sin(x) { return f64_sin(x); }
 fn _tc_cos(x) { return f64_cos(x); }
@@ -4493,6 +4497,50 @@ assert_eq(f64_eq(ganita_f64_pow(f64_neg(F64_TWO), F64_HALF),
 # [measured: tests/modules.tcyr:4494]
 assert_eq(ganita_f64_pow(f64_neg(F64_TWO), f64_from(4)), f64_from(16),
   "ganita_f64_pow(-2,4) is now BIT-EXACT 16.0 -- ganita 1.2.4 binary exponentiation");
+# ================================================================
+# 2.11.4 -- the regime `_ad_pow` exists FOR, which until now nothing tested.
+# ================================================================
+# ⛔ THIS IS THE ASSERTION WHOSE ABSENCE ALMOST DELETED THE FUNCTION. _ad_pow's
+# first two rationales (domain, then precision on small integers) were both
+# invalidated by upstream, and on the cases the suite DID cover it now agrees with
+# the stdlib bit for bit -- so on the evidence in-tree it looked redundant. It is
+# not: ganita 1.2.4 uses BINARY EXPONENTIATION inside |n| <= 1024, and squaring
+# amplifies relative error geometrically, so it loses accuracy exactly where it wins
+# speed. Repeated multiplication accumulates error additively instead.
+#
+# 0.9^1024, against a 60-digit reference: repeated multiplication lands 7 ULP out,
+# binary exponentiation 137. Asserted as ULP DISTANCE rather than exact bits so a
+# harmless reassociation does not fail the suite while a reversion to the stdlib
+# path -- which is what this guards -- fails it immediately by two orders of magnitude.
+#
+# ⚠ 2.11.4 also REMOVED the `base > 0` delegation that sent every positive base
+# straight to the stdlib. That is why this test can exist at all: before it, 0.9^1024
+# WAS the stdlib's 137-ULP answer, and the two lines below would have been identical.
+# [measured: scratch harness, not reproducible in-tree, 2026-09-09; ganita 1.2.4]
+var apw_b = f64_div(f64_from(9), f64_from(10));
+var apw_truth = 0x36346060685B7366;   # 0.9^1024 = 1.394214727062403e-47
+assert(_tc_ulp_gap(_ad_pow(apw_b, f64_from(1024)), apw_truth) <= 16,
+  "_ad_pow(0.9,1024) is within 16 ulp of truth (measured 7)");
+assert(_tc_ulp_gap(ganita_f64_pow(apw_b, f64_from(1024)), apw_truth) > 100,
+  "ganita_f64_pow(0.9,1024) is >100 ulp out (measured 137) -- the two paths are NOT interchangeable");
+
+# ⛔ AND THE GUARD THAT FABRICATED 1.0. `f64_to` SATURATES: f64_to(1e300) is
+# i64::MIN, and negating i64::MIN gives i64::MIN back, so a bound checked AFTER the
+# truncation reads false, the loop never runs, `acc` stays 1 and _ad_pow returned a
+# plausible **1.0** where the answer is +Inf. 1e300 is integral, so the round check
+# does not stop it. The bound is now tested in f64 space, before `f64_to`.
+# Same class as the fabricated answer catalogued in `complex.cyr:58`.
+var apw_huge = 0x7E37E43C8800759C;    # 1e300
+assert_eq(_ad_pow(f64_neg(F64_TWO), apw_huge), 0x7FF0000000000000,
+  "_ad_pow(-2, 1e300) is +Inf, not a fabricated 1.0");
+assert_eq(_ad_pow(f64_neg(F64_TWO), f64_neg(apw_huge)), 0,
+  "_ad_pow(-2, -1e300) is +0, not a fabricated 1.0");
+assert_eq(_ad_pow(F64_HALF, apw_huge), 0,
+  "_ad_pow(0.5, 1e300) is +0 -- the positive base reaches the same guard");
+assert_eq(_ad_pow(f64_neg(F64_TWO), apw_huge),
+  ganita_f64_pow(f64_neg(F64_TWO), apw_huge),
+  "past the +-1024 window _ad_pow defers to the stdlib and agrees with it");
+
 assert_eq(f64_to(_ad_pow(f64_neg(F64_TWO), f64_from(4))), 16,
   "_ad_pow(-2,4) is exactly 16 -- repeated multiplication");
 # ⚠ _ad_pow now AGREES with the stdlib bit for bit, so this pair no longer

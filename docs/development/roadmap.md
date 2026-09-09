@@ -13,7 +13,7 @@ Hisab owns **typed mathematical operations**. It does NOT own:
 
 ## Current — v2.11.4
 
-Suite **3532** across five harnesses (hisab 416, foundation 351, modules 1791, edge_cases 233,
+Suite **3538** across five harnesses (hisab 416, foundation 351, modules 1797, edge_cases 233,
 abuse 741), constant gate **159/159**, **72** benchmarks, **35** `[lib]` modules, toolchain
 **6.6.1**, sakshi **2.5.1**, ganita **1.2.4**, and **zero** deprecated-alias call sites. All gates green:
 `lint` 0 warnings and `fmt <file> --check` 0 drift across all 44 sources, `vet` 2 deps / 0 untrusted
@@ -173,13 +173,11 @@ All three touch `gjk_epa_*` and none should be done alone: they share a benchmar
 
 ### Toolchain, tracked upstream
 
-**Three filings are open here** (`docs/development/issues/`, **25** archived beside them (26 counting the reproducer note)). ⚠ **Cyrius bugs are filed in the CYRIUS repo**, not this one — `cyrius/docs/development/issues/` is where the language agent reads them; only hisab's own items and hisab's record of a live upstream workaround belong here:
+**One filing is open here** (`docs/development/issues/`, **27** archived beside them (28 counting the reproducer note)). ⚠ **Cyrius bugs are filed in the CYRIUS repo**, not this one — `cyrius/docs/development/issues/` is where the language agent reads them; only hisab's own items and hisab's record of a live upstream workaround belong here:
 
 | filing | state |
 |---|---|
 | ⛔ **upstream, not here:** `cyrius/.../2026-09-09-hisab-derive-accessor-simd-dst-slot.md` | **Wrong-code, live on the current pin.** A `#derive(accessors)` getter passed to an `f64v_*` intrinsic leaves the intrinsic's destination stack slot unwritten. Bisected to **6.5.71** (6.5.70 clean). hisab carries the workaround: the accessor hoist in `src/mat4.cyr`. **That hoist must not be removed** until a fixed cycc ships. |
-| `2026-09-09-ad-pow-rationale-collapsed-twice.md` | ⚠ **hisab's own, opened by the 2.11.4 migration.** `_ad_pow`'s reason to exist has been invalidated twice by upstream (domain in 2.11.2, precision here — 665 of 665 comparisons now agree bit for bit). A third, narrower ground survives and is the OPPOSITE of the second: `(-0.999)^1000` is 4 ulp from truth through repeated multiplication and 58 through ganita's binary exponentiation, inverting past its ±1024 window. **No test exercises that regime**, so the only reason it still exists is untested. Keep / delete / narrow — filed, not decided. |
-| `2026-09-09-bench-net-below-timer-floor.md` | ⚠ **hisab's own.** 41 of 72 benchmarks report a `net` smaller than the floor they subtract (worst 0.01x); 48 of 72 below 10x. Their movement is host noise, so a regression inside them is invisible. Fix is amplification inside the timed region plus a `net/floor` threshold that refuses to write a trend row — see the tier below. |
 | `2026-08-06-epa-certificate-tests-the-seed-not-the-polytope.md` | ⚠ **hisab's own, not a toolchain item** — the EPA tier above. |
 
 #### Capabilities 6.5.19–6.5.33 opened, filed rather than taken in 2.11.2
@@ -207,7 +205,7 @@ apply are named too, so a later reader knows they were examined rather than skip
 
 | item | state |
 |---|---|
-| **Give the benchmark harness resolution, not just an unbiased floor** | The filing above. 2.10.0 moved 17 rows to `bench_batch()` because they measured `clock_gettime`; 6.5.19 then *subtracted* the floor, which removed the **bias** but not the **resolution** — subtraction cannot recover a signal that is 1% of the sample. Two parts: amplify inside the timed region so `net` lands at >= 10x floor, and make `bench-history.sh` refuse a trend row below that ratio, exactly as it already refuses rows that are not `stat=avg regime=net`. ⚠ **Do the refusal gate first** — it is what stops the next release quoting another −56% that means nothing. |
+| ~~**Give the benchmark harness resolution**~~ | 🔴 **REFUTED in 2.11.4, not built.** The premise was mine and it was wrong: the `net/floor` ratio compares a **per-op** net against a **per-clock-pair** floor, while `bench_run` sizes every batch so the clock is 1% of the window. Measured on a same-binary re-run, the tier it condemned is the **quieter** one (median 1.43% vs 2.10%). ⚠ It had suppressed most of 2.11.3's real result — `ray_aabb` −54.8%, `vec3_cross` −54.0% — so **a wrong instrument suppresses real findings as readily as it invents false ones**. The guard that needs no threshold: re-run the identical binary and measure the spread. |
 | ~~**Migrate off ganita's deprecated aliases**~~ | 🟢 **DONE in 2.11.4** — 536 call sites over 20 of the 53 deprecated names, not the **8** this row estimated. ⚠ **The estimate was scoped from ganita's changelog paragraph rather than from its surface**, and was wrong by 67x; the deprecation block is a 53-entry table further down the same file. Suites byte-identical across the change; `svd_golub_kahan_12` **−27.85%** and `eigen_qr_12` **−27.67%** because the aliases were real `call`/`ret` pairs (`#inline` needs ≤2 params; `ganita_mat_get`/`_set` take 3 and 4). |
 | **A `load` column for `bench-history.csv`** | Carried forward from 2.11.2, and now with a second reason: this release saw 40 of 72 rows move in the same direction at once, and distinguishing "box-wide contention" from a real change had to be done by hand, using the flat numeric kernels as an ad-hoc control. A recorded second metric would make that mechanical. |
 

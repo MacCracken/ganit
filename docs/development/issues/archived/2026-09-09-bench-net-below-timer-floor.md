@@ -54,3 +54,51 @@ Amplify inside the timed region — loop the operation N times per sample so `ne
 ≥ 10x floor — and have `bench-history.sh` **refuse to write a trend row** whose `net/floor` is below
 a threshold, the way it already refuses rows that are not `stat=avg regime=net`. A gate that
 silently reports a meaningless number is the shape this repo has been bitten by three times.
+
+---
+
+## 🔴 REFUTED AND ARCHIVED 2026-09-09 (v2.11.4) — the instrument was mine, not the harness's
+
+**This filing is wrong, and the way it is wrong is the exact failure it accused the harness of.**
+
+It compared each benchmark's **per-operation** `net` against `floor_ns`, which is the cost of **one
+clock pair** — two quantities that are not comparable. Since 6.5.19 `bench_run` does not wrap a clock
+pair around each call; `_bench_chunk_for(per, fl)` sizes every batch as `want = (fl * 100) / per`,
+i.e. **so the clock's own error is 1% of the timed window**. A 7 ns operation therefore runs ~19,000
+times inside one window. `net` being 0.01x the floor is that design working, not a signal drowning.
+
+Tested rather than argued, on the property the filing actually cared about — reproducibility. Two
+back-to-back runs of the **identical** binary, all 72 benchmarks, split by the very ratio this filing
+used to condemn them:
+
+| tier | n | median spread | p90 | worst |
+|---|---:|---:|---:|---:|
+| `net` >= 10x floor — *"trustworthy"* | 23 | 2.10% | 5.95% | 9.13% |
+| `net` < 10x floor — *"cannot support a claim"* | 49 | **1.43%** | **4.74%** | **7.32%** |
+
+**The tier this filing dismissed is the quieter of the two.** There was never a resolution problem.
+
+### ⚠ What the bad instrument cost
+
+2.11.3 used this filing to suppress its own result, saying `ray_aabb` −55.9% and `vec3_cross` −55.6%
+were "not evidence of anything". Against measured same-binary noise they are 15–25x the noise and
+entirely real:
+
+| benchmark | 2.11.2 → 2.11.4 | same-binary noise |
+|---|---:|---:|
+| `ray_aabb` | **−54.8%** | 2.33% |
+| `vec3_cross` | **−54.0%** | 3.33% |
+| `ray_triangle` | **−44.3%** | 2.84% |
+| `jet_plane` | **−40.5%** | 0.98% |
+| `quat_mul` | **−39.7%** | 2.56% |
+| `ray_sphere` | **−36.7%** | 1.72% |
+
+So cycc 6.5.71's accessor inlining was a far broader win than 2.11.3 claimed, and the claim was
+narrowed by a ratio that measures nothing. **Being conservative is not the same as being correct** —
+a wrong instrument suppresses real findings as readily as it invents false ones, and this one did
+exactly that for a whole release.
+
+⭐ **The right guard, if one is ever wanted, is the one used here**: re-run the identical binary and
+measure the spread. That needs no threshold, no ratio and no assumption about what the harness is
+doing internally. Recorded rather than deleted so the reasoning is not repeated.
+[measured: bench-history.csv, runs 2026-09-09; two back-to-back runs of the same binary]

@@ -2696,11 +2696,26 @@ fn dual_sqrt(a) {
 #                     _ad_pow    3 ulp from truth
 #                     ganita     1 ulp from truth      <- the stdlib wins
 #
-# So the honest statement is narrow: repeated multiplication is exact-or-better for
-# small n, MORE accurate than the stdlib for large n inside the window, and WORSE
-# than it past the window — at O(n) multiplies against O(log n). It is no longer
-# obviously the right default, and whether to keep it is a real question rather
-# than a settled one. Filed, not decided.
+# ⭐ SO 2.11.4 SETTLED IT BY WIDENING THE LOOP, NOT BY DELETING IT — and the first
+# reading of the evidence pointed the other way. Swept over 9 bases, `_ad_pow` tied
+# the stdlib on every POSITIVE base at every n, which looked like proof it was
+# redundant. It was proof of nothing: the old first line was
+# `if (f64_gt(base, 0) == 1) { return ganita_f64_pow(base, n); }`, so those rows were
+# **the stdlib being compared with itself**. Running the loop on positive bases too
+# beats the stdlib on 44 of 48 of them, ties 2, and loses 2 by at most 3 ULP.
+# [measured: scratch harness, not reproducible in-tree, 2026-09-09; ganita 1.2.4]
+#
+# The delegation is therefore gone. One rule replaces it, and the bound is ganita's
+# own so no threshold here needs a scale chosen for it: an integral exponent with
+# |n| <= AD_POW_MAX_K goes through the product; everything else defers.
+#
+#   0.9^1024      loop   7 ULP    stdlib 137 ULP     (pinned in modules.tcyr)
+#   1.001^1024    loop  10 ULP    stdlib 174 ULP
+#   (-0.999)^1101 past the window: stdlib 1 ULP, loop 3 -- which is why the bound exists
+#
+# Net across the 126-row sweep: 60 rows improved, 6 lost <= 3 ULP, and against the
+# stdlib it now wins 93 / ties 26 / loses 7. The cost is O(n) multiplies against
+# O(log n), bounded at 1024 and paid only where the accuracy is bought.
 # [measured: scratch harness, not reproducible in-tree, 2026-09-09; ganita 1.2.4]
 #
 # So: integer exponents go through repeated multiplication, which is exact and has
@@ -2715,9 +2730,25 @@ fn dual_sqrt(a) {
 # +Inf is the IEEE-754 answer for pow(0, -1); dual_pow(0, -1) is correspondingly
 # (+Inf, -Inf). Pinned in tests/modules.tcyr so it is a checked outcome rather
 # than a discovered one. [measured: 2026-08-21]
+enum AdPowLimit {
+    # ganita's own binary-exponentiation window. Inside it, repeated multiplication
+    # is more accurate; outside it ganita switches to exp/ln, which beats a
+    # 1024-step product on both accuracy and cost. Matching the bound rather than
+    # inventing one means there is no threshold here that needs a scale chosen for it.
+    AD_POW_MAX_K = 1024;
+}
+
 fn _ad_pow(base, n) {
-    if (f64_gt(base, 0) == 1) { return ganita_f64_pow(base, n); }
     if (f64_eq(f64_round(n), n) != 1) { return ganita_f64_pow(base, n); }
+    # ⛔ THE BOUND IS CHECKED IN f64 SPACE, BEFORE `f64_to`, AND THAT ORDER IS THE
+    # WHOLE GUARD. `f64_to` SATURATES: f64_to(1e300) is i64::MIN, and negating
+    # i64::MIN in two's complement gives i64::MIN back, so a post-truncation
+    # `k > AD_POW_MAX_K` reads FALSE, the loop `i < k` never runs, acc stays 1, and
+    # the function returns a fabricated **1.0** for (-2)^1e300 where the answer is
+    # +Inf. Reproduced before this guard existed; the same shape as the fabricated
+    # plausible answer catalogued in `complex.cyr:58`. 1e300 IS integral, so the
+    # round check above does not stop it.
+    if (f64_gt(f64_abs(n), f64_from(AD_POW_MAX_K)) == 1) { return ganita_f64_pow(base, n); }
     var k = f64_to(n);
     var neg = 0;
     if (k < 0) { neg = 1; k = 0 - k; }

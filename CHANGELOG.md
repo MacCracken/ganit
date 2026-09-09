@@ -2,7 +2,7 @@
 
 ## [Unreleased]
 
-## [2.11.4] - 2026-09-09 — off the deprecated ganita aliases, and the 28% that was hiding behind them
+## [2.11.4] - 2026-09-09 — off the deprecated ganita aliases, the pow repair, and two of my own instruments caught wrong
 
 ganita 1.2.4 marks the bare `mat_*` and `f64_*` spellings **deprecated aliases, migration window
 only**. All hisab call sites now use the `ganita_*` names. Suite **3532/3532**, unchanged; every
@@ -43,16 +43,12 @@ parameters**, and `ganita_mat_get` takes 3, `ganita_mat_set` takes 4. Every matr
 | `eigen_qr_12` | 119,704 ns | 86,578 ns | **−27.67%** |
 
 ⚠ **Both figures are the mean of two post-migration runs, against a noise floor measured on this
-host in this session, not quoted from a previous release.** Two back-to-back runs of the *identical*
-binary spread by a **median 2.10%** and a **worst 9.13%** across the 23 benchmarks whose `net` is at
-least 10x the timer floor — so −28% is roughly **3x the worst noise and 13x the median**, and it
-lands on exactly the two benchmarks the mechanism predicts.
+host in this session** — two back-to-back runs of the *identical* binary, spreading by a **median
+1.79%**, p90 **5.30%** and a **worst 9.13%** across all 72 benchmarks. −28% is ~3x the worst noise and lands on
+exactly the two benchmarks the mechanism predicts.
 
-**No other movement is claimed.** The remaining 21 trustworthy benchmarks drifted **+0.07% to
-+6.99%**, all inside that 9.13% band and all in geometry/collision code containing **zero** matrix
-calls — there is no mechanism for a regression there, and the drift is the host. The other 49
-benchmarks remain floor-dominated and carry no claim at all (see
-[`issues/2026-09-09-bench-net-below-timer-floor.md`](docs/development/issues/2026-09-09-bench-net-below-timer-floor.md)).
+**No other movement is claimed.** Every other benchmark drifted inside that band, and none of them
+contains a matrix call, so there is no mechanism for a change either way.
 
 ### Fixed
 
@@ -73,6 +69,69 @@ benchmarks remain floor-dominated and carry no claim at all (see
   testing anything.** The failing kind announces itself; this kind does not, and only re-reading the
   rationale finds it.
 
+### Fixed — `_ad_pow` delegated away its own accuracy, and hid a fabricated 1.0 behind it
+
+`_ad_pow` opened with `if (f64_gt(base, 0) == 1) { return ganita_f64_pow(base, n); }` — every
+**positive** base went straight to the stdlib and its repeated-multiplication path never ran.
+
+⚠ **That line also made the evidence lie.** Swept over 9 bases, `_ad_pow` tied the stdlib on every
+positive base at every exponent, which reads as "this function is redundant". It was the stdlib
+being **compared with itself**. Running the loop on positive bases too beats the stdlib on **44 of
+48** of them, ties 2, and loses 2 by at most 3 ULP — because ganita 1.2.4 uses binary exponentiation
+inside `|n| <= 1024`, and squaring amplifies relative error geometrically where repeated
+multiplication accumulates it additively:
+
+| | repeated multiplication | ganita 1.2.4 |
+|---|---:|---:|
+| `0.9^1024` | **7 ULP** | 137 ULP |
+| `1.001^1024` | **10 ULP** | 174 ULP |
+| `1.001^512` | **5 ULP** | 104 ULP |
+| `(-0.999)^1101` — past the ±1024 window | 3 ULP | **1 ULP** |
+
+The delegation is gone. **One rule replaces it and the bound is ganita's own**, so nothing here needs
+a scale chosen for it: an integral exponent with `|n| <= 1024` goes through the product, everything
+else defers. Across the 126-row sweep, **60 rows improved, 6 lost <= 3 ULP**, and against the stdlib
+`_ad_pow` now wins 93 / ties 26 / loses 7.
+
+⛔ **And widening the loop exposed a fabricated answer that had been live for negative bases all
+along.** `f64_to` **SATURATES**: `f64_to(1e300)` is `i64::MIN`, and negating `i64::MIN` in two's
+complement gives `i64::MIN` back — so a bound checked *after* the truncation reads false, the loop
+`i < k` never runs, `acc` stays 1, and `_ad_pow(-2, 1e300)` returned a plausible **1.0** where the
+answer is **+Inf**. `1e300` is integral, so the round check does not stop it. The bound is now tested
+in **f64 space, before `f64_to`** — the order is the guard. Same class as the fabricated plausible
+answer catalogued in `complex.cyr:58`.
+
+**6 assertions added, both groups mutation-proven**: restoring the `base > 0` delegation fails the
+accuracy assertion; moving the bound back after `f64_to` fails all four fabrication assertions with
+`got 4607182418800017408` — `0x3FF0000000000000`, the fabricated 1.0 itself. ⚠ **Until now nothing in
+3532 assertions exercised the regime this function exists for**, which is why deleting it looked
+defensible.
+
+### Fixed — my own benchmark filing was the thing that needed refuting
+
+2.11.3 filed *"41 of 72 benchmarks report a `net` below the timer floor they subtract"* and used it
+to suppress most of that release's measured result. **The ratio was the wrong instrument.** It
+compares a **per-operation** net against the cost of **one clock pair**; since 6.5.19 `bench_run`
+sizes each batch as `want = (fl * 100) / per`, i.e. so the clock's error is **1% of the timed
+window**. A 7 ns op runs ~19,000 times inside one window — `net` at 0.01x the floor is that design
+working.
+
+Tested on the property that actually matters, two back-to-back runs of the identical binary:
+
+| tier | n | median | p90 | worst |
+|---|---:|---:|---:|---:|
+| `net` >= 10x floor — *"trustworthy"* | 23 | 2.10% | 5.95% | 9.13% |
+| `net` < 10x floor — *"cannot support a claim"* | 49 | **1.43%** | **4.74%** | **7.32%** |
+
+**The tier I dismissed is the quieter one.** The filing is archived REFUTED, and 2.11.3's entry is
+corrected in place: `ray_aabb` **−54.8%**, `vec3_cross` **−54.0%**, `ray_triangle` **−44.3%**,
+`jet_plane` **−40.5%**, `quat_mul` **−39.7%**, `ray_sphere` **−36.7%** — each 15–25x its own noise.
+cycc 6.5.71's accessor inlining sped up the whole vector/quaternion/ray surface, not nine benchmarks.
+
+⭐ **Being conservative is not the same as being correct.** A wrong instrument suppresses real results
+as readily as it invents false ones, and this one did exactly that for a whole release. The guard
+that needs no threshold: **re-run the identical binary and measure the spread.**
+
 ### Notes
 
 - ⚠ **`_ad_pow`'s reason to exist has now collapsed twice, and the comment beside it said so about
@@ -83,10 +142,8 @@ benchmarks remain floor-dominated and carry no claim at all (see
   error, so binary exponentiation loses accuracy exactly where it wins speed. Against a 60-digit
   reference, `(-0.999)^1000` is **4 ulp** from truth through `_ad_pow` and **58 ulp** through ganita
   — while past ganita's ±1024 window the ranking inverts (3 ulp vs 1 ulp). The comment now states
-  that measured position instead of a rationale that stopped being true two releases ago; whether to
-  keep, delete or narrow the function is filed as
-  [`issues/2026-09-09-ad-pow-rationale-collapsed-twice.md`](docs/development/issues/2026-09-09-ad-pow-rationale-collapsed-twice.md),
-  which records that **no test currently exercises the one regime `_ad_pow` still wins**.
+  that measured position instead of a rationale that stopped being true two releases ago; **it was settled by widening the loop rather than deleting it** — see the repair above. The
+  regime it wins is now pinned by an assertion, which nothing in 3532 had covered.
 - **Comments were NOT renamed wholesale, and the split is deliberate.** 21 present-tense API
   descriptions (`caller allocates via ganita_mat_new`, `the matvec reads ganita_mat_get(A, i, j)`)
   were corrected so a reader can grep from the comment to the call. The ~45 remaining bare mentions
@@ -191,6 +248,20 @@ Geometry and collision workloads got materially faster, and the cause is upstrea
 | `spatial_hash_query_2k` | 428,040 ns | 366,498 ns | −14.4% |
 | `delaunay_2d_400` | 1,583,000 ns | 1,388,000 ns | −12.3% |
 
+⛔ **CORRECTED IN PLACE 2026-09-09 (2.11.4): the restriction below was wrong and it suppressed most
+of this release's actual result.** The paragraph limited every claim to 23 of 72 benchmarks on the
+grounds that the rest had a `net` below the timer floor. That ratio compares a **per-operation** net
+against the cost of **one clock pair**, and since 6.5.19 `bench_run` batches so the clock's error is
+1% of each window — the two numbers are not comparable. Measured on the property that actually
+matters, two back-to-back runs of the identical binary, the dismissed tier is the **quieter** one
+(median 1.43% vs 2.10%). The suppressed rows are real: `ray_aabb` **−54.8%**, `vec3_cross`
+**−54.0%**, `ray_triangle` **−44.3%**, `jet_plane` **−40.5%**, `quat_mul` **−39.7%**, `ray_sphere`
+**−36.7%**, each 15–25x its own measured noise. **cycc 6.5.71's accessor inlining sped up the whole
+vector/quaternion/ray surface, not nine benchmarks.** See
+[`issues/archived/2026-09-09-bench-net-below-timer-floor.md`](docs/development/issues/archived/2026-09-09-bench-net-below-timer-floor.md).
+
+The original paragraph, left for the record:
+
 ⚠ **These are drawn only from the 23 benchmarks whose `net` is at least 10x the subtracted timer
 floor.** Same instrument as 2.11.2 (`regime=net`, floor 1343 → 1329 ns), so the comparison is
 like-for-like — and the flat rows *inside the trustworthy tier* are the control proving the
@@ -203,13 +274,11 @@ tier; the worst movement is +1.0%.
 
 ### Notes
 
-- ⚠ **41 of 72 benchmarks report a `net` value smaller than the floor they subtract** (worst:
-  `ease_in_out` at 7 ns against a 1329 ns floor, a ratio of **0.01x**; 48 of 72 are below 10x). Their
-  run-to-run movement is dominated by host noise — this release's `ray_aabb` −55.9% and `vec3_cross`
-  −55.6% are in that tier and are **not** evidence of anything. Same class as 2.10.0's "17 of 60
-  benchmarks measuring `clock_gettime`": subtracting the floor fixed the *bias* but not the
-  *resolution*. Filed rather than fixed, with a suggested gate, in
-  [`issues/2026-09-09-bench-net-below-timer-floor.md`](docs/development/issues/2026-09-09-bench-net-below-timer-floor.md).
+- ⛔ **RETRACTED 2026-09-09 (2.11.4).** This note claimed 41 of 72 benchmarks report a `net` below
+  the floor they subtract and therefore measure nothing. **The ratio was the wrong instrument** — a
+  per-op net against a per-clock-pair floor — and the filing it raised is now archived REFUTED. The
+  dismissed tier is the quieter of the two on a same-binary re-run, and `ray_aabb` / `vec3_cross`
+  are real −54% speedups rather than "not evidence of anything".
 - ⚠ **The enum Critical the 6.6.1 launcher warns about does not reach hisab, and that was checked
   rather than assumed.** 6.5.33 and earlier mis-read enum constants >= 2^62 as −1; hisab declares
   constants as enums by policy, and every hex f64 bit pattern for a value >= 2.0 exceeds that
