@@ -2,6 +2,296 @@
 
 ## [Unreleased]
 
+## [2.12.0] - 2026-09-09 — the safety release: eight entry points that ended, or corrupted, the caller
+
+The first release off the rewritten release train. **Eight public entry points could be made to end
+the caller's process — and one of them did something worse.** Every repair is reproduced on HEAD with
+a discriminating control and mutation-proven. Suite **3538 → 3572**.
+
+⚠ **The tier said "3 remaining" allocation sites and named three of the four abort sites. It is
+eight**, and the last two were found by refusing to trust the list: one by a **mutant that did not
+die**, one by grepping for the shape after the first was repaired.
+
+### Fixed — the abort tier: a library must not end its caller's process
+
+The stdlib's `vec_get` is bounds-checked and calls `_vec_die()` → `syscall(60, 1)`. Three entry
+points indexed a vec with the **caller's `n`** without ever comparing it to `vec_len`, so passing an
+`n` larger than the data did not return an error — it **exited the process**, printing
+`vec: index out of bounds`.
+
+| entry point | reproduced | control |
+|---|---|---|
+| `convex_hull_2d` (`collision_core.cyr`) | 3 points, `n = 100` → **exit 1** | same call, `n = 3` → exit 0 |
+| `triangulate_polygon` (`collision_core.cyr`) | 3 points, `n = 100` → **exit 1** | same call, `n = 3` → exit 0 |
+| `sequential_impulse` (`collision_core.cyr`) | see below | — |
+| `halfedge_from_triangles` (`collision_mesh.cyr`) | `n_verts = VEC_CAP_MAX + 1` → **exit 1**, `vec: capacity overflow` | `n_verts = 3` → exit 0 |
+
+⛔ **`sequential_impulse` did not abort — it returned SUCCESS after writing out of bounds.** Its
+zeroing loop runs `for zi < n` at 16 bytes per contact **before the first `vec_get`**, so with
+`iterations = 0` the vec is never touched at all. Reproduced: an **empty** contacts vec, `n = 1000`,
+a 64-byte `out_impulses` and a 64-byte canary → **all 8 canary words clobbered, rc = 0, no
+diagnostic**. ~16 KB past a 64-byte buffer with a clean exit. CWE-787, silent.
+
+⚠ **The abuse suite already had a canary block for this exact function and could never have caught
+it.** It tries `n` = 4, 0 and −2 against a 4-contact vec and a 4-contact buffer — **every one of them
+in bounds**. A canary only proves what its `n` reaches.
+
+⚠ **The zeroing loop is the one that had to be bounded, not the solver loop.** Mutation-proven both
+ways: removing the guard restores the silent clobber (8/8 canary words), and the *tempting half-fix*
+— guarding only the `vec_get` loop — leaves the silent write fully intact.
+
+`halfedge_from_triangles` is bounded by **`VEC_CAP_MAX` itself**, read from the stdlib rather than
+transcribed, so it moves when the stdlib moves.
+
+### Fixed — the allocation tier: four sites, not two
+
+`alloc` returns its designed **0** for `size <= 0` and `size > ALLOC_MAX` (2 GiB, re-derived from
+`lib/alloc.cyr`). Four entry points stored through that 0.
+
+| entry point | reproduced | note |
+|---|---|---|
+| `detect_islands` (`collision_mesh.cyr`) | `n_bodies = 268,435,457` → **139** | ⚠ **two different doors**: past the cap, *and* `n_bodies * 8` **overflowing to negative**, which `alloc` rejects via `size <= 0` — the same designed 0 by another route |
+| `solve_gmres` — Hessenberg (`linalg_ext.cyr`) | `n = restart = 16385` → **139** | quadratic in `m`; the bound is exact — m = 16383 accepted (2,147,352,576 B fits), m = 16384 rejected |
+| `solve_gmres` — `_lext_copy` | `n = 268,435,457` → **139** | ⭐ **found by a mutant that did not die** |
+| `solve_bicgstab` — `_lext_copy` | `n = ALLOC_MAX/8 + 1` → **139** | ⭐ **found by grepping for the shape** after the above |
+
+⭐ **The seventh site was found because a mutation test failed to kill.** The Hessenberg guard was
+justified on `(m + 1) * m * 8` overflowing; swapping it for the overflowing multiply form left the
+suite **green**. That said the overflow was unreachable — and it is, because `solve_gmres`'s *first
+line* is `_lext_copy(x0, n)`, an unchecked `alloc(n * 8)` that fails first on any `n` large enough to
+overflow it. **The surviving mutant was pointing at a second defect, not at a redundant guard.** The
+comment that justified the guard has been corrected to say so.
+
+⭐ **The eighth was found by grepping rather than assuming the list was complete.** `solve_bicgstab`
+opens with the identical line. A mechanical sweep for the whole class — an `alloc` sized by a caller
+parameter with no `== 0` check — finds **90 sites tree-wide, of which 9 are public entry points**.
+Seven of those nine are still open and are recorded on the roadmap rather than folded in silently.
+
+⚠ **Every bound is derived, never chosen**: `VEC_CAP_MAX`, `ALLOC_MAX / 8`, and `(ALLOC_MAX / 8) / m`
+written as a **division** so the guard is not computable only when it is unnecessary. Rejection uses
+each function's **existing** channel — an empty vec where `tests/abuse.tcyr` reads `vec_len`, a
+designed 0 where it reads `assert_neq(..., 0)`, `HSB_ERR_INVALID_INPUT` where there is an rc.
+⛔ `solve_gmres` returning `x` — the untouched initial guess — was the tempting alternative and is
+exactly the fabricated-plausible-answer class the 2026-08-11 audit filed against that very function.
+
+### Fixed — my own `sequential_impulse` repair, which introduced a regression
+
+⛔ **The first version of that guard turned a harmless no-op into a SIGSEGV**, and an adversarial
+re-check caught it before release. It read:
+
+```
+if (contacts == 0) { return HSB_ERR_INVALID_INPUT; }
+if (n > vec_len(contacts)) { return HSB_ERR_INVALID_INPUT; }
+```
+
+`vec_len(v)` is `load64(v + 8)` with **no null or validity check**. On the unguarded function
+`contacts` was dereferenced only inside the solver loop, so an `n <= 0` call never touched it — null,
+stale or wild, harmless. Reading `vec_len` before establishing `n > 0` moves that dereference onto a
+path that never had one, and **a non-null bad handle is not null**, so the null check does not cover
+it. Measured: `sequential_impulse(0x1000, 0, 0, out)` — the natural *"no contacts this frame"* call
+with a stale handle — returned 0 untouched before and **SIGSEGV'd** after.
+
+Corrected by one line, ordered first: `if (n <= 0) { return HSB_ERR_NONE; }`. Both loops are already
+no-ops there, so the early return is bit-identical in memory effect and rc for **every** handle
+value — which is what makes the change a pure addition. The incumbent `n <= 0` → success was never
+documented; it is now in the function's `Returns:` block.
+
+⚠ **The first version of the TEST was weak too, and the same re-check proved it**: a `>` → `!=`
+mutant survived all 3560 assertions, because the pre-existing canary lines call `n = 0` and `n = -2`
+but read only the **canary**, never the rc — and the rc is the half that discriminates. Six
+assertions added. All four mutants now die: `!=` (rejects a legal partial solve), `>=` (rejects the
+exact-fit boundary), dropping the `n <= 0` line (**SIGSEGVs the suite**), and dropping the bound.
+
+### Fixed — `opt_conjugate_gradient` and `opt_gradient_descent`: `n * 8` wraps positive
+
+⛔ **A wrap that defeats a null check.** For `n >= 2^61+1` the product `n * 8` is a small **positive**
+number — n = 2^61+1 gives exactly **8** — so `alloc(8)` SUCCEEDS, every handle is non-zero, the
+existing `alloc == 0` check passes, and `_opt_copy` then walks 2^61 slots through an 8-byte buffer.
+Measured **exit 139 even with 1 GiB caller buffers**, so the fault is the library's own allocation,
+not a short `x0`. ⚠ This is the **opposite sign** of the wrap already asserted for
+`opt_levenberg_marquardt`, whose product wraps *non-positive* and is caught by `alloc`'s `size <= 0`
+gate — the harness had reasoned about the wrap only in its negative form.
+
+The guard is a **round-trip test**, `if (n != (n * 8) / 8)`, not a dimension cap:
+
+⛔ **A `n > _OPT_MAX_DIM` cap was measured and REJECTED — it removes a working capability.** That
+cap's own comment scopes it to solvers allocating an `n × n` matrix; these are O(n) solvers, and a
+**conforming caller at n = 10,000,000 returns normally today** and would start being refused. The
+round-trip tests the multiply the function actually performs: no constant, nothing to go stale when
+`ALLOC_MAX` moves — which is the failure this very file already records (an `ALLOC_MAX`-derived 5792
+that had to become 16384 when 6.4.51 moved it). The discriminating assertion is `n = 1e9`, which does
+**not** wrap and must still return `HSB_ERR_ALLOC`; the rejected cap fails that line.
+
+### Notes — the alloc-tier sweep: 6 of 7 candidates were false positives
+
+The mechanical grep flagged 9 public entry points. Each of the 7 unrepaired ones was handed to an
+agent told that **a false positive is a valuable result and must not be manufactured**. Six came back
+already guarded, each with the cap quoted at `file:line`:
+
+| entry point | existing cap |
+|---|---|
+| `tensor_new` | `rank < 0 \|\| rank > 8` — first statement, before either alloc |
+| `geodesic_state_new` | `_DG_MAX_DIM = 16`, first statement |
+| `geodesic_rk4` | same cap, ahead of all fourteen `alloc(dim * 8)` |
+| `parallel_transport` | same cap, two lines above the alloc |
+| `opt_bfgs` | three layers, all ahead of the first alloc |
+| `opt_lbfgs` | a four-line block bounding both `n` and `m` |
+
+⭐ **So the roadmap's "triage before repairing — several are probably false positives" warning was
+right, and following it saved six unnecessary guards** behind caps up to 8.4 million times tighter.
+Dead code behind an existing stricter check is not safety; it is the next reader's confusion.
+
+### Added
+
+**25 assertions** in `tests/abuse.tcyr`, every group mutation-proven — including the half-fix mutant
+for `sequential_impulse` and the overflowing-multiply mutant for `solve_gmres`. Boundaries are
+asserted on **both** sides where one exists, because an off-by-one there is the difference between
+rejecting a valid solve and accepting a SIGSEGV.
+
+⚠ **One assertion is deliberately absent and says so in place.** `detect_islands` at exactly
+`ALLOC_MAX / 8` *is* accepted — verified once, out of tree — but with 0 contacts it correctly builds
+**268,435,456 single-body islands**, which is minutes and gigabytes. (My first version of that
+assertion expected 0 and failed with `got 268435456`: the assertion was wrong, not the code.)
+
+### Performance
+
+**The guards are free: guard-touched benchmarks moved +0.08% against a 0.77% noise floor.**
+
+⚠ **That number took two attempts, and the first one was worthless.** The initial run reported a
+median **+4.43%** across all 72 benchmarks with 69 of 72 moving positive — which no guard could
+cause. The control said so immediately: guard-**touched** rows +3.92%, guard-**untouched** rows
+**+4.45%**, i.e. the untouched rows moved *more*. Three agent workflows were saturating the box
+(load average 1.97).
+
+Re-run on a quiet machine (load 0.33), two runs before and two after:
+
+| | loaded box | quiet box |
+|---|---:|---:|
+| median move, all 72 | +4.43% | **−0.61%** |
+| same-binary noise (median) | 2–9% | **0.77%** |
+| guard-touched rows | +3.92% | **+0.08%** |
+| guard-untouched rows | +4.45% | −0.67% |
+
+⭐ **The lesson is the instrument, not the result.** A `vec_len` compare and a division are free, as
+expected — but the first measurement could not have shown that, and the only thing that distinguished
+"my change is slow" from "the box is busy" was carrying a control group through both runs. **Check
+what the machine was doing before believing the delta.**
+
+No individual row is claimed: the five that moved beyond 3× their own noise are all *faster*, all
+sub-nanosecond-quantised vector rows the guards never touch (`ease_in_out` 7→6 ns, `vec3_add` 17→16).
+
+### Changed — roadmap verified against the tree; 18 of 39 items did not survive it
+
+No source change. Every open item in `docs/development/roadmap.md` was handed to an independent
+verifier instructed to **try to prove it already done**: **21 genuinely open, 15 stale premise, 3
+finished**. Stale rows are struck through **with the proof that killed them** rather than deleted —
+several were false in a way that would have sent someone to do the *wrong work*. Evidence base:
+[`docs/audit/2026-09-09-roadmap-verification.md`](docs/audit/2026-09-09-roadmap-verification.md).
+
+⛔ **The gate blocking the entire release train could not be executed.** 2.12.0 was gated on "re-run
+the 28 unverified audit findings first — this gates every item below it". **The 28 were never
+enumerated.** The audit report records them only as a count; its only per-finding tables are
+explicitly the *confirmed* and *fixed* sets, and no ledger exists in `docs/`, in git history, or in
+scratch. ⭐ **And it bound nothing even in principle** — the tiers it blocked draw from the
+*confirmed* set, which is **disjoint** from the 28. Retired.
+
+**The release train is rewritten around a safety release**, and the ordering is forced by a
+measurement rather than a preference:
+
+| Was | Now |
+|---|---|
+| 2.12.0 = epsilon tier, gated on the 28 | **2.12.0 = safety release** (abort + allocation tiers), gated on nothing |
+| — | **2.13.0 = suite tier** (the `f64_to` truncation) |
+| — | **2.14.0 = epsilon tier**, gated on 2.13.0 |
+
+Every epsilon repair is a change to a threshold **below 1.0**, and **843 of 3247 assertion sites
+compare through `f64_to`, which truncates** — `assert_eq(f64_to(1.9999), f64_to(1.0))` **passes**.
+Landing sub-1.0 behaviour changes into a suite that structurally cannot see them is the wrong order.
+The abort and alloc tiers do not have that problem: their failure mode is a signal, not a digit.
+
+### Fixed — 41 defects in the corrections themselves, found by auditing the edit
+
+The roadmap corrections were handed to four independent adversarial lenses (missed-stale, broken
+references, internal contradictions, and **over-reach** — did a strike delete real work?). **41
+findings survived refutation, 9 of them high**, and most were mine.
+
+⛔ **Three of my own edits rendered as CODE BLOCKS, hiding what they said.** A continuation paragraph
+indented 6 spaces after a blank line inside a list item is an indented code block in GFM — lazy
+continuation (no blank line) is fine, a new paragraph is not. **83 lines were swallowed**, including
+the `sequential_impulse` CWE-787 finding in the file's self-declared highest-priority item, and the
+entire six-pairs table in the public/private item. All dedented; a detector now confirms 0 remain.
+
+⛔ **Unescaped `|` used as absolute-value notation split table rows.** GFM parses table pipes *before*
+inline code spans, so `` `|d_k|` `` inside backticks still splits the row and every cell past it is
+dropped. Fixed across `roadmap.md` and `doc-health.md`; all tables now have consistent cell counts.
+
+⛔ **I claimed the audit backlog was "reordered" and left it in the old order.** The list still read
+epsilon-first while the release train I had just written says epsilon is *last*. Moved.
+
+⛔ **A strike silently deleted a tracked gap.** My ellipsis in the "what this audit did NOT reach"
+quote elided `the SIMD f64v_* paths`, which is still real — the 2026-08-03 sweep reached only
+`hvec3_*`, never the 27 `f64v_*` call sites. Restored. **Deleting a clause while striking a list is
+how a gap stops being tracked**, which is the failure the strike was correcting.
+
+⛔ **"18 of 33" was arithmetic I got wrong and propagated to five files.** 21 open + 15 stale + 3 done
+= **39**.
+
+⚠ **Two corrections were themselves wrong.** I wrote that the escape-hatch decision was "nothing to
+decide" — false: privacy is per *file*, so each of the six `X`→`X_ext` pairs still forces a choice
+between promoting the helper, merging the files, or leaving `X` public. And I misdiagnosed the two
+broken provenance markers as citing moved paths; the real cause is that `check-measurements.sh`
+resolves from the repo root while hisab writes markers relative to `docs/development/` — **my stated
+fix would have left both broken.**
+
+⚠ **A citation I "corrected" was still wrong.** The `vec_sort_by` remediation pointed at
+`CHANGELOG.md:4111`; my replacement said `:4175`; the actual line is **`:4275`**. Verified by grep
+this time. A remediation instruction whose citations have drifted is worse than none.
+
+Also corrected: three EPA benchmarks → **four** (the refuter measured the omitted `gjk_epa_3d_cyl_box`
+and confirmed the conclusion holds 4 of 4); a keep/delete contradiction between the standing lesson
+and its own Open item; a duplicated backlog row carrying **opposite dispositions**; `defer`'s "8 uses,
+all file descriptors" → 6 fds and 2 unlinks; and the constant-gate (156→159), lock (30→31), bundle,
+vendored-file and current-pin counts across `CLAUDE.md`, `dependency-watch.md` and `doc-health.md`.
+
+⭐ **README and CLAUDE.md still listed the six Rust repos as consumers** — the exact error the roadmap
+sweep had flagged and that neither file had been updated for. Both now name the ten SHA-locked
+consumers, with the Rust repos marked as awaiting a port.
+
+### Fixed — documentation claims that were false
+
+- ⛔ **`sequential_impulse` writes past its output buffer and returns success.** Its zeroing loop runs
+  `for zi < n` at 16 bytes per contact **before the first `vec_get`**, with no `vec_len` comparison.
+  Reproduced: an **empty** contacts vec, `n = 1000`, a 64-byte `out_impulses` and a 64-byte canary →
+  **all 8 canary words clobbered, rc = 0, no diagnostic**. ~16 KB past a 64-byte buffer with a clean
+  exit. ⚠ **The abuse suite has a canary block for this exact function** and misses it — its three
+  `n` values (4, 0, −2) are all in bounds. Scheduled 2.12.0; the roadmap had never named the three
+  `collision_core` sites at all.
+- ⛔ **The struct-layout contract cannot fail.** "32 assertions across 16 public structs make any such
+  change trip a gate" — all 32 are `sizeof(T) > 0` or `sizeof(T) % 8 == 0`, and `ColContact` going
+  64 → 72 bytes passes both *identically on both sides of the change they were written to catch*.
+  There is no `assert_eq(sizeof(T), <n>)` anywhere, and six public structs carry none — including
+  **`HVec3`**, the type live consumers touch most. Quoted as protection for five releases.
+- ⛔ **"None are live yet — all four come online later" is wrong in both directions.** **Ten repos
+  consume `dist/hisab.cyr` today**, SHA-locked (svara pins tag 2.11.2 and calls `num_fft`), while
+  impetus/kiran/joshua/hisab-mimamsa/kana have **no `cyrius.cyml` on any branch** — they are Rust
+  repos needing a port. ⚠ **No live consumer has built 2.11.3+**, i.e. none has crossed the
+  6.5.33 → 6.6.2 bump or the 536-site ganita migration.
+- ⭐ **Four v3.0.0 "decisions" were already answered by the toolchain.** cycc 6.6.2 ships and
+  **enforces** file-level `private` + per-fn `pub`. The bundle question was answered *wrong* here: a
+  real `distlib` bundle from `private` modules exported only its `pub fn`s. ⚠ Landmine recorded:
+  `check --with-deps` stays **green** on a bundle no consumer can call.
+- **The epsilon tier is mis-sized**: "~20 sites" came from a review; the mechanical grep the item
+  itself prescribes returns **123 guards across 24 of 35 modules**, untriaged. The allocation tier is
+  **2, not 3** (the third is owned by the abort tier and needs a different repair).
+- **EPA sphere-family non-convergence is not a defect.** Holding the seed and varying only curvature:
+  smooth sphere **12** handoffs → inscribed icosahedron **4** → box **0**. A polytope expansion cannot
+  certify a smooth surface at 1e-10 within 64 iterations. Nothing to repair.
+- Header drift corrected: the roadmap's own header said toolchain **6.5.33** fourteen lines above a
+  line saying **6.6.2**; `deps --verify` 30/30 → **31/31**; bundle figures in `cyrius.cyml` re-derived
+  (**905,803 B / 23,405 lines**); archived-filing counts corrected; and the "Cyrius has no build-time
+  string interpolation" claim in `scripts/version-bump.sh` and `ci.yml` — **false since 6.5.21** —
+  fixed. ⚠ A dangling sentence fragment left in `README.md` by an earlier edit was also repaired.
+
 ## [2.11.5] - 2026-09-09 — cycc 6.6.2: the wrong-code bug is fixed, and the filing was wrong about its scope
 
 Toolchain **6.6.1 → 6.6.2**. No hisab source behaviour change; suite **3538/3538**, every gate green,

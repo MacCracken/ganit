@@ -282,8 +282,8 @@ jobs:
           grep -qF -- "## [$VERSION]" CHANGELOG.md \
             || { echo "FAIL: CHANGELOG.md has no '## [$VERSION]' section header"; exit 1; }
           # src/main.cyr hardcodes the string the CLI prints. It is the one
-          # version site ${file:VERSION} cannot reach — Cyrius has no build-time
-          # string interpolation — so it is a manual edit on every bump and was
+          # version site ${file:VERSION} cannot reach, so it is a manual edit on
+          # every bump and was
           # gated by nothing. Same class as the constant gate: a claim stated in
           # committed text that no gate compared to its source of truth. Added
           # 2.9.2, after the 2.9.1 → 2.9.2 bump left it reading "hisab 2.9.1".

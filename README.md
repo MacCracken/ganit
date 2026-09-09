@@ -4,7 +4,9 @@
 
 Higher math for the AGNOS ecosystem — linear algebra, geometry, calculus, numerical methods, automatic differentiation, symbolic algebra, and more. Written in [Cyrius](https://github.com/MacCracken/cyrius), ported from Rust.
 
-Used by [impetus](https://github.com/MacCracken/impetus) (physics), [kiran](https://github.com/MacCracken/kiran) (engine), [joshua](https://github.com/MacCracken/joshua) (simulation), [aethersafha](https://github.com/MacCracken/aethersafha) (compositor), [svara](https://github.com/MacCracken/svara) (vocal synthesis), [hisab-mimamsa](https://github.com/MacCracken/hisab-mimamsa) (theoretical physics), and [kana](https://github.com/MacCracken/kana) (quantum science).
+Used by **svara**, **naad**, **goonj**, **dhvani**, **attn11**, **ghurni**, **prani**, **garjan**, **prakash** and **nidhi** — ten repos that pull `dist/hisab.cyr` SHA-locked (verified 2026-09-09).
+
+⚠ [impetus](https://github.com/MacCracken/impetus) (physics), [kiran](https://github.com/MacCracken/kiran) (engine), [joshua](https://github.com/MacCracken/joshua) (simulation), [aethersafha](https://github.com/MacCracken/aethersafha) (compositor), [hisab-mimamsa](https://github.com/MacCracken/hisab-mimamsa) (theoretical physics) and [kana](https://github.com/MacCracken/kana) (quantum science) are **planned** — they are Rust repos awaiting a Cyrius port and have no `cyrius.cyml` on any branch.
 
 For expression evaluation and unit conversion, see [abaco](https://github.com/MacCracken/abaco).
 
@@ -46,7 +48,7 @@ stdlib = ["string", "fmt", "alloc", "vec", "str", "math", "ganita", "tagged", "f
 
 [deps.hisab]
 git     = "https://github.com/MacCracken/hisab.git"
-tag     = "2.11.5"
+tag     = "2.12.0"
 modules = ["dist/hisab.cyr"]   # ~884 KB self-contained bundle (all 35 modules)
 # `dist/hisab.deps` is tracked as of 2.9.2 -- `cyrius deps` reads that sidecar and
 # pulls in hisab's own 15 stdlib leaves, so the `stdlib` list above only has to
@@ -105,7 +107,7 @@ cyrius test tests/hisab.tcyr        # 416 smoke tests
 cyrius test tests/foundation.tcyr   # 351 foundation tests
 cyrius test tests/modules.tcyr      # 1797 module tests
 cyrius test tests/edge_cases.tcyr   # 233 edge case tests
-cyrius test tests/abuse.tcyr        # 741 abuse tests (negative indices, zero/huge
+cyrius test tests/abuse.tcyr        # 775 abuse tests (negative indices, zero/huge
                                     #   dimensions, non-conformable operands, canaries)
 cyrius bench tests/hisab.bcyr       # 72 benchmarks
 ```
@@ -118,15 +120,15 @@ See [docs/architecture/overview.md](docs/architecture/overview.md) for the full 
 
 | Metric | Value |
 |--------|-------|
-| Version | 2.11.5 |
-| Library | 35 modules, ~23,319 lines of Cyrius |
-| Tests | 3538 assertions across 5 suites |
+| Version | 2.12.0 |
+| Library | 35 modules, ~23,450 lines of Cyrius |
+| Tests | 3572 assertions across 5 suites |
 | Benchmarks | 72 operations |
 | Fuzz targets | 5 with invariant checks |
 | CLI binary | ~251 KB static ELF (`build/hisab` — version smoke test only) |
 | Toolchain | Cyrius 6.6.2 |
 | Dependencies | 1 (sakshi 2.5.1); no third-party, no FFI/libc |
-| Security | P(-1) audit (2026-04-15) + hardening pass (2026-05-29); [2026-08-03](docs/audit/2026-08-03.md) sweep (70 findings, 2 critical) discharged in 2.6.12–2.6.15; [2026-08-04](docs/audit/2026-08-04.md) re-audit (42 confirmed, 0 critical) discharged in 2.7.0; [2026-08-04 v2.8.0 full sweep](docs/audit/2026-08-04-v2.8.0-full.md) (42 confirmed, 4 critical) **42 FIXED / 0 OPEN** as of 2.9.1; `tests/abuse.tcyr` (2.9.0) found 11 defects on public entry points, all fixed; [2026-08-11 v2.11.0 full sweep](docs/audit/2026-08-11-v2.11.0-full.md) (**52 reproduced, 21 confirmed, 2 refuted — and 28 reproduced but never verified, recorded as such**) with four repairs shipped in 2.11.1 and the rest scheduled on the roadmap. **1 open filing** in [docs/development/issues/](docs/development/issues/), 27 archived filings beside them (28 counting the note added for the two reproducer fixtures) — the EPA seed/certificate question re-diagnosed in 2.9.3. ⚠ **2.11.4 closed both of the filings it had been carrying rather than deferring them**: `_ad_pow` was **repaired** (its `base > 0` delegation was discarding up to 174 ULP, and widening the loop exposed a fabricated 1.0 hiding behind a bound checked *after* a saturating `f64_to`), and the benchmark-floor filing was **REFUTED** — the ratio it rested on compared a per-op net against a per-clock-pair floor, and on a same-binary re-run the tier it dismissed is the quieter of the two, so it had been suppressing real −54% speedups. ⚠ **Cyrius bugs are filed in the cyrius repo**, not here; the one 2.11.3 filed there is **FIXED in cycc 6.6.2 and archived** — all 21 SIMD intrinsic handlers were binding an argument's frame local over their own destination slot. ⚠ hisab filed it as derive-specific and as a 6.5.71 regression and it was **neither**: 6.5.71 only exposed it, so the bisect found the release that made it visible, not the one that caused it and **closed two** by re-testing them on 6.6.1: the CLI source-clobber data-loss risk is now guarded fail-closed, and a syntax error in an uncalled function is finally rejected by `lint` |
+| Security | P(-1) audit (2026-04-15) + hardening pass (2026-05-29); [2026-08-03](docs/audit/2026-08-03.md) sweep (70 findings, 2 critical) discharged in 2.6.12–2.6.15; [2026-08-04](docs/audit/2026-08-04.md) re-audit (42 confirmed, 0 critical) discharged in 2.7.0; [2026-08-04 v2.8.0 full sweep](docs/audit/2026-08-04-v2.8.0-full.md) (42 confirmed, 4 critical) **42 FIXED / 0 OPEN** as of 2.9.1; `tests/abuse.tcyr` (2.9.0) found 11 defects on public entry points, all fixed; [2026-08-11 v2.11.0 full sweep](docs/audit/2026-08-11-v2.11.0-full.md) (**52 reproduced, 21 confirmed, 2 refuted — and 28 reproduced but never verified, recorded as such**) with four repairs shipped in 2.11.1 and the rest scheduled on the roadmap. **1 open filing** in [docs/development/issues/](docs/development/issues/), 26 archived filings beside it, plus a README — the EPA seed/certificate question re-diagnosed in 2.9.3. ⚠ **2.11.4 closed both of the filings it had been carrying rather than deferring them**: `_ad_pow` was **repaired** (its `base > 0` delegation was discarding up to 174 ULP, and widening the loop exposed a fabricated 1.0 hiding behind a bound checked *after* a saturating `f64_to`), and the benchmark-floor filing was **REFUTED** — the ratio it rested on compared a per-op net against a per-clock-pair floor, and on a same-binary re-run the tier it dismissed is the quieter of the two, so it had been suppressing real −54% speedups. ⚠ **Cyrius bugs are filed in the cyrius repo**, not here; the one 2.11.3 filed there is **FIXED in cycc 6.6.2 and archived** — all 21 SIMD intrinsic handlers were binding an argument's frame local over their own destination slot. ⚠ hisab filed it as derive-specific and as a 6.5.71 regression and it was **neither**: 6.5.71 only exposed it, so the bisect found the release that made it visible, not the one that caused it. 2.11.3 also **closed two** older upstream filings by re-testing them on 6.6.1 — the CLI source-clobber data-loss risk is now guarded fail-closed, and a syntax error in an uncalled function is finally rejected by `lint`. ⭐ **A 2026-09-09 verification sweep of the roadmap found 18 of 39 items stale** and retired the gate that had been blocking the whole release train — [`docs/audit/2026-09-09-roadmap-verification.md`](docs/audit/2026-09-09-roadmap-verification.md) |
 
 ## License
 

@@ -259,7 +259,52 @@ fn contact_new(body_a, body_b, normal, penetration, friction, restitution, inv_m
 #   n_i is the normal impulse, >= 0. f_i is the SIGNED friction impulse along the
 #   caller's tangent t^ (the one ColContact.tangent_vel was measured along), so it
 #   is negative for a positive tangent_vel; |f_i| <= friction * n_i always.
+# Returns: HSB_ERR_NONE on success and for n <= 0 (a no-op frame, which was the
+#   incumbent behaviour and is now contracted); HSB_ERR_INVALID_INPUT if
+#   `contacts` is null or `n` exceeds `vec_len(contacts)`.
 fn sequential_impulse(contacts, n, iterations, out_impulses) {
+    # ⛔ THE ZEROING LOOP BELOW RUNS BEFORE THE FIRST `vec_get`, SO WITHOUT THIS
+    # GUARD THE FUNCTION WROTE OUT OF BOUNDS AND RETURNED **SUCCESS**.
+    #
+    # `n` is documented as "number of contacts" — i.e. it is a restatement of
+    # `vec_len(contacts)` — but nothing checked it. Two failure modes, and the
+    # quiet one is worse:
+    #   iterations > 0 : the `vec_get(contacts, ci)` below is bounds-checked by
+    #                    the stdlib and calls `_vec_die()` -> `syscall(60, 1)`,
+    #                    which ENDS THE CALLER'S PROCESS. A library must not.
+    #   iterations = 0 : the vec is never touched at all, so the zeroing loop
+    #                    writes 16*n bytes and returns 0. Reproduced: an EMPTY
+    #                    contacts vec with n = 1000 and a 64-byte out_impulses
+    #                    clobbered all 8 words of an adjacent canary with rc = 0
+    #                    and no diagnostic — ~16 KB past the buffer, silently.
+    #                    CWE-787.
+    # [measured: scratch harness, not reproducible in-tree, 2026-09-09; cycc 6.6.2]
+    #
+    # ⚠ THE ZEROING LOOP IS THE ONE THAT MUST BE BOUNDED, not just the solver
+    # loop. Guarding only the `vec_get` would leave the silent write intact,
+    # which is the half that cannot announce itself.
+    #
+    # [measured: scratch harness, not reproducible in-tree, 2026-09-09; cycc 6.6.2]
+    # ⚠ `out_impulses` is sized `16*n` by the caller and its extent is genuinely
+    # unknowable here — that half stays the caller's contract. What is knowable,
+    # and now enforced, is that `n` may not exceed the contacts actually present.
+    # ⛔ ORDER IS LOAD-BEARING, AND THE FIRST VERSION OF THIS GUARD GOT IT WRONG.
+    # `vec_len(v)` is `load64(v + 8)` with NO null or validity check. On the
+    # unguarded function `contacts` was dereferenced only inside the solver loop,
+    # so an `n <= 0` call never touched it — null, stale or wild, harmless. A
+    # guard that reads `vec_len` before establishing `n > 0` moves that
+    # dereference onto a path that never had one. Measured:
+    # `sequential_impulse(0x1000, 0, 0, out)` — the natural "no contacts this
+    # frame" call with a stale handle — returned 0 untouched before, and
+    # **SIGSEGV'd** with the null-check-first ordering. A non-null bad handle is
+    # not null, so the null check does not cover it.
+    # ⭐ `n <= 0` FIRST, RETURNING SUCCESS, is what makes this a pure addition:
+    # both loops are already no-ops there, so the early return is bit-identical
+    # in memory effect and rc for EVERY handle value.
+    if (n <= 0) { return HSB_ERR_NONE; }
+    if (contacts == 0) { return HSB_ERR_INVALID_INPUT; }
+    if (n > vec_len(contacts)) { return HSB_ERR_INVALID_INPUT; }
+
     # Zero out impulses
     for (var zi = 0; zi < n; zi = zi + 1) {
         store64(out_impulses + zi * 16,     _COL_F64_ZERO);
@@ -487,6 +532,21 @@ fn _col_sort_indices_by_xy(indices, points, n) {
 
 fn convex_hull_2d(points, n) {
     var result = vec_new();
+    # ⛔ `n` IS A RESTATEMENT OF `vec_len(points)` AND WAS NEVER CHECKED, so a
+    # caller passing a larger `n` did not get a wrong answer — it lost its
+    # PROCESS. The stdlib's `vec_get` is bounds-checked and calls `_vec_die()`
+    # -> `syscall(60, 1)`. Reproduced: 3 points with n = 100 prints
+    # `vec: index out of bounds` and exits 1; the same call with n = 3 exits 0.
+    # [measured: scratch harness, not reproducible in-tree, 2026-09-09; cycc 6.6.2]
+    # **A library must not end its caller's process.**
+    #
+    # Rejection returns the empty `result` vec, which is this function's
+    # established convention for degenerate input (n < 2) and what every
+    # assertion in `tests/abuse.tcyr` calls `vec_len` on — returning a designed 0
+    # here would null-deref in the suite's own idiom.
+    if (points == 0) { return result; }
+    if (n > vec_len(points)) { return result; }
+
     if (n < 2) {
         for (var i = 0; i < n; i = i + 1) {
             vec_push(result, i);
@@ -652,6 +712,21 @@ fn _col_ring_is_convex(vertices, idx, remaining, p, ccw) {
 
 fn triangulate_polygon(vertices, n) {
     var result = vec_new();
+    # ⛔ `n` IS A RESTATEMENT OF `vec_len(vertices)` AND WAS NEVER CHECKED, so a
+    # caller passing a larger `n` did not get a wrong answer — it lost its
+    # PROCESS. The stdlib's `vec_get` is bounds-checked and calls `_vec_die()`
+    # -> `syscall(60, 1)`. Reproduced: 3 vertices with n = 100 prints
+    # `vec: index out of bounds` and exits 1; the same call with n = 3 exits 0.
+    # [measured: scratch harness, not reproducible in-tree, 2026-09-09; cycc 6.6.2]
+    # **A library must not end its caller's process.**
+    #
+    # Rejection returns the empty `result` vec, which is this function's
+    # established convention for degenerate input (n < 3) and what every
+    # assertion in `tests/abuse.tcyr` calls `vec_len` on — returning a designed 0
+    # here would null-deref in the suite's own idiom.
+    if (vertices == 0) { return result; }
+    if (n > vec_len(vertices)) { return result; }
+
     if (n < 3) { return result; }
 
     # Build index list (will shrink as ears are clipped)

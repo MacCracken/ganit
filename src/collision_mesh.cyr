@@ -1031,6 +1031,22 @@ fn halfedge_from_triangles(triangles, n_tris, n_verts) {
     if (n_tris < 1) { return 0; }
     if (n_verts < 1) { return 0; }
     if (vec_len(triangles) < n_tris * 3) { return 0; }
+    # ⛔ THE ONE ABORT PATH THE 2.9.x GUARDS ABOVE DID NOT CLOSE. `n_verts` sizes
+    # the `vertex_edge` vec directly, one `vec_push` per vertex, and nothing
+    # bounded it from ABOVE — the index check below only proves each index is
+    # *below* n_verts, never that n_verts itself is buildable. Past the stdlib's
+    # own cap the push dies: `vec: capacity overflow`, `_vec_die()`,
+    # `syscall(60, 1)`. Reproduced with `n_verts = VEC_CAP_MAX + 1` — exit 1,
+    # and it arrives fast because the vec doubles, so it never allocates the
+    # 2 GB the count implies.
+    # [measured: scratch harness, not reproducible in-tree, 2026-09-09; cycc 6.6.2]
+    #
+    # ⭐ The bound is `VEC_CAP_MAX` ITSELF, not a number chosen for it: this
+    # guards exactly what makes the operation fail and nothing more, and it is
+    # read from the dependency rather than transcribed — a constant derived from
+    # a dependency is a measurement, and this one moves when the stdlib moves.
+    # [measured: scratch harness, not reproducible in-tree, 2026-09-09; cycc 6.6.2]
+    if (n_verts > VEC_CAP_MAX) { return 0; }
     for (var ci = 0; ci < n_tris * 3; ci = ci + 1) {
         var cv = vec_get(triangles, ci);
         if (cv < 0 || cv >= n_verts) { return 0; }
@@ -1310,6 +1326,27 @@ fn _col_uf_union(uf, a, b) {
 fn detect_islands(contacts, n_contacts, n_bodies) {
     var result = vec_new();  # vec of vecs
     if (n_bodies == 0) { return result; }
+    # ⛔ CALLER-SIZED ALLOCATION STORED THROUGH UNCHECKED — reproduced as SIGSEGV.
+    # `n_bodies` sizes three allocations that nothing bounded: `_col_uf_new`'s
+    # `parent` and `rank` (`alloc(n * 8)` each) and `comp_index` below. Above
+    # `ALLOC_MAX` the stdlib's `alloc` returns its designed **0**, and the very
+    # next `store64(parent + i * 8, i)` writes to address 0. Measured: n_bodies =
+    # 268,435,457 exits **139**, and so does 1,152,921,504,606,846,976 — that
+    # second one via a different door, because `n_bodies * 8` OVERFLOWS to a
+    # negative and `alloc` rejects `size <= 0` with the same designed 0.
+    # Control: n_bodies = 4 exits 0 and returns 4 islands.
+    # [measured: scratch harness, not reproducible in-tree, 2026-09-09; cycc 6.6.2]
+    #
+    # ⭐ The bound is derived, not chosen: `ALLOC_MAX / 8` is exactly the largest
+    # `n_bodies` whose `n * 8` request `alloc` will honour. Dividing rather than
+    # multiplying is what makes it also catch the overflow case — there is no
+    # `n_bodies` that passes this and then wraps.
+    #
+    # ⚠ API NOTE: this function returns a **vec of vecs**, so it has no rc to
+    # report through. Rejection returns the same empty `result` as `n_bodies == 0`
+    # — the convention every `detect_islands` assertion in `tests/abuse.tcyr`
+    # already reads via `vec_len`. A designed 0 here would null-deref that idiom.
+    if (n_bodies > ALLOC_MAX / 8) { return result; }
 
     var uf = _col_uf_new(n_bodies);
 

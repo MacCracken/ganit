@@ -18,9 +18,14 @@ if ! grep -q '^version = "${file:VERSION}"' "$REPO_ROOT/cyrius.cyml"; then
   echo "::warning:: cyrius.cyml does not use \${file:VERSION} — manifest version may drift"
 fi
 
-# src/main.cyr hardcodes the string the CLI prints. Cyrius has no build-time
-# string interpolation, so ${file:VERSION} cannot reach it and it was a manual
+# src/main.cyr hardcodes the string the CLI prints. ${file:VERSION} cannot reach
+# it, so it was a manual
 # edit this script did not make and no gate checked — the 2.9.1 → 2.9.2 bump
+# ⚠ 2026-09-09: the old wording here claimed "Cyrius has no build-time string
+# interpolation". That has been FALSE since 6.5.21 — CYRIUS_PKG_VERSION exists,
+# and the included-file case was fixed in 6.5.34 (re-verified on 6.6.2). Adopting
+# it is a live roadmap item; what stays true is only that ${file:VERSION} itself
+# cannot reach a .cyr string literal.
 # left the CLI reporting 2.9.1. Rewritten here; CI's version-consistency step
 # asserts it independently, so a hand-edit that misses it still fails the build.
 if grep -qE '^\s*println\("hisab [0-9]+\.[0-9]+\.[0-9]+"\);' "$REPO_ROOT/src/main.cyr"; then

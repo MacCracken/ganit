@@ -344,10 +344,48 @@ fn _lext_copy(src, n) {
 # restart:  restart dimension (Krylov subspace size per cycle).
 # Returns: flat f64 array of length n (solution).
 fn solve_gmres(A_fn, b, x0, n, tol, max_iter, restart) {
+    # ⛔ `n` SIZES THE VERY FIRST ALLOCATION AND WAS UNCHECKED. `_lext_copy(x0, n)`
+    # does `alloc(n * 8)` and stores through it; past ALLOC_MAX that is the
+    # designed 0 and the copy loop writes to address 0. Measured: n = 268,435,457
+    # with restart = 2 exits **139** — i.e. it never reached the Hessenberg guard
+    # below.
+    # [measured: scratch harness, not reproducible in-tree, 2026-09-09; cycc 6.6.2]
+    # ⭐ FOUND BY A MUTANT THAT DID NOT DIE. The Hessenberg guard was written
+    # against an overflow of `(m + 1) * m * 8`; replacing it with the overflowing
+    # multiply form left the suite green, which said the overflow was unreachable.
+    # It is — because THIS allocation fails first on any `n` large enough to
+    # overflow it. The surviving mutant was pointing at a second defect, not at a
+    # redundant guard.
+    if (n > ALLOC_MAX / 8) { return 0; }
     var x = _lext_copy(x0, n);
     var m = restart;
     if (m > n) { m = n; }
     if (m < 1) { m = 1; }
+
+    # ⛔ THE HESSENBERG IS QUADRATIC IN `m` AND WAS STORED THROUGH UNCHECKED.
+    # `h = alloc((m + 1) * m * 8)`; above `ALLOC_MAX` the stdlib returns its
+    # designed **0** and the zeroing loop immediately writes to address 0.
+    # Measured: n = 16385 with restart = 16385 asks for 2,147,893,... B against a
+    # 2 GiB cap and exits **139**. ⭐ Two controls isolate the quadratic term
+    # rather than the inputs: the SAME n with restart = 2 exits 0, and the same
+    # restart == n shape at n = 64 exits 0.
+    # [measured: scratch harness, not reproducible in-tree, 2026-09-09; cycc 6.6.2]
+    #
+    # ⚠ Written as a DIVISION rather than `(m + 1) * m * 8 > ALLOC_MAX`. Both are
+    # correct HERE — the `n` guard above means `m` can never reach the ~1.07e9
+    # needed to overflow the product, and a mutation swapping the two forms was
+    # green, which is how that was established rather than assumed. The division
+    # form is kept because it stays correct if that `n` guard is ever loosened.
+    # Exact at the boundary, asserted both ways in the suite: m = 16383 passes
+    # (2,147,352,576 B, fits) and m = 16384 is rejected (2,147,614,720 B).
+    # [measured: scratch harness, not reproducible in-tree, 2026-09-09; cycc 6.6.2]
+    #
+    # ⚠ Returns a designed 0. This function hands back the solution ARRAY and has
+    # no rc, and `tests/abuse.tcyr` already reads its failure channel as
+    # `assert_neq(..., 0)`. ⛔ Returning `x` — the untouched initial guess — was
+    # the tempting alternative and is exactly the fabricated-plausible-answer
+    # class the 2026-08-11 audit filed against this very function.
+    if (m + 1 > (ALLOC_MAX / 8) / m) { return 0; }
 
     # COUNT the matrix-vector products rather than deriving an outer-cycle bound
     # from them. Through 2.7.0 this computed
@@ -535,6 +573,15 @@ fn solve_gmres(A_fn, b, x0, n, tol, max_iter, restart) {
 # max_iter: maximum iterations.
 # Returns: flat f64 array of length n (solution).
 fn solve_bicgstab(A_fn, b, x0, n, tol, max_iter) {
+    # ⛔ IDENTICAL DEFECT TO `solve_gmres`, and found only because that one was
+    # repaired and the same shape was then grepped for rather than assumed
+    # absent. `_lext_copy(x0, n)` is an unchecked `alloc(n * 8)`; past ALLOC_MAX
+    # that is the designed 0 and the copy loop writes to address 0. Measured:
+    # n = ALLOC_MAX / 8 + 1 exits **139**. Same guard, same designed-0 channel
+    # (`tests/abuse.tcyr` already reads this function's failures as
+    # `assert_neq(..., 0)`).
+    # [measured: scratch harness, not reproducible in-tree, 2026-09-09; cycc 6.6.2]
+    if (n > ALLOC_MAX / 8) { return 0; }
     var x = _lext_copy(x0, n);
     var ax = fncall1(A_fn, x);
     var r = _lext_sub(b, ax, n);

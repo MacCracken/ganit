@@ -159,6 +159,31 @@ fn _opt_armijo(f, x, d, grad_ptr, n, f_old, x_trial) {
 # Returns:  HSB_ERR_NONE on success, HSB_ERR_INVALID_INPUT or HSB_ERR_NO_CONVERGENCE
 fn opt_gradient_descent(f, grad, x0, n, lr, tol, max_iter, out_x, out_fmin) {
     if (n <= 0) { return HSB_ERR_INVALID_INPUT; }
+    # ⛔ CWE-190: `n * 8` WRAPS, AND THE WRAP DEFEATS THE NULL CHECK BELOW. For
+    # n >= 2^61+1 the product is a small POSITIVE number — n = 2^61+1 gives
+    # exactly **8** — so `alloc` SUCCEEDS, every handle is non-zero, and
+    # `_opt_copy` then walks 2^61 slots through an 8-byte buffer. Measured: exit
+    # 139 even with 1 GiB caller buffers, so the fault is this function's own
+    # allocation, not a short `x0`. No caller can prevent it and no buffer of
+    # 2^61 f64s can exist, so it is not a precondition anyone could satisfy.
+    # [measured: scratch harness, not reproducible in-tree, 2026-09-09; cycc 6.6.2]
+    #
+    # ⭐ THE ROUND-TRIP IS THE GUARD, not a dimension cap. It tests the multiply
+    # this function actually performs, so it needs no constant, cannot be wrong
+    # for a different element size, and cannot go stale when ALLOC_MAX moves —
+    # which is the failure this file already records at `_OPT_MAX_DIM` (an
+    # ALLOC_MAX-derived 5792 that had to become 16384 when 6.4.51 moved it).
+    # ⚠ A `n > _OPT_MAX_DIM` cap was measured and REJECTED: it removes a working
+    # capability. `_OPT_MAX_DIM`'s own comment scopes it to solvers allocating an
+    # n x n matrix; this is an O(n) solver, and a CONFORMING caller at n = 1e7
+    # returns normally today and would start being refused.
+    # [measured: scratch harness, not reproducible in-tree, 2026-09-09; cycc 6.6.2]
+    # Every larger-but-representable n is already handled by the `alloc == 0`
+    # check further down.
+    # Values: n = 2^61+1 exits 139 with 1 GiB caller buffers; n = 2^28 and n = 1e9
+    # are unaffected; a conforming n = 1e7 still returns normally.
+    # [measured: scratch harness, not reproducible in-tree, 2026-09-09; cycc 6.6.2]
+    if (n != (n * 8) / 8) { return HSB_ERR_INVALID_INPUT; }
 
     # Working copy of x
     var x = alloc(n * 8);
@@ -216,6 +241,31 @@ fn opt_gradient_descent(f, grad, x0, n, lr, tol, max_iter, out_x, out_fmin) {
 # Returns:  HSB_ERR_NONE on success, HSB_ERR_INVALID_INPUT or HSB_ERR_NO_CONVERGENCE
 fn opt_conjugate_gradient(f, grad, x0, n, tol, max_iter, out_x, out_fmin) {
     if (n <= 0) { return HSB_ERR_INVALID_INPUT; }
+    # ⛔ CWE-190: `n * 8` WRAPS, AND THE WRAP DEFEATS THE NULL CHECK BELOW. For
+    # n >= 2^61+1 the product is a small POSITIVE number — n = 2^61+1 gives
+    # exactly **8** — so `alloc` SUCCEEDS, every handle is non-zero, and
+    # `_opt_copy` then walks 2^61 slots through an 8-byte buffer. Measured: exit
+    # 139 even with 1 GiB caller buffers, so the fault is this function's own
+    # allocation, not a short `x0`. No caller can prevent it and no buffer of
+    # 2^61 f64s can exist, so it is not a precondition anyone could satisfy.
+    # [measured: scratch harness, not reproducible in-tree, 2026-09-09; cycc 6.6.2]
+    #
+    # ⭐ THE ROUND-TRIP IS THE GUARD, not a dimension cap. It tests the multiply
+    # this function actually performs, so it needs no constant, cannot be wrong
+    # for a different element size, and cannot go stale when ALLOC_MAX moves —
+    # which is the failure this file already records at `_OPT_MAX_DIM` (an
+    # ALLOC_MAX-derived 5792 that had to become 16384 when 6.4.51 moved it).
+    # ⚠ A `n > _OPT_MAX_DIM` cap was measured and REJECTED: it removes a working
+    # capability. `_OPT_MAX_DIM`'s own comment scopes it to solvers allocating an
+    # n x n matrix; this is an O(n) solver, and a CONFORMING caller at n = 1e7
+    # returns normally today and would start being refused.
+    # [measured: scratch harness, not reproducible in-tree, 2026-09-09; cycc 6.6.2]
+    # Every larger-but-representable n is already handled by the `alloc == 0`
+    # check further down.
+    # Values: n = 2^61+1 exits 139 with 1 GiB caller buffers; n = 2^28 and n = 1e9
+    # are unaffected; a conforming n = 1e7 still returns normally.
+    # [measured: scratch harness, not reproducible in-tree, 2026-09-09; cycc 6.6.2]
+    if (n != (n * 8) / 8) { return HSB_ERR_INVALID_INPUT; }
 
     var x       = alloc(n * 8);
     var g       = alloc(n * 8);

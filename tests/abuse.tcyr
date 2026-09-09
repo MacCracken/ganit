@@ -654,6 +654,33 @@ assert_eq(opt_conjugate_gradient(&_ab_fvec, &_ab_gvec, ab_x0, 0, F64_HALF, 5,
     ab_outx, ab_fmin), HSB_ERR_INVALID_INPUT, "opt_conjugate_gradient: n = 0");
 assert_eq(opt_conjugate_gradient(&_ab_fvec, &_ab_gvec, ab_x0, (0 - 2), F64_HALF, 5,
     ab_outx, ab_fmin), HSB_ERR_INVALID_INPUT, "opt_conjugate_gradient: n = -2");
+
+# ⛔ 2.12.0 — `n * 8` WRAPS TO A SMALL POSITIVE SIZE, WHICH DEFEATS THE NULL CHECK.
+# n = 2^61+1 makes the product exactly **8**, so `alloc(8)` SUCCEEDS, all five
+# handles are non-zero, and `_opt_copy` walks 2^61 slots through an 8-byte buffer.
+# Measured exit **139** even with 1 GiB caller buffers — the fault is the
+# library's own allocation, not a short x0.
+# ⚠ This is the OPPOSITE sign of the wrap already asserted for
+# `opt_levenberg_marquardt` below, whose product wraps NON-POSITIVE and is
+# therefore caught by `alloc`'s own `size <= 0` gate. The harness had reasoned
+# about the wrap only in its negative form.
+# [measured: scratch harness, not reproducible in-tree, 2026-09-09]
+assert_eq(opt_conjugate_gradient(&_ab_fvec, &_ab_gvec, ab_x0, 2305843009213693953, F64_HALF, 5,
+    ab_outx, ab_fmin), HSB_ERR_INVALID_INPUT,
+  "opt_conjugate_gradient: n = 2^61+1 wraps n*8 to 8 -- alloc succeeds, null check defeated");
+assert_eq(opt_gradient_descent(&_ab_fvec, &_ab_gvec, ab_x0, 2305843009213693953, F64_HALF, F64_HALF,
+    5, ab_outx, ab_fmin), HSB_ERR_INVALID_INPUT,
+  "opt_gradient_descent: same wrap, same guard");
+# ⭐ THE LOAD-BEARING CONTROL. This discriminates the round-trip guard from a
+# blanket dimension cap: n = 1e9 does NOT wrap, so `alloc` rejects it and the
+# EXISTING null check must still report HSB_ERR_ALLOC. A `n > _OPT_MAX_DIM` cap
+# would return HSB_ERR_INVALID_INPUT here and fail this line — which is why the
+# cap was measured and rejected: it also refuses a conforming caller at n = 1e7.
+# [measured: scratch harness, not reproducible in-tree, 2026-09-09; cycc 6.6.2]
+assert_eq(opt_conjugate_gradient(&_ab_fvec, &_ab_gvec, ab_x0, 1000000000, F64_HALF, 5,
+    ab_outx, ab_fmin), HSB_ERR_ALLOC,
+  "opt_conjugate_gradient: n = 1e9 -> HSB_ERR_ALLOC (no wrap; guard must NOT fire)");
+
 assert_eq(opt_bfgs(&_ab_fvec, &_ab_gvec, ab_x0, 0, F64_HALF, 5, ab_outx, ab_fmin),
   HSB_ERR_INVALID_INPUT, "opt_bfgs: n = 0");
 assert_eq(opt_bfgs(&_ab_fvec, &_ab_gvec, ab_x0, (0 - 2), F64_HALF, 5, ab_outx, ab_fmin),
@@ -915,8 +942,53 @@ assert_neq(solve_gmres(&_ab_matvec, ab_b3, ab_xg, 3, EPSILON_F64, 5, (0 - 3)), 0
   "solve_gmres: restart = -3 clamped to 1");
 assert_neq(solve_gmres(&_ab_matvec, ab_b3, ab_xg, 3, EPSILON_F64, 5, 9999), 0,
   "solve_gmres: restart >> n clamped to n");
+
+# ⛔ 2.12.0 — THE HESSENBERG IS QUADRATIC IN `m` AND WAS STORED THROUGH UNCHECKED.
+# The four assertions above all use n = 3, so `m` clamps to 3 and the allocation
+# is 96 bytes — none of them could reach this. `h = alloc((m + 1) * m * 8)`
+# above ALLOC_MAX returns the designed 0 and the zeroing loop writes to address 0.
+# Measured: n = 16385, restart = 16385 exits **139**.
+# ⭐ The controls isolate the QUADRATIC TERM, not the inputs: the same n with
+# restart = 2 succeeds, and the same restart == n shape at n = 64 succeeds.
+# ⚠ The boundary is asserted on both sides because an off-by-one here is the
+# difference between rejecting a valid solve and accepting a SIGSEGV.
+# [measured: scratch harness, not reproducible in-tree, 2026-09-09]
+var ab_gm_n = 16385;
+var ab_gm_b = alloc(ab_gm_n * 8);
+var ab_gm_x = alloc(ab_gm_n * 8);
+assert_eq(solve_gmres(&_ab_matvec, ab_gm_b, ab_gm_x, ab_gm_n, EPSILON_F64, 2, ab_gm_n), 0,
+  "solve_gmres: Hessenberg past ALLOC_MAX -> designed 0, not a SIGSEGV");
+assert_eq(solve_gmres(&_ab_matvec, ab_gm_b, ab_gm_x, 16384, EPSILON_F64, 2, 16384), 0,
+  "solve_gmres: m = 16384 rejected -- (m+1)*m*8 = 2,147,614,720 > ALLOC_MAX");
+assert_neq(solve_gmres(&_ab_matvec, ab_gm_b, ab_gm_x, 16383, EPSILON_F64, 2, 16383), 0,
+  "solve_gmres: m = 16383 ACCEPTED -- 2,147,352,576 fits. The guard is exact, not conservative");
+assert_neq(solve_gmres(&_ab_matvec, ab_gm_b, ab_gm_x, ab_gm_n, EPSILON_F64, 2, 2), 0,
+  "solve_gmres: same n with restart = 2 still solves -- the guard is on m, not n");
+
+# ⛔ A SEVENTH SITE, AND A MUTANT THAT DID NOT DIE IS WHAT FOUND IT. The Hessenberg
+# guard above was justified on `(m + 1) * m * 8` overflowing; swapping it for the
+# overflowing multiply form left the suite GREEN. That said the overflow was
+# unreachable — and it is, because `solve_gmres`'s FIRST line is
+# `_lext_copy(x0, n)`, an unchecked `alloc(n * 8)` that fails first on any `n`
+# large enough. Measured: n = 268,435,457 with restart = 2 exits **139**, never
+# reaching the Hessenberg guard at all.
+# ⚠ Small buffers with a large claimed `n` — the hostile-caller shape. A correct
+# library rejects on `n` before dereferencing them. (My first probe allocated
+# `n * 8` itself and crashed in the PROBE; the library was innocent of that one.)
+# [measured: scratch harness, not reproducible in-tree, 2026-09-09]
+assert_eq(solve_gmres(&_ab_matvec, ab_b3, ab_xg, ALLOC_MAX / 8 + 1, EPSILON_F64, 2, 2), 0,
+  "solve_gmres: n past ALLOC_MAX/8 -> designed 0 before _lext_copy dereferences");
+assert_eq(solve_gmres(&_ab_matvec, ab_b3, ab_xg, 1073741824, EPSILON_F64, 2, 2), 0,
+  "solve_gmres: n large enough to overflow (m+1)*m*8 is rejected on n first");
 assert_neq(solve_bicgstab(&_ab_matvec, ab_b3, ab_xg, 3, EPSILON_F64, 0), 0,
   "solve_bicgstab: max_iter = 0 returns a vector");
+# ⛔ 2.12.0 — AN EIGHTH SITE, found by grepping for the shape after `solve_gmres`
+# was repaired rather than assuming the tier's list was complete. Identical
+# defect: `_lext_copy(x0, n)` is an unchecked `alloc(n * 8)`.
+# Measured: n = ALLOC_MAX/8 + 1 exits **139**. Control: n = 3 above still solves.
+# [measured: scratch harness, not reproducible in-tree, 2026-09-09]
+assert_eq(solve_bicgstab(&_ab_matvec, ab_b3, ab_xg, ALLOC_MAX / 8 + 1, EPSILON_F64, 2), 0,
+  "solve_bicgstab: n past ALLOC_MAX/8 -> designed 0, not a SIGSEGV");
 assert_neq(solve_bicgstab(&_ab_matvec, ab_b3, ab_xg, 3, EPSILON_F64, (0 - 4)), 0,
   "solve_bicgstab: max_iter = -4 returns a vector");
 
@@ -1145,6 +1217,78 @@ assert_eq(_ab_clob(ab_imp_can, 16), 0, "sequential_impulse n = -2: canary clean"
 sequential_impulse(ab_contacts, 4, (0 - 3), ab_imp);
 assert_eq(_ab_clob(ab_imp_can, 16), 0, "sequential_impulse iterations = -3: canary clean");
 
+# ⛔ 2.12.0 — THE FOUR LINES ABOVE COULD NEVER HAVE CAUGHT THIS, AND THAT IS THE
+# LESSON. They try n = 4, 0 and -2 against a 4-contact vec and a 4-contact
+# buffer: every one of those is IN BOUNDS, so the canary was proving nothing
+# about the case that mattered. **A canary only proves what its `n` reaches.**
+#
+# The defect: `n` is documented as the contact count but was never compared to
+# `vec_len(contacts)`, and the zeroing loop runs BEFORE the first `vec_get`. So
+# with `iterations = 0` the vec is never touched, and the function wrote 16*n
+# bytes and returned **0 — success**. Reproduced at 16 KB past a 64-byte buffer
+# [measured: scratch harness, not reproducible in-tree, 2026-09-09; cycc 6.6.2]
+# with no diagnostic. With `iterations > 0` it aborted the process instead, via
+# the stdlib's bounds-checked `vec_get` -> `_vec_die()` -> `syscall(60, 1)`.
+#
+# ⚠ Both halves are asserted, because a guard on the solver loop alone would fix
+# the loud one and leave the silent one live.
+# [measured: scratch harness, not reproducible in-tree, 2026-09-09]
+var ab_si_small = alloc(64);              # room for exactly 4 contacts
+var ab_si_can = _ab_canary_new(8);
+var ab_si_empty = vec_new();
+
+# (a) the SILENT case: n far exceeds the vec, iterations = 0 so nothing derefs
+assert_eq(sequential_impulse(ab_si_empty, 1000, 0, ab_si_small), HSB_ERR_INVALID_INPUT,
+  "sequential_impulse: n > vec_len is rejected, not written");
+assert_eq(_ab_clob(ab_si_can, 8), 0,
+  "sequential_impulse: n = 1000 on an EMPTY vec leaves the canary clean (was 8/8 clobbered, rc 0)");
+
+# (b) the LOUD case: same overrun with iterations > 0 used to abort the process
+assert_eq(sequential_impulse(ab_si_empty, 1000, 3, ab_si_small), HSB_ERR_INVALID_INPUT,
+  "sequential_impulse: n > vec_len with iterations > 0 returns, does not abort");
+assert_eq(_ab_clob(ab_si_can, 8), 0, "sequential_impulse: loud case leaves the canary clean too");
+
+# (c) one past the end — the boundary, not just a wild value
+assert_eq(sequential_impulse(ab_contacts, 5, 1, ab_imp), HSB_ERR_INVALID_INPUT,
+  "sequential_impulse: n = vec_len + 1 is rejected");
+
+# (d) null vec
+assert_eq(sequential_impulse(0, 1, 1, ab_si_small), HSB_ERR_INVALID_INPUT,
+  "sequential_impulse: null contacts vec -> HSB_ERR_INVALID_INPUT");
+
+# ⭐ CONTROL — the exact-fit call must still succeed and still compute. Without
+# this the four assertions above would pass on a function that rejected
+# everything.
+assert_eq(sequential_impulse(ab_contacts, 4, 3, ab_imp), HSB_ERR_NONE,
+  "sequential_impulse: n == vec_len still succeeds");
+assert_eq(_ab_clob(ab_imp_can, 16), 0, "sequential_impulse: valid call still canary-clean");
+
+# ⭐ THESE FOUR EXIST BECAUSE AN ADVERSARIAL RE-CHECK KILLED THE FIRST VERSION OF
+# THIS BLOCK. With only the assertions above, a `>` -> `!=` mutant SURVIVED all
+# 3560 assertions: the pre-existing canary lines at :1139-1146 call n = 0 and
+# n = -2 but read only the CANARY, never the rc — and the rc is the half that
+# discriminates. A partial solve and a no-op frame are both legal and both would
+# be rejected by `!=`.
+assert_eq(sequential_impulse(ab_contacts, 2, 3, ab_imp), HSB_ERR_NONE,
+  "sequential_impulse: n < vec_len is a legal PARTIAL solve, not an error (kills the != mutant)");
+assert_eq(sequential_impulse(ab_contacts, 0, 3, ab_imp), HSB_ERR_NONE,
+  "sequential_impulse: n = 0 is a no-op frame, rc NONE (kills the != and >= mutants)");
+assert_eq(sequential_impulse(ab_contacts, (0 - 2), 3, ab_imp), HSB_ERR_NONE,
+  "sequential_impulse: negative n is a no-op frame, rc NONE");
+assert_eq(sequential_impulse(ab_contacts, 4, 3, ab_imp), HSB_ERR_NONE,
+  "sequential_impulse: n == vec_len is the boundary and must be ACCEPTED (kills the >= mutant)");
+
+# ⛔ AND THE REGRESSION MY OWN FIRST REPAIR INTRODUCED. `vec_len(v)` is
+# `load64(v + 8)` unchecked, so guarding on it before establishing `n > 0`
+# dereferences a handle the unguarded function never touched. The natural "no
+# contacts this frame" call with a stale handle went from rc 0 to **SIGSEGV**.
+# 0x1000 is below Linux's mmap_min_addr, so it is reliably unmapped.
+# [measured: scratch harness, not reproducible in-tree, 2026-09-09]
+assert_eq(sequential_impulse(0x1000, 0, 0, ab_imp), HSB_ERR_NONE,
+  "sequential_impulse: n <= 0 must not dereference contacts -- a wild handle is harmless there");
+assert_eq(sequential_impulse(0x1000, (0 - 5), 3, ab_imp), HSB_ERR_NONE,
+  "sequential_impulse: negative n with a wild handle is still a no-op");
+
 # --- optimiser out_x on a rejected call ---
 var ab_ox = alloc(4 * 8);
 var ab_ox_can = _ab_canary_new(16);
@@ -1369,6 +1513,29 @@ assert_eq(vec_len(triangulate_polygon(ab_line, 4)), 0,
 assert_eq(vec_len(triangulate_polygon(ab_same, 6)), 0,
   "triangulate_polygon: 6 coincident vertices -> no ears");
 
+# ⛔ 2.12.0 — BOTH OF THESE ENDED THE CALLER'S PROCESS. `n` is documented as a
+# restatement of `vec_len(...)` and was never checked, so an `n` larger than the
+# vec reached the stdlib's bounds-checked `vec_get`, which calls `_vec_die()` ->
+# `syscall(60, 1)`. Not a wrong answer — a dead process, from a library call.
+#
+# ⚠ Every assertion above passes an n that is <= the vec's length, so none of
+# them could reach it. The overrun is the case the block was missing.
+#
+# Reproduced as standalone binaries because an abort cannot be caught in-suite:
+# 3 points with n = 100 printed `vec: index out of bounds` and exited **1**;
+# the identical call with n = 3 exited **0**. That pair is the discriminator.
+# [measured: scratch harness, not reproducible in-tree, 2026-09-09]
+assert_eq(vec_len(convex_hull_2d(ab_line, 100)), 0,
+  "convex_hull_2d: n > vec_len -> empty, not an aborted process");
+assert_eq(vec_len(triangulate_polygon(ab_line, 100)), 0,
+  "triangulate_polygon: n > vec_len -> empty, not an aborted process");
+assert_eq(vec_len(convex_hull_2d(ab_line, vec_len(ab_line) + 1)), 0,
+  "convex_hull_2d: n = vec_len + 1 is rejected -- the boundary, not just a wild value");
+assert_eq(vec_len(triangulate_polygon(ab_line, vec_len(ab_line) + 1)), 0,
+  "triangulate_polygon: n = vec_len + 1 is rejected");
+assert_eq(vec_len(convex_hull_2d(0, 5)), 0, "convex_hull_2d: null points vec -> empty");
+assert_eq(vec_len(triangulate_polygon(0, 5)), 0, "triangulate_polygon: null vertices vec -> empty");
+
 assert_eq(vec_len(delaunay_2d(ab_line, 0)), 0, "delaunay_2d: n = 0 -> empty");
 assert_eq(vec_len(delaunay_2d(ab_line, (0 - 5))), 0, "delaunay_2d: n = -5 -> empty");
 assert_eq(vec_len(delaunay_2d(ab_line, 2)), 0, "delaunay_2d: n = 2 -> empty");
@@ -1407,6 +1574,20 @@ vec_push(ab_big_tri, 9);
 vec_push(ab_big_tri, 2);
 assert_eq(halfedge_from_triangles(ab_big_tri, 1, 3), 0,
   "halfedge_from_triangles: vertex id >= n_verts -> 0");
+# ⛔ 2.12.0 — the one abort path the 2.9.x guards above did not close. `n_verts`
+# sizes the `vertex_edge` vec one `vec_push` at a time and nothing bounded it
+# from ABOVE; the index check only proves each index is *below* n_verts. Past
+# `VEC_CAP_MAX` the push calls `_vec_die()` -> `syscall(60, 1)`. Reproduced:
+# `n_verts = VEC_CAP_MAX + 1` printed `vec: capacity overflow` and exited **1**
+# (fast — the vec doubles, so it never allocates the 2 GB the count implies).
+# ⭐ Asserted against `VEC_CAP_MAX` itself rather than a transcribed number, so
+# this test follows the stdlib if the cap moves.
+# [measured: scratch harness, not reproducible in-tree, 2026-09-09]
+assert_eq(halfedge_from_triangles(ab_tris, 1, VEC_CAP_MAX + 1), 0,
+  "halfedge_from_triangles: n_verts > VEC_CAP_MAX -> 0, not an aborted process");
+assert_eq(halfedge_from_triangles(ab_tris, 1, VEC_CAP_MAX * 4), 0,
+  "halfedge_from_triangles: n_verts far past the cap -> 0");
+
 assert_neq(halfedge_from_triangles(ab_tris, 1, 3), 0,
   "halfedge_from_triangles: a well-formed single triangle builds");
 
@@ -1514,6 +1695,29 @@ assert_eq(vec_len(detect_islands(vec_new(), 0, 0)), 0, "detect_islands: n_bodies
 assert_eq(vec_len(detect_islands(vec_new(), 0, (0 - 4))), 0, "detect_islands: n_bodies = -4 -> empty");
 assert_eq(vec_len(detect_islands(vec_new(), (0 - 1), 3)), 3,
   "detect_islands: n_contacts = -1 -> every body is its own island");
+
+# ⛔ 2.12.0 — CALLER-SIZED ALLOCATION STORED THROUGH UNCHECKED, reproduced as
+# SIGSEGV. `n_bodies` sizes three allocations (`_col_uf_new`'s parent and rank,
+# and `comp_index`) and nothing bounded it from above. Above ALLOC_MAX the
+# stdlib's `alloc` returns its designed 0 and `store64(parent + i * 8, i)` writes
+# to address 0. The assertions above use n_bodies = 0, -4 and 3 — none reaches it.
+# ⚠ TWO DIFFERENT DOORS, both exit 139: n_bodies = ALLOC_MAX/8 + 1 exceeds the
+# cap, and a huge n_bodies makes `n_bodies * 8` **OVERFLOW to negative**, which
+# `alloc` rejects via its `size <= 0` guard — the same designed 0 by another
+# route. The bound is written as a DIVISION so it catches both.
+# [measured: scratch harness, not reproducible in-tree, 2026-09-09]
+assert_eq(vec_len(detect_islands(vec_new(), 0, ALLOC_MAX / 8 + 1)), 0,
+  "detect_islands: n_bodies past ALLOC_MAX/8 -> empty, not a SIGSEGV");
+assert_eq(vec_len(detect_islands(vec_new(), 0, 1152921504606846976)), 0,
+  "detect_islands: n_bodies * 8 overflows to negative -> empty, not a SIGSEGV");
+# ⚠ THE ACCEPTED SIDE OF THE BOUNDARY IS DELIBERATELY NOT ASSERTED HERE, and
+# saying so beats leaving a silent gap. `n_bodies = ALLOC_MAX / 8` is exactly at
+# the cap and IS accepted — verified once, out of tree — but with 0 contacts it
+# correctly builds **268,435,456 single-body islands**, which is minutes of work
+# and gigabytes of vecs. (My first version of this assertion expected 0 and
+# failed with `got 268435456` — the assertion was wrong, not the code.)
+# The cheap control for the accepted side is `n_bodies = 3` above.
+# [measured: scratch harness, not reproducible in-tree, 2026-09-09]
 
 test_group("abuse/geometry: BVH and k-d tree on degenerate inputs");
 
