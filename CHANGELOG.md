@@ -2,6 +2,81 @@
 
 ## [Unreleased]
 
+## [2.11.5] - 2026-09-09 — cycc 6.6.2: the wrong-code bug is fixed, and the filing was wrong about its scope
+
+Toolchain **6.6.1 → 6.6.2**. No hisab source behaviour change; suite **3538/3538**, every gate green,
+lock 30 → **31** (the new `lib/boxed.cyr`, pulled transitively by `tagged`). No dependency of hisab's
+moved: ganita stays **1.2.4**, sakshi **2.5.1**.
+
+### Fixed — the SIMD destination-slot miscompile filed in 2.11.3 is repaired upstream
+
+The reproducer hisab filed now exits **0** on 6.6.2 and **139** on 6.6.1, same binary. hisab's three
+affected suites pass with the consumer-side hoist **removed** (416 / 351 / 741, rc=0 each), so
+`m4_mul_vec4`'s hoist is **no longer load-bearing** — it is kept only because `m3_mul_vec3` has always
+been written that way, and its comment now says so. ⭐ **A comment claiming a workaround is mandatory,
+left standing after it stops being mandatory, costs the next reader the same investigation twice.**
+
+⛔ **hisab's filing was right about the symptom and wrong about the scope, in two ways that would
+each have shaped a narrower fix.**
+
+1. **Neither derive-specific nor a 6.5.71 regression** — it was filed as both. All **21**
+   `f64v_*`/`f32v_*`/`f32v8_*`/`f64v256_*`/`iv_*` handlers took `var vbase = GFLC(S)` without raising
+   `GFLC` until every argument was parsed, so any argument allocating a frame local bound it over the
+   intrinsic's own destination. Reachable via `callptr` since **6.0.70** and `#inline` since
+   **6.5.63**; 6.5.71 merely removed the real `call` that had been forcing the spill by accident.
+   ⚠ **The bisect found the release that EXPOSED the bug and I reported it as the release that
+   caused it.** A first-bad-version is evidence about *visibility*, not about *origin* — and the
+   filing's own Root-cause section said "older than 6.5.71" while its header contradicted it.
+2. **The severity was understated.** The filing called the silent out-of-bounds write the unlucky
+   case. Upstream measured both modes deterministically: with the register picker on it faults; with
+   `CYRIUS_REGALLOC_PICKER_CAP=0` it **exits 0 and writes the result into the argument object**.
+
+### Fixed — a landmine hisab has documented since 2.3.1, and documented for the wrong reason
+
+Found upstream *while writing the test* for the above: a bare SIMD intrinsic at **top level**
+compiled clean and SIGSEGV'd on every release checked, because these handlers stash operands in
+**frame** slots and top-level code has no frame. 6.6.2 refuses with
+`SIMD intrinsics must be called inside a function`.
+
+⚠ **`src/vec4.cyr` has carried this rule since 2.3.1 with the wrong cause attached** — it blamed a
+misaligned stack for SSE. Corrected. Verified from the consumer side, identical source both ways:
+6.6.1 builds `OK` then exits **139**; 6.6.2 rejects at compile time.
+
+### Performance
+
+**No change is claimed — 6.6.2 is performance-neutral for hisab**, which is the interesting result
+given it rewrote the operand handling of all 21 SIMD intrinsics.
+
+⚠ **Two rows looked like regressions and are not, and the check that settled it is per-benchmark
+rather than global.** `vec4_dot_x64` read +22.85% and `vec3_dot_x64` +14.01% against a *global* p90
+noise band. Their raw runs say otherwise:
+
+| benchmark | 6.6.1 runs | 6.6.2 runs |
+|---|---|---|
+| `vec4_dot_x64` | 295, 287 ns | 286, **429** ns |
+| `vec3_dot_x64` | 386, 385 ns | 381, **498** ns |
+
+The *first* 6.6.2 run matches 6.6.1 to within 1%; the second spiked. A single outlier in one run, not
+a regression — and every other SIMD row (`vec3_add`, `vec3_cross`, `quat_mul`, `m4_mul_x16`) is flat.
+⭐ **A global noise band is the wrong instrument when one benchmark is 50x noisier than the median**;
+comparing each benchmark's move against *its own* run-to-run spread is what separated these.
+
+`ease_in_out` "6 → 7 ns" is integer-nanosecond quantisation on a 7 ns value, not a measurement.
+
+### Notes
+
+- **hisab is not exposed to 6.6.2's headline `tagged` repair.** 6.6.0 deleted `tagged_new`/`payload`
+  and **silently redefined `tag()` and `is_tag()` at unchanged arity** — the one class a consumer
+  build cannot catch. Checked rather than assumed: hisab calls **none** of
+  `tagged_new`/`tag`/`payload`/`is_tag`/`is_some`/`is_none`/`is_ok`/`is_err`, so it passed through
+  6.6.0 and 6.6.1 unaffected. ⭐ **The rule that release establishes is worth carrying here: a name
+  whose meaning changed must be RETIRED, not redefined.**
+- The enum ≥ 2^62 Critical still does not reach hisab — re-scanned after the bump, **938** enum
+  constants across `src/`, `lib/` and `dist/`, none at or above the threshold.
+- All 31 vendored files byte-match the **6.6.2 snapshot itself**, not old-pin vs new-pin.
+- Nothing else in 6.6.2 touches hisab's surface (`map_u64` sentinels, `object;` libc exports,
+  `--allow-undef`, foreign-src builds, lexer token numbering).
+
 ## [2.11.4] - 2026-09-09 — off the deprecated ganita aliases, the pow repair, and two of my own instruments caught wrong
 
 ganita 1.2.4 marks the bare `mat_*` and `f64_*` spellings **deprecated aliases, migration window

@@ -105,21 +105,28 @@ fn m4_mul(a, b) {
 
 # Mat4 * Vec4 — SIMD: result = Σ_k v[k]·M_col_k (M's columns contiguous).
 #
-# ⛔ THE HOIST OF vx..vw IS LOAD-BEARING, NOT STYLE. A `#derive(accessors)`
-# getter passed DIRECTLY as an `f64v_*` argument miscompiles on cycc >= 6.5.71:
-# the intrinsic's expansion reads its destination pointer from a stack slot that
-# the accessor's inline-replay path leaves UNWRITTEN, so the packed store goes to
-# whatever garbage the slot held. `movupd %xmm0,(%rdx,%rsi,8)` with %rdx = 12,
-# read from -0x50(%rbp), a slot no instruction in the function ever stores to —
-# while the src and scalar slots ARE stored. Bisected: 6.5.70 OK, 6.5.71 broken
-# (that release made derive accessors reach the inline-replay path, callq 7 -> 3,
-# removing the call that had incidentally forced the spill). Reproduced on 6.5.71,
-# 6.5.72, 6.5.73, 6.6.0, 6.6.1; three of five suites SIGSEGV'd before this hoist.
-# [measured: scratch harness, not reproducible in-tree -- see the issue doc]
-# Same file, same context: a plain fn accessor and a raw `load64` both compile
-# correctly — only the derived getter as a direct argument fails.
-# `m3_mul_vec3` has always hoisted; this function was the lone inconsistency.
-# Filed upstream: cyrius/docs/development/issues/2026-09-09-hisab-derive-accessor-simd-dst-slot.md
+# ⚠ THE HOIST OF vx..vw IS NO LONGER LOAD-BEARING — FIXED UPSTREAM IN cycc 6.6.2.
+# It is kept because `m3_mul_vec3` has always been written this way and mat4 was
+# the lone inconsistency, NOT because removing it breaks anything. Verified rather
+# than assumed: reverting to the inline `HVec4_x(v)` form passes all three suites
+# that used to SIGSEGV (hisab 416, foundation 351, abuse 741, rc=0 each) on 6.6.2.
+# [measured: scratch harness, not reproducible in-tree, 2026-09-09; cycc 6.6.2]
+# **Do not leave a comment claiming a workaround is required after it stops being
+# required** — a false alarm costs the next reader the same investigation twice.
+#
+# History, kept because the shape recurs: 2.11.3 hit this as a wrong-code bug on
+# the 6.6.1 bump. The intrinsic read its destination pointer from a frame slot
+# nothing ever wrote — `movupd %xmm0,(%rdx,%rsi,8)` with %rdx = 12, loaded from
+# -0x50(%rbp), read once and stored to zero times, while the src and scalar slots
+# WERE stored. hisab filed it as derive-specific and a 6.5.71 regression; ⭐ upstream
+# established it was NEITHER. All 21 `f64v_*`/`f32v_*`/`f32v8_*`/`f64v256_*`/`iv_*`
+# handlers took `var vbase = GFLC(S)` without raising GFLC until every argument was
+# parsed, so any argument allocating a frame local bound it over the destination —
+# reachable via `callptr` since 6.0.70 and `#inline` since 6.5.63. 6.5.71 only
+# removed the incidental call that had been forcing the spill. **The bisect found
+# the release that EXPOSED it, and I reported that as the release that caused it.**
+# Fixed by one `_SIMD_RESERVE(S, base, n)` across all 21 handlers.
+# See cyrius/docs/development/issues/archived/2026-09-09-hisab-derive-accessor-simd-dst-slot.md
 #must_use
 fn m4_mul_vec4(m, v) {
     var r = alloc(32);

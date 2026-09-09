@@ -34,8 +34,19 @@
 #
 # Layout note for anyone porting old code: the boxed form published `tag` at +0 and `payload`
 # at +8 as a USER-FACING contract, and hand-rolled `load64(p)` / `load64(p + 8)` reads exist in
-# the wild. Those reads must become the two bound variables — a register pair dereferenced as a
-# pointer is a plausible-looking address, so they do NOT fail loudly on their own.
+# the wild. Those reads must become the two bound variables.
+#
+# ⛔ CORRECTED v6.6.2 — this said such reads "do NOT fail loudly on their own". They DO.
+# MEASURED: a stale `load64(p + 8)` against a value-form Result exits **139 (SIGSEGV)**, because
+# the thing being dereferenced is the TAG, and the tags are **0 and 1** — addresses no process
+# ever has mapped. This note pointed the reader at the wrong hazard class and would have had them
+# looking for silent corruption where the failure is in fact immediate and obvious.
+#
+# ⚠ THE GENUINELY SILENT CLASS IS THE SAME-ARITY PREDICATES, not the raw reads. `is_ok`,
+# `is_err_result`, `is_none`, `is_some`, `is_left`, `is_right` and `is_tag` kept their arity and
+# had their bodies rewritten from `load64(box)` to a direct register compare. On a box every one
+# of them answers wrongly, compiling clean and exiting 0 — `is_some(box)` and `is_none(box)` are
+# BOTH 0. Boxes go through `boxed_*` (lib/boxed.cyr) and nothing else.
 
 enum Result<T, E>: stack {
     Ok(v);

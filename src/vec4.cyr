@@ -7,9 +7,15 @@
 # SIMD: HVec4 is exactly 4 contiguous f64 (32 bytes), so the packed
 # `f64v_*` builtins operate on it directly with n=4 (even — no
 # over-read past the allocation). Intrinsics are global (no include).
-# They MUST stay wrapped in functions: a bare `f64v_*` call from a
-# top-level `.tcyr` statement SIGSEGVs on a misaligned stack; reached
-# through a function prologue (as here) the stack is correctly aligned.
+# They MUST stay wrapped in functions — and since cycc 6.6.2 the
+# COMPILER enforces that rather than leaving it to a runtime crash.
+# ⭐ The old reason recorded here was wrong: it blamed a misaligned
+# stack. The real one is that these intrinsics stash their operands in
+# FRAME slots and top-level code has no frame. 6.6.2 refuses with
+# `SIMD intrinsics must be called inside a function`; before it the
+# same source compiled clean and SIGSEGV'd at run time on every
+# release checked. Verified both ways on 6.6.1 (OK, then exit 139)
+# and 6.6.2 (compile error). [measured: scratch harness, 2026-09-09]
 
 #derive(accessors)
 struct HVec4 { x; y; z; w; }

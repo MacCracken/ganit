@@ -4,7 +4,7 @@ Tracked dependency version constraints and upgrade paths.
 
 ## Cyrius Toolchain
 
-**Status:** Pinned to **6.6.1** via `cyrius.cyml [package].cyrius` (legacy `.cyrius-toolchain` removed; CI/release grep the manifest directly).
+**Status:** Pinned to **6.6.2** via `cyrius.cyml [package].cyrius` (legacy `.cyrius-toolchain` removed; CI/release grep the manifest directly).
 
 **Note:** Cyrius stdlib provides dense LU, Cholesky, QR, SVD, eigendecomposition. As of 6.2.x these live in the new **`ganita`** umbrella module (which re-exports the former `matrix`/`linalg` API in full and also hosts the transcendentals). This is a critical dependency — hisab's `linalg_ext.cyr` wraps these functions. The `[deps] stdlib` list pulls `ganita` (not `matrix`/`linalg` — listing those alongside `ganita` collides).
 
@@ -20,6 +20,34 @@ Tracked dependency version constraints and upgrade paths.
 - 6.0.2: lockfile/vendoring fix — `cyrius deps` now hashes all `.cyr` under `lib/` and writes a real lock (the empty 0-byte `cyrius.lock` bug present since 5.11.8); vendored deps are regular file-copies, not the dangling symlinks that broke CI.
 - **6.0.14**: clean build/test (901/901 as of v2.4.6). Migration was manifest-only (pin bump + sakshi resolution); the 34 math modules moved `lib/`→`src/` so the committed `lib/` no longer shadows the toolchain's version-pinned stdlib snapshot.
 - **6.2.11** (v2.6.6): stdlib math reorg. The transcendentals (`f64_acos`/`f64_asin`/`f64_atan2`/`f64_pow`/`f64_sinh`/`f64_cosh`/`f64_tanh` + hyperbolic inverses) moved out of `math` into the new **`ganita`** module, which also subsumes `matrix`/`linalg` (re-exports their full API). `math` now ships NaN-correct `f64_le`/`f64_ge` (hisab dropped its local copies). `[deps] stdlib`: `+ganita`, `−matrix`, `−linalg`. Clean build, 957/957 tests, all gates green. Tracked-issue re-verify: **3 of 5 fixed** (modules-substring, 18-arg-fn scramble, lint rc-as-count → all archived); for-empty-clauses still open. Vendored `lib/` re-resolved via `cyrius deps` (30 files — **not** the full-snapshot `cyrius lib sync`, which over-vendors unused platform variants and breaks `deps --verify` on a spurious `process_agnos.cyr` entry); `cyrius.lock` 30 deps, verify 30/30.
+- **6.6.2** (current pin, v2.11.5): **repairs the wrong-code bug hisab filed on the 6.6.1 bump.**
+  Stdlib delta is `result.cyr`, `tagged.cyr` and the NEW `lib/boxed.cyr` (pulled transitively by
+  `tagged`; lock 30 -> 31). ganita stays 1.2.4, sakshi stays 2.5.1. All 31 vendored files
+  byte-match the **6.6.2 snapshot itself**.
+
+  ⭐ **The SIMD destination-slot miscompile is FIXED**, verified from the consumer side: hisab's own
+  filed reproducer exits **0** on 6.6.2 and **139** on 6.6.1, same binary, and the three suites that
+  used to SIGSEGV pass with `m4_mul_vec4`'s hoist REMOVED. The hoist is kept for consistency with
+  `m3_mul_vec3` only, and its comment no longer claims otherwise.
+
+  ⛔ **hisab's filing was wrong about the scope in two ways.** It was filed as derive-specific and as
+  a 6.5.71 regression and was **neither** — all 21 `f64v_*`/`f32v_*`/`f32v8_*`/`f64v256_*`/`iv_*`
+  handlers bound an argument's frame local over their own destination slot, reachable via `callptr`
+  since 6.0.70. **A first-bad-version is evidence about visibility, not origin.** Severity was
+  understated too: under `CYRIUS_REGALLOC_PICKER_CAP=0` it exits 0 and writes into the argument
+  object rather than faulting.
+
+  ⚠ **A second SIMD fix retires a landmine this repo documented since 2.3.1 with the WRONG CAUSE.**
+  A bare intrinsic at top level compiled clean and SIGSEGV'd on every release — not SSE stack
+  misalignment as `src/vec4.cyr` claimed, but because the handlers stash operands in FRAME slots and
+  top-level code has no frame. 6.6.2 refuses at compile time. Corrected in `vec4.cyr`.
+
+  ⛔ **NOT EXPOSED, BUT WORTH KNOWING: 6.6.0 silently redefined `tag()` and `is_tag()` at unchanged
+  arity** — `tag(box)` returned the pointer, `is_tag` compared pointer to tag, both compiling and
+  running clean. hisab calls neither (checked, not assumed), so it passed through 6.6.0/6.6.1
+  unaffected. **The rule 6.6.2 establishes: a name whose meaning changed must be RETIRED, not
+  redefined** — same-arity redefinition is the one class a consumer build structurally cannot catch.
+
 - **6.6.1** (current pin, v2.11.3): **forty-odd releases from 6.5.33, crossing a minor.** Not
   compiler-only: **ganita 1.1.4 → 1.2.4**, plus `io.cyr`, `math.cyr`, `result.cyr`, `tagged.cyr`
   and four syscalls variants. sakshi 2.4.11 → **2.5.1** alongside it. All 30 `lib/` files are
