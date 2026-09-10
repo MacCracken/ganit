@@ -18,6 +18,16 @@
 var _GA_F64_QUARTER     = 0x3FD0_0000_0000_0000;  # 0.25
 var _GA_F64_NEG_HALF    = 0xBFE0_0000_0000_0000;  # -0.5
 var _GA_F64_NEG_ONE     = 0xBFF0_0000_0000_0000;  # -1.0
+var _GA_F64_TINY        = F64_TINY;      # alias of error.cyr (DBL_MIN)
+# 8 x DBL_EPSILON = 2^-49. The null-blade residual bound, MEASURED rather than
+# reused: over 3000 pseudo-random conformal points per scale, max |nsq| / sum b_i^2
+# is 2.13e-16 at coordinate scale 1 and 1.11e-16 from 1e2 to 1e8 — flat, i.e. the
+# residual really is relative. 8x is the margin over every measured null.
+# ⚠ NOT EPSILON_F64: at 1e-12 the bound is ~4500x looser than the measured noise
+# and discards resolvable geometry — a sphere of radius 10 centred at 1e4 has
+# nsq = 100 exactly (ratio 2.0e-14, 90x above the floor) and would be called null.
+# [measured: docs/audit/2026-09-09-epsilon-open.json]
+var _CGA_NULL_TOL       = 0x3CE0_0000_0000_0000;  # 1.7763568394002505e-15
 var _GA_F64_POS_INF = F64_POS_INF;   # alias of error.cyr
 var _GA_F64_NEG_INF     = 0xFFF0_0000_0000_0000;  # -Infinity
 # _GA_F64_001 (0.01) is gone: its only consumer was time_of_impact's sampling
@@ -1053,18 +1063,32 @@ fn _epa_degenerate_normal(sup_a, shape_a, sup_b, shape_b) {
     # First vertex genuinely distinct from v0 gives the hull's primary direction.
     var e1 = hvec3_zero();
     for (var i = 1; i < n; i = i + 1) {
-        if (f64_lt(hvec3_length_sq(e1), EPSILON_F64) == 1) {
+        # ⛔ `hvec3_length_sq(e1)` is a SQUARED length — degree two in the world
+        # units — against the unsquared 1e-12, so a small-but-real simplex edge
+        # read as "not yet found" and EPA fell back to a FABRICATED unit_x normal.
+        # ⭐ "Genuinely distinct from v0" is an exact question, and this file's own
+        # 2.9.0 repair at :266 already answers it that way.
+        # [measured: docs/audit/2026-09-09-epsilon-open.json]
+        if (f64_gt(hvec3_length_sq(e1), 0) == 0) {
             e1 = hvec3_sub(_gjk_simplex_get(simplex, i), v0);
         }
     }
-    if (f64_lt(hvec3_length_sq(e1), EPSILON_F64) == 1) { return hvec3_unit_x(); }
+    if (f64_gt(hvec3_length_sq(e1), 0) == 0) { return hvec3_unit_x(); }
 
     # A second direction off that line makes the set planar, and the plane normal
     # is the cross product. If no such direction exists the set is a segment, and
     # any perpendicular to it escapes.
     for (var j = 1; j < n; j = j + 1) {
-        var c = hvec3_cross(e1, hvec3_sub(_gjk_simplex_get(simplex, j), v0));
-        if (f64_gt(hvec3_length_sq(c), EPSILON_F64) == 1) { return _epa_unit(c); }
+        var ej = hvec3_sub(_gjk_simplex_get(simplex, j), v0);
+        var c = hvec3_cross(e1, ej);
+        # ⭐ COLINEARITY IS AN ANGLE, not a magnitude. |e1 x ej| / (|e1| |ej|) is
+        # sin(theta) — dimensionless and bounded — which is the form this file
+        # already uses at :530 and :682. The squared-vs-unsquared comparison here
+        # made the same three points colinear or not depending on their units.
+        if (f64_le(hvec3_length(c),
+            f64_mul(EPSILON_F64, f64_mul(hvec3_length(e1), hvec3_length(ej)))) == 0) {
+            return _epa_unit(c);
+        }
     }
     return _epa_unit(_epa_perp(e1));
 }
@@ -1513,7 +1537,7 @@ fn _bvh_ray_hits_aabb(ray, aabb) {
     var t_max = _GA_F64_POS_INF;
 
     # X slab
-    if (f64_lt(f64_abs(dx), EPSILON_F64) == 1) {
+    if (f64_lt(f64_abs(dx), _GA_F64_TINY) == 1) {
         if (f64_lt(ox, HVec3_x(bmin)) == 1) { return 0; }
         if (f64_gt(ox, HVec3_x(bmax)) == 1) { return 0; }
     } else {
@@ -1527,7 +1551,7 @@ fn _bvh_ray_hits_aabb(ray, aabb) {
     }
 
     # Y slab
-    if (f64_lt(f64_abs(dy), EPSILON_F64) == 1) {
+    if (f64_lt(f64_abs(dy), _GA_F64_TINY) == 1) {
         if (f64_lt(oy, HVec3_y(bmin)) == 1) { return 0; }
         if (f64_gt(oy, HVec3_y(bmax)) == 1) { return 0; }
     } else {
@@ -1541,7 +1565,7 @@ fn _bvh_ray_hits_aabb(ray, aabb) {
     }
 
     # Z slab
-    if (f64_lt(f64_abs(dz), EPSILON_F64) == 1) {
+    if (f64_lt(f64_abs(dz), _GA_F64_TINY) == 1) {
         if (f64_lt(oz, HVec3_z(bmin)) == 1) { return 0; }
         if (f64_gt(oz, HVec3_z(bmax)) == 1) { return 0; }
     } else {
@@ -2015,7 +2039,11 @@ fn time_of_impact(support_a, shape_a, vel_a, support_b, shape_b, vel_b, max_t, o
 
     var rel_vel = hvec3_sub(vel_b, vel_a);
     var speed = hvec3_length(rel_vel);
-    if (f64_lt(speed, EPSILON_F64) == 1) { return 0; }
+    # ⛔ A relative SPEED, dimensions L/T, against an absolute 1e-12 — so whether
+    # two bodies counted as "not approaching" depended on metres-per-second versus
+    # kilometres-per-hour. `_epa_unit` in this same file already uses the exact
+    # test; only an exactly zero relative velocity means no impact.
+    if (f64_gt(speed, 0) == 0) { return 0; }
 
     # Contact tolerance from the geometry, not from the horizon: the extent of
     # the Minkowski difference along the direction of travel is exactly
@@ -2265,14 +2293,27 @@ fn cga_mv_reverse(mv) {
 }
 
 # Geometric product of two multivectors
+# ⛔ THE EIGHT SKIP-TESTS IN THESE FOUR PRODUCTS GUARDED NOTHING. A blade
+# coefficient is not a denominator and not a tolerance — it is one FACTOR of the
+# term a_i * b_j, and these products are exactly BILINEAR, so any non-zero
+# threshold makes them non-bilinear: scale a multivector down and terms start
+# vanishing that contributed at the original scale. The coefficients carry the
+# caller's units (cga_point writes (x^2 +- 1)/2), so the threshold was scale
+# dependent as well as unnecessary.
+# ⭐ The skip exists purely to avoid work on structurally absent blades, so the
+# test is exactly `!= 0`. ⚠ Numeric, not a bit compare, so -0.0 is treated as the
+# zero it is; and NaN is KEPT rather than silently deleted from the multivector.
+# ⚠ Both tests in a product must move together — measured, repairing one alone
+# leaves the result non-bilinear in the OTHER operand.
+# [measured: docs/audit/2026-09-09-epsilon-open.json]
 fn cga_geometric_product(a, b) {
     var r = cga_mv_zero();
     for (var gi = 0; gi < 32; gi = gi + 1) {
         var ai = load64(a + gi * 8);
-        if (f64_lt(f64_abs(ai), EPSILON_F64) != 1) {
+        if (f64_eq(ai, f64_from(0)) == 0) {
             for (var gj = 0; gj < 32; gj = gj + 1) {
                 var bj = load64(b + gj * 8);
-                if (f64_lt(f64_abs(bj), EPSILON_F64) != 1) {
+                if (f64_eq(bj, f64_from(0)) == 0) {
                     var packed = _cga_geo_blades(gi, gj);
                     var sign = load64(packed);
                     var blade = load64(packed + 8);
@@ -2294,10 +2335,10 @@ fn cga_outer_product(a, b) {
     var r = cga_mv_zero();
     for (var gi = 0; gi < 32; gi = gi + 1) {
         var ai = load64(a + gi * 8);
-        if (f64_lt(f64_abs(ai), EPSILON_F64) != 1) {
+        if (f64_eq(ai, f64_from(0)) == 0) {
             for (var gj = 0; gj < 32; gj = gj + 1) {
                 var bj = load64(b + gj * 8);
-                if (f64_lt(f64_abs(bj), EPSILON_F64) != 1) {
+                if (f64_eq(bj, f64_from(0)) == 0) {
                     var grade_sum = _cga_blade_grade(gi) + _cga_blade_grade(gj);
                     var packed = _cga_geo_blades(gi, gj);
                     var sign = load64(packed);
@@ -2325,10 +2366,10 @@ fn cga_left_contraction(a, b) {
     var r = cga_mv_zero();
     for (var gi = 0; gi < 32; gi = gi + 1) {
         var ai = load64(a + gi * 8);
-        if (f64_lt(f64_abs(ai), EPSILON_F64) != 1) {
+        if (f64_eq(ai, f64_from(0)) == 0) {
             for (var gj = 0; gj < 32; gj = gj + 1) {
                 var bj = load64(b + gj * 8);
-                if (f64_lt(f64_abs(bj), EPSILON_F64) != 1) {
+                if (f64_eq(bj, f64_from(0)) == 0) {
                     var target = _cga_blade_grade(gj) - _cga_blade_grade(gi);
                     var packed = _cga_geo_blades(gi, gj);
                     var sign = load64(packed);
@@ -2355,10 +2396,10 @@ fn cga_right_contraction(a, b) {
     var r = cga_mv_zero();
     for (var gi = 0; gi < 32; gi = gi + 1) {
         var ai = load64(a + gi * 8);
-        if (f64_lt(f64_abs(ai), EPSILON_F64) != 1) {
+        if (f64_eq(ai, f64_from(0)) == 0) {
             for (var gj = 0; gj < 32; gj = gj + 1) {
                 var bj = load64(b + gj * 8);
-                if (f64_lt(f64_abs(bj), EPSILON_F64) != 1) {
+                if (f64_eq(bj, f64_from(0)) == 0) {
                     var target = _cga_blade_grade(gi) - _cga_blade_grade(gj);
                     var packed = _cga_geo_blades(gi, gj);
                     var sign = load64(packed);
@@ -2426,7 +2467,26 @@ fn cga_dual(x) {
 # conformal points are null, so projecting onto them is undefined.
 fn cga_blade_inverse(b) {
     var nsq = cga_norm_sq(b);
-    if (f64_lt(f64_abs(nsq), EPSILON_F64) == 1) { return cga_mv_zero(); }
+    # ⛔ ONE LINE DOING TWO DIFFERENT JOBS. `nsq` is a norm SQUARED (degree two in
+    # the blade's scale) against an unsquared absolute 1e-12, and it was being
+    # asked both "can I divide by this" and "is this blade null" — which need
+    # different tests.
+    # ⭐ (1) THE DIVISION fails only at zero, and this case is common rather than
+    # theoretical: nsq is bit-exactly 0 for every conformal point, and for an
+    # origin sphere of radius below ~1.05e-8 or above ~1e8.
+    # [measured: docs/audit/2026-09-09-epsilon-open.json]
+    if (f64_lt(f64_abs(nsq), F64_TINY) == 1) { return cga_mv_zero(); }
+    # ⭐ (2) NULLNESS is relative to the blade's own magnitude, and the bound is
+    # measured (see _CGA_NULL_TOL) rather than borrowed from EPSILON_F64.
+    # [measured: docs/audit/2026-09-09-epsilon-open.json]
+    var magsq = f64_from(0);
+    for (var bi = 0; bi < 32; bi = bi + 1) {
+        var bc = load64(b + bi * 8);
+        magsq = f64_add(magsq, f64_mul(bc, bc));
+    }
+    if (f64_le(f64_abs(nsq), f64_mul(_CGA_NULL_TOL, magsq)) == 1) {
+        return cga_mv_zero();
+    }
     return cga_mv_scale(cga_mv_reverse(b), f64_div(F64_ONE, nsq));
 }
 
@@ -2474,10 +2534,14 @@ fn cga_sphere(cx, cy, cz, r) {
 fn cga_plane(nx, ny, nz, d) {
     var mv = cga_mv_zero();
     var norm = f64_sqrt(f64_add(f64_add(f64_mul(nx, nx), f64_mul(ny, ny)), f64_mul(nz, nz)));
-    var inv = F64_ONE;
-    if (f64_gt(norm, EPSILON_F64) == 1) {
-        inv = f64_div(F64_ONE, norm);
-    }
+    # ⛔ `norm` is the LENGTH of the caller's normal, in the caller's units,
+    # against an absolute 1e-12 — and when the test failed it left `inv = 1` and
+    # built a plane from the UNNORMALISED normal, which is not the plane the
+    # caller asked for and carries no signal that anything went wrong.
+    # ⭐ A zero normal has no plane at all, so that is the only rejection; every
+    # other normal divides.
+    if (f64_gt(norm, 0) == 0) { return cga_mv_zero(); }
+    var inv = f64_div(F64_ONE, norm);
     cga_mv_set(mv, 1, f64_mul(nx, inv));
     cga_mv_set(mv, 2, f64_mul(ny, inv));
     cga_mv_set(mv, 3, f64_mul(nz, inv));
@@ -2513,7 +2577,10 @@ fn cga_translator(tx, ty, tz) {
 # Axis (ax, ay, az) is normalized internally.
 fn cga_rotor(ax, ay, az, angle) {
     var norm = f64_sqrt(f64_add(f64_add(f64_mul(ax, ax), f64_mul(ay, ay)), f64_mul(az, az)));
-    if (f64_lt(norm, EPSILON_F64) == 1) {
+    # ⛔ The axis LENGTH is a unit choice — the header one line up even says the
+    # axis is normalised internally — so an absolute 1e-12 turned a real rotation
+    # into the identity rotor for a short axis vector, with no error channel.
+    if (f64_lt(norm, _GA_F64_TINY) == 1) {
         # Degenerate axis: return identity
         var mv = cga_mv_zero();
         cga_mv_set(mv, 0, F64_ONE);

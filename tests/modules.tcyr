@@ -10713,6 +10713,354 @@ assert(calc_monotone_cubic(_ce_rx, _ce_ry, 4,
 # ⭐ `_col_point_in_tri` in the same file has always used the exact sign test on
 # this same quantity, so the repair is consistency, not a new rule.
 
+# ================================================================
+# 2.15.0 — geo_advanced: bilinearity, slabs and a measured null bound
+# ================================================================
+# ⛔ EIGHT OF THE EIGHTEEN GUARDED NOTHING AT ALL. The CGA products skipped a term
+# when a blade COEFFICIENT was below 1e-12 — but a coefficient is not a
+# denominator, it is one factor of a_i*b_j, and these products are exactly
+# BILINEAR. Any non-zero threshold destroys that: scale a multivector down and
+# terms start vanishing that contributed at the original scale.
+# ⛔ The BVH slab tests guarded `1/d` with an absolute cut on a ray direction that
+# `GeoRay` does not require to be unit, so a short direction vector made whole
+# slabs "parallel" and the traversal missed real hits.
+# ⭐ And `cga_blade_inverse` was one line doing two jobs — "can I divide by this"
+# and "is this blade null" — which need different tests. The null bound is now
+# MEASURED (8 x DBL_EPSILON) rather than borrowed: at 1e-12 it is ~4500x looser
+# than the observed residual and discards resolvable geometry.
+# [measured: docs/audit/2026-09-09-epsilon-open.json]
+
+test_group("geo_advanced 2.15.0: CGA bilinearity and BVH slabs");
+
+# --- BILINEARITY. gp(k*a, b) == k*gp(a, b), exactly, at every k. Two general
+# multivectors so the sparse skip actually has terms to skip.
+fn _ga_mv2(s, t, u) {
+    var m = cga_mv_zero();
+    cga_mv_set(m, 0, s);
+    cga_mv_set(m, 1, t);
+    cga_mv_set(m, 2, u);
+    cga_mv_set(m, 6, f64_add(s, t));
+    return m;
+}
+var _GA_RUN = 0;
+var _GA_BAD = 0;
+for (var _ga_e = 0; _ga_e < 400; _ga_e = _ga_e + 1) {
+    var _ga_k = (1023 - _ga_e) << 52;
+    var _ga_a1 = _ga_mv2(F64_ONE, F64_TWO, f64_from(3));
+    var _ga_b = _ga_mv2(f64_from(5), f64_from(7), f64_from(11));
+    var _ga_ak = _ga_mv2(_ga_k, f64_mul(F64_TWO, _ga_k), f64_mul(f64_from(3), _ga_k));
+    var _ga_r1 = cga_geometric_product(_ga_a1, _ga_b);
+    var _ga_rk = cga_geometric_product(_ga_ak, _ga_b);
+    _GA_RUN = _GA_RUN + 1;
+    for (var _ga_i = 0; _ga_i < 32; _ga_i = _ga_i + 1) {
+        # k * (a.b)_i, bit-exact for a power-of-two k.
+        if (cga_mv_get(_ga_rk, _ga_i)
+          != f64_mul(_ga_k, cga_mv_get(_ga_r1, _ga_i))) {
+            _GA_BAD = _GA_BAD + 1;
+        }
+    }
+    # the OUTER product and both contractions are bilinear in exactly the same way
+    if (cga_mv_get(cga_outer_product(_ga_ak, _ga_b), 6)
+      != f64_mul(_ga_k, cga_mv_get(cga_outer_product(_ga_a1, _ga_b), 6))) {
+        _GA_BAD = _GA_BAD + 1;
+    }
+    if (cga_mv_get(cga_left_contraction(_ga_ak, _ga_b), 0)
+      != f64_mul(_ga_k, cga_mv_get(cga_left_contraction(_ga_a1, _ga_b), 0))) {
+        _GA_BAD = _GA_BAD + 1;
+    }
+    if (cga_mv_get(cga_right_contraction(_ga_ak, _ga_b), 0)
+      != f64_mul(_ga_k, cga_mv_get(cga_right_contraction(_ga_a1, _ga_b), 0))) {
+        _GA_BAD = _GA_BAD + 1;
+    }
+}
+assert_eq(_GA_RUN, 400, "the CGA bilinearity sweep actually ran 400 scales");
+assert_eq(_GA_BAD, 0,
+  "cga products: bilinear in the left operand at every scale from 2^0 to 2^-399");
+
+# --- cga_rotor / cga_plane: the axis and the normal are DIRECTIONS, so their
+# length is a unit choice and the result must not move at all.
+var _GR_RUN = 0;
+var _GR_BAD = 0;
+var _gr_ref = cga_rotor(0, 0, F64_ONE, F64_PI_2);
+var _gp_ref = cga_plane(0, 0, F64_ONE, F64_ONE);
+for (var _gr_e = 0; _gr_e < 400; _gr_e = _gr_e + 1) {
+    var _gr_k = (1023 - _gr_e) << 52;
+    var _gr_r = cga_rotor(0, 0, _gr_k, F64_PI_2);
+    # ⚠ `d` MUST SCALE WITH THE NORMAL. cga_plane divides d by |n| as well, so
+    # (0,0,k,1) is the plane at distance 1/k — a genuinely different plane, not the
+    # same one in other units. The first draft passed a fixed d and "failed" 798
+    # checks against correct output: exactly 2 per scale, the two components that
+    # carry d. [measured: 2 x 399 failing components, 2026-09-10]
+    var _gr_p = cga_plane(0, 0, _gr_k, _gr_k);
+    _GR_RUN = _GR_RUN + 1;
+    for (var _gr_i = 0; _gr_i < 32; _gr_i = _gr_i + 1) {
+        if (cga_mv_get(_gr_r, _gr_i) != cga_mv_get(_gr_ref, _gr_i)) {
+            _GR_BAD = _GR_BAD + 1;
+        }
+        if (cga_mv_get(_gr_p, _gr_i) != cga_mv_get(_gp_ref, _gr_i)) {
+            _GR_BAD = _GR_BAD + 1;
+        }
+    }
+}
+assert_eq(_GR_RUN, 400, "the rotor/plane axis sweep actually ran 400 scales");
+assert_eq(_GR_BAD, 0,
+  "cga_rotor / cga_plane: bit-identical for axis lengths 2^0 down to 2^-399");
+# ⭐ ANTI-DELETION: an exactly zero axis has no rotation and an exactly zero
+# normal has no plane.
+assert_eq(cga_mv_get(cga_rotor(0, 0, 0, F64_PI_2), 0), 0x3FF0000000000000,
+  "cga_rotor: an exactly zero axis still returns the identity rotor");
+assert_eq(cga_mv_get(cga_plane(0, 0, 0, F64_ONE), 1), 0,
+  "cga_plane: an exactly zero normal returns the zero multivector");
+
+# --- BVH SLAB TESTS. `GeoRay` does not require a unit direction — `_graw` builds
+# one directly and so does any caller that sets the field — so `|dx| < 1e-12`
+# declared a slab "parallel" purely because the caller's direction vector was
+# short. The two boxes below straddle x = 1; an x-aligned ray through them hits
+# both at every direction magnitude, because a ray is a set of points and scaling
+# its direction reparameterises it without moving it.
+var _GB_RUN = 0;
+var _GB_BAD = 0;
+var _gb_arr = alloc(16);
+store64(_gb_arr, geo_aabb_new(hvec3_new(0, 0, 0), hvec3_new(F64_ONE, F64_ONE, F64_ONE)));
+store64(_gb_arr + 8, geo_aabb_new(hvec3_new(F64_ONE, 0, 0),
+    hvec3_new(F64_TWO, F64_ONE, F64_ONE)));
+var _gb_tree = bvh_build(_gb_arr, 2);
+for (var _gb_e = 0; _gb_e < 400; _gb_e = _gb_e + 1) {
+    var _gb_k = (1023 - _gb_e) << 52;
+    # ⚠ NOT geo_ray_new — it normalises, which erases the very quantity these
+    # guards get wrong. The y and z components are exactly 0, so the y and z slab
+    # guards fire on EVERY iteration and the x guard on none: all three sites are
+    # exercised, which a diagonal ray would not do.
+    var _gb_r = alloc(sizeof(GeoRay));
+    GeoRay_set_origin(_gb_r, hvec3_new(F64_HALF, F64_HALF, F64_HALF));
+    GeoRay_set_direction(_gb_r, hvec3_new(_gb_k, 0, 0));
+    _GB_RUN = _GB_RUN + 1;
+    if (vec_len(bvh_query_ray(_gb_tree, _gb_r)) != 2) { _GB_BAD = _GB_BAD + 1; }
+}
+assert_eq(_GB_RUN, 400, "the BVH direction-magnitude sweep actually ran 400 scales");
+assert_eq(_GB_BAD, 0,
+  "bvh_query_ray: an interior x-ray hits both boxes for |d| from 2^0 to 2^-399");
+# ⭐ ANTI-DELETION: the parallel-slab branch must still reject a ray that runs
+# alongside the boxes and outside them.
+var _gb_out = alloc(sizeof(GeoRay));
+GeoRay_set_origin(_gb_out, hvec3_new(F64_HALF, f64_from(5), F64_HALF));
+GeoRay_set_direction(_gb_out, hvec3_new(F64_ONE, 0, 0));
+assert_eq(vec_len(bvh_query_ray(_gb_tree, _gb_out)), 0,
+  "bvh_query_ray: a ray parallel to the slabs and outside them still misses");
+
+# --- cga_blade_inverse. nsq(kB) = k^2 nsq(B), so (kB)^-1 = (1/k) B^-1. The old
+# absolute cut on a SQUARED norm called ordinary blades null.
+var _GI_RUN = 0;
+var _GI_BAD = 0;
+var _gi_ref = cga_blade_inverse(_ga_mv2(F64_ONE, F64_TWO, f64_from(3)));
+for (var _gi_e = 0; _gi_e < 250; _gi_e = _gi_e + 1) {
+    var _gi_k = (1023 - _gi_e) << 52;
+    var _gi_b = _ga_mv2(_gi_k, f64_mul(F64_TWO, _gi_k), f64_mul(f64_from(3), _gi_k));
+    var _gi_r = cga_blade_inverse(_gi_b);
+    _GI_RUN = _GI_RUN + 1;
+    for (var _gi_i = 0; _gi_i < 32; _gi_i = _gi_i + 1) {
+        if (cga_mv_get(_gi_r, _gi_i)
+          != f64_div(cga_mv_get(_gi_ref, _gi_i), _gi_k)) {
+            _GI_BAD = _GI_BAD + 1;
+        }
+    }
+}
+assert_eq(_GI_RUN, 250, "the blade-inverse scale sweep actually ran 250 scales");
+assert_eq(_GI_BAD, 0,
+  "cga_blade_inverse: (kB)^-1 = (1/k)B^-1 bit-exact for scales 2^0 to 2^-249");
+# ⭐ ANTI-DELETION, and it is why the two tests are SPLIT: a conformal point is
+# genuinely null — its nsq is bit-exactly 0 — and must still return the zero
+# multivector rather than dividing by it.
+assert_eq(cga_mv_get(cga_blade_inverse(cga_point(F64_ONE, F64_TWO, f64_from(3))), 0), 0,
+  "cga_blade_inverse: a conformal point is null and still inverts to zero");
+# ⭐ AND THE NULL BOUND ITSELF, which the scale sweep cannot reach. Reusing
+# `EPSILON_F64` for it is ~4500x looser than the measured residual and throws away
+# resolvable geometry: a sphere of radius 10 centred at 1e4 has nsq = 100 exactly
+# — a ratio of 2.0e-14 to its own magnitude, 90x above the observed noise floor —
+# yet a 1e-12 relative bound declares it null and returns the zero multivector.
+# It is a real sphere and it must invert. [measured: ratio 2.0e-14 vs floor 2.2e-16]
+var _gi_sph = cga_sphere(f64_from(10000), 0, 0, f64_from(10));
+var _gi_sinv = cga_blade_inverse(_gi_sph);
+var _gi_nz = 0;
+for (var _gi_j = 0; _gi_j < 32; _gi_j = _gi_j + 1) {
+    if (cga_mv_get(_gi_sinv, _gi_j) != 0) { _gi_nz = _gi_nz + 1; }
+}
+assert(_gi_nz > 0,
+  "cga_blade_inverse: a radius-10 sphere at 1e4 is not null and inverts");
+
+# --- _epa_degenerate_normal. It runs only when GJK ends with FEWER THAN FOUR
+# simplex vertices — an exactly tangent contact — so the ordinary EPA tests never
+# reach it. Its two guards compare a SQUARED simplex edge length, and a squared
+# cross product, against the unsquared 1e-12, so both bite as soon as the scene is
+# small: a sphere of radius k touching a box at 2k has simplex edges of order k
+# and their squares of order k^2.
+# ⚠ The tangency normal is +x by continuity with the overlapping case, which is
+# asserted above; here it must stay +x at every scale.
+var _GE_RUN = 0;
+var _GE_BAD = 0;
+var _ge_n = alloc(8);
+var _ge_d = alloc(8);
+for (var _ge_e = 0; _ge_e < 150; _ge_e = _ge_e + 1) {
+    var _ge_k = (1023 - _ge_e) << 52;
+    var _ge_sph = hvec4_new(0, 0, 0, _ge_k);
+    var _ge_box = _mpr_mkbox(f64_mul(F64_TWO, _ge_k), 0, 0, _ge_k, _ge_k, _ge_k);
+    _GE_RUN = _GE_RUN + 1;
+    if (gjk_epa_3d(&_mpr_sup_sphere, _ge_sph, &_mpr_sup_box, _ge_box,
+        _ge_n, _ge_d) != 1) {
+        _GE_BAD = _GE_BAD + 1;
+    } else {
+        if (HVec3_x(load64(_ge_n)) != 0x3FF0000000000000) { _GE_BAD = _GE_BAD + 1; }
+        # ⚠ y is APPROXIMATE and x is EXACT, deliberately. EPA refines
+        # iteratively, so the off-axis component carries its convergence residual
+        # even at unit scale — a bit-exact 0 there fails on correct output at
+        # every scale. The SIGN and magnitude of x is what discriminates.
+        if (f64_gt(f64_abs(HVec3_y(load64(_ge_n))), LOOSE_TOL_M) == 1) {
+            _GE_BAD = _GE_BAD + 1;
+        }
+    }
+}
+# ⚠ 150 decades, and the floor is MEASURED: the x component first goes wrong
+# at 2^-158, where the support functions and the portal arithmetic reach their
+# own limits rather than any guard. The defect being tested bites at ~2^-20,
+# since the guard compares a SQUARED edge length against 1e-12.
+# [measured: first failing decade 158 of 300, 2026-09-10]
+assert_eq(_GE_RUN, 150, "the EPA tangency scale sweep actually ran 150 scales");
+assert_eq(_GE_BAD, 0,
+  "gjk_epa_3d: the tangent normal is exactly +x for scene scales 2^0 to 2^-149");
+
+# ⭐ AND THE PATH THAT ACTUALLY REACHES `_epa_degenerate_normal`: GJK encloses the
+# origin but the Minkowski difference has NO VOLUME, so the portal seed fails too.
+# Two zero-thickness segments crossing at the origin do it — the hull is a planar
+# parallelogram, so the contact normal is +/-z with depth exactly 0.
+# ⚠ THE EXISTING UNIT-SCALE TEST FOR THIS CANNOT DISCRIMINATE, and a reachability
+# probe proved it: replacing the whole function body with a constant +z passes
+# every assertion in the tree, because they check only x = 0, y = 0 and unit
+# length — and +z satisfies all three. Returning +x instead does fail them, so the
+# function IS reached; it is the ASSERTIONS that were too weak, not the coverage.
+# ⛔ Its two guards compare a SQUARED simplex edge length, and a squared cross
+# product, against the unsquared 1e-12, so both bite once the scene is small.
+# [measured: reachability probe with +z (passes) and +x (fails), 2026-09-10]
+var _GD_RUN = 0;
+var _GD_BAD = 0;
+var _gd_n = alloc(8);
+var _gd_d = alloc(8);
+# The unit-scale answer, taken as the reference the whole sweep must reproduce.
+gjk_epa_3d(&_mpr_sup_box, _mpr_mkbox(0, 0, 0, F64_ONE, 0, 0),
+  &_mpr_sup_box, _mpr_mkbox(0, 0, 0, 0, F64_ONE, 0), _gd_n, _gd_d);
+var _gd_ref_x = HVec3_x(load64(_gd_n));
+var _gd_ref_y = HVec3_y(load64(_gd_n));
+var _gd_ref_z = HVec3_z(load64(_gd_n));
+# and it is a real unit vector, not the null HVec3 a failed path would leave.
+assert(f64_approx_eq(f64_add(f64_add(f64_mul(_gd_ref_x, _gd_ref_x),
+        f64_mul(_gd_ref_y, _gd_ref_y)), f64_mul(_gd_ref_z, _gd_ref_z)),
+    F64_ONE, LOOSE_TOL_M) == 1,
+  "the degenerate-simplex reference normal is a unit vector");
+for (var _gd_e = 0; _gd_e < 150; _gd_e = _gd_e + 1) {
+    var _gd_k = (1023 - _gd_e) << 52;
+    var _gd_sa = _mpr_mkbox(0, 0, 0, _gd_k, 0, 0);
+    var _gd_sb = _mpr_mkbox(0, 0, 0, 0, _gd_k, 0);
+    _GD_RUN = _GD_RUN + 1;
+    if (gjk_epa_3d(&_mpr_sup_box, _gd_sa, &_mpr_sup_box, _gd_sb,
+        _gd_n, _gd_d) != 1) {
+        _GD_BAD = _GD_BAD + 1;
+    } else {
+        # ⚠ NOT +/-z, and measuring said so: GJK ends this configuration with a
+        # two-vertex simplex, so the code correctly takes its segment-perpendicular
+        # fallback and returns (-1/sqrt2, -1/sqrt2, 0). The plane normal was my
+        # assumption, not the geometry.
+        # ⭐ The property that DOES hold, and the one that interrogates the guards,
+        # is that the configuration is SELF-SIMILAR: scaling both segments scales
+        # nothing about the direction, so the normal must be bit-identical at every
+        # scale and the depth exactly zero.
+        if (HVec3_x(load64(_gd_n)) != _gd_ref_x) { _GD_BAD = _GD_BAD + 1; }
+        if (HVec3_y(load64(_gd_n)) != _gd_ref_y) { _GD_BAD = _GD_BAD + 1; }
+        if (HVec3_z(load64(_gd_n)) != _gd_ref_z) { _GD_BAD = _GD_BAD + 1; }
+        if (load64(_gd_d) != 0) { _GD_BAD = _GD_BAD + 1; }
+    }
+}
+assert_eq(_GD_RUN, 150, "the degenerate-simplex sweep actually ran 150 scales");
+assert_eq(_GD_BAD, 0,
+  "gjk_epa_3d: the crossing-segment normal is bit-identical at scales to 2^-149");
+
+# ⭐ AND A PLANAR degenerate simplex, which the crossing segments do NOT give.
+# There GJK ends with two vertices, so the code takes its segment-perpendicular
+# branch and the CROSS-PRODUCT test is never the deciding one — measured, two of
+# the three EPA mutants survive that fixture. Two coplanar FLAT boxes give a
+# genuinely planar hull, so the second-direction search runs and the plane normal
+# is the closed form +/-z.
+# [measured: 11-mutant run over geo_advanced.cyr, 2026-09-10]
+var _GF_RUN = 0;
+var _GF_BAD = 0;
+var _gf_n = alloc(8);
+var _gf_d = alloc(8);
+for (var _gf_e = 0; _gf_e < 150; _gf_e = _gf_e + 1) {
+    var _gf_k = (1023 - _gf_e) << 52;
+    var _gf_a = _mpr_mkbox(0, 0, 0, _gf_k, _gf_k, 0);
+    var _gf_b = _mpr_mkbox(f64_mul(_gf_k, F64_HALF), f64_mul(_gf_k, F64_HALF), 0,
+      _gf_k, _gf_k, 0);
+    _GF_RUN = _GF_RUN + 1;
+    if (gjk_epa_3d(&_mpr_sup_box, _gf_a, &_mpr_sup_box, _gf_b, _gf_n, _gf_d) != 1) {
+        _GF_BAD = _GF_BAD + 1;
+    } else {
+        # The affine hull is the z = 0 plane, so the normal is exactly +/-z.
+        if (f64_approx_eq(f64_abs(HVec3_z(load64(_gf_n))), F64_ONE, LOOSE_TOL_M) != 1) {
+            _GF_BAD = _GF_BAD + 1;
+        }
+        if (f64_gt(f64_abs(HVec3_x(load64(_gf_n))), LOOSE_TOL_M) == 1) {
+            _GF_BAD = _GF_BAD + 1;
+        }
+        if (f64_gt(f64_abs(HVec3_y(load64(_gf_n))), LOOSE_TOL_M) == 1) {
+            _GF_BAD = _GF_BAD + 1;
+        }
+        if (load64(_gf_d) != 0) { _GF_BAD = _GF_BAD + 1; }
+    }
+}
+assert_eq(_GF_RUN, 150, "the planar degenerate sweep actually ran 150 scales");
+assert_eq(_GF_BAD, 0,
+  "gjk_epa_3d: coplanar flat boxes give a unit +/-z normal at scales to 2^-149");
+
+# ⚠ ONE EPA MUTANT SURVIVES AND IS RECORDED. Reverting ONLY the loop that PICKS
+# e1 (leaving the early-return guard repaired) passes both fixtures. That is a
+# genuine equivalence for these hulls rather than a hole: the loop chooses which
+# spanning edge to use, and for a planar or segment hull ANY non-degenerate edge
+# spans the same affine hull, so the plane normal is unchanged. The observable
+# consequence of the old test — e1 left at zero and the fabricated unit_x returned
+# — belongs to the early-return guard, and that mutant IS killed above.
+# [measured: 11-mutant run over geo_advanced.cyr, 10 killed / 1 survivor]
+
+# --- time_of_impact. `speed` is a relative SPEED, dimensions L/T, so an absolute
+# 1e-12 made "are these bodies approaching?" depend on metres-per-second versus
+# kilometres-per-hour. Two unit spheres 5 apart close over 3 units of distance, so
+# scaling the velocity by k scales the impact TIME by 1/k — and max_t with it.
+var _GT_RUN = 0;
+var _GT_BAD = 0;
+var _gt_a = hvec4_new(0, 0, 0, F64_ONE);
+var _gt_b = hvec4_new(f64_from(5), 0, 0, F64_ONE);
+var _gt_t = alloc(8);
+var _gt_n = alloc(8);
+for (var _gt_e = 0; _gt_e < 300; _gt_e = _gt_e + 1) {
+    var _gt_k = (1023 - _gt_e) << 52;
+    var _gt_vel = hvec3_new(f64_neg(_gt_k), 0, 0);
+    var _gt_max = f64_mul(f64_from(10), (1023 + _gt_e) << 52);   # 10/k
+    _GT_RUN = _GT_RUN + 1;
+    if (time_of_impact(&_mpr_sup_sphere, _gt_a, hvec3_zero(),
+        &_mpr_sup_sphere, _gt_b, _gt_vel, _gt_max, _gt_t, _gt_n) != 1) {
+        _GT_BAD = _GT_BAD + 1;
+    } else {
+        # t*k is the scale-free impact distance, and it is 3 for these spheres.
+        var _gt_d = f64_mul(load64(_gt_t), _gt_k);
+        if (f64_gt(_gt_d, F64_TWO) != 1) { _GT_BAD = _GT_BAD + 1; }
+        if (f64_lt(_gt_d, f64_from(4)) != 1) { _GT_BAD = _GT_BAD + 1; }
+    }
+}
+assert_eq(_GT_RUN, 300, "the time_of_impact speed sweep actually ran 300 scales");
+assert_eq(_GT_BAD, 0,
+  "time_of_impact: impact distance is 3 for closing speeds from 2^0 to 2^-299");
+# ⭐ ANTI-DELETION: two bodies with exactly equal velocity never collide.
+assert_eq(time_of_impact(&_mpr_sup_sphere, _gt_a, hvec3_zero(),
+    &_mpr_sup_sphere, _gt_b, hvec3_zero(), f64_from(10), _gt_t, _gt_n), 0,
+  "time_of_impact: an exactly zero relative velocity is still no impact");
+
 test_group("collision_core 2.15.0: order, sign and inverse mass are scale-free");
 
 # --- triangulate_polygon / _col_ring_is_convex. A square is a square at every
