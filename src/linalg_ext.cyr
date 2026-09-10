@@ -85,7 +85,14 @@ fn csr_from_dense(dense_mat) {
         var j = 0;
         while (j < ncols) {
             var v = ganita_mat_get(dense_mat, i, j);
-            if (f64_gt(f64_abs(v), EPSILON_F64) == 1) {
+            # ⛔ SPARSITY IS A STRUCTURAL QUESTION, NOT A TOLERANCE ONE. An entry
+            # is stored or it is not, and `|A_ij| > 1e-12` made that depend on the
+            # caller's units — a matrix in millimetres kept entries a matrix in
+            # metres silently dropped. ⚠ AND THE TWO PASSES MUST AGREE EXACTLY:
+            # this test counts the entries and the identical one below emits them,
+            # so any disagreement mis-sizes the arrays.
+            # [measured: docs/audit/2026-09-09-epsilon-open.json]
+            if (f64_eq(v, f64_from(0)) == 0) {
                 count = count + 1;
             }
             j = j + 1;
@@ -104,7 +111,8 @@ fn csr_from_dense(dense_mat) {
         var j = 0;
         while (j < ncols) {
             var v = ganita_mat_get(dense_mat, i, j);
-            if (f64_gt(f64_abs(v), EPSILON_F64) == 1) {
+            # ⚠ Byte-identical to the counting pass above, deliberately.
+            if (f64_eq(v, f64_from(0)) == 0) {
                 store64(col_idx + pos * 8, j);
                 store64(values + pos * 8, v);
                 pos = pos + 1;
@@ -199,7 +207,11 @@ fn csr_add(a, b) {
                 } else {
                     # Same column -- add values
                     var s = f64_add(load64(a_v + ai * 8), load64(b_v + bi * 8));
-                    if (f64_gt(f64_abs(s), EPSILON_F64) == 1) {
+                    # ⛔ Same class: a genuinely non-zero sum was dropped from the
+                    # pattern because it was small in the caller's units. ⚠ Exact
+                    # `!= 0` rather than `|s| > 0`, so a NaN sum is KEPT rather
+                    # than silently deleted from the matrix.
+                    if (f64_eq(s, f64_from(0)) == 0) {
                         store64(out_ci + pos * 8, ac);
                         store64(out_v + pos * 8, s);
                         pos = pos + 1;
@@ -468,7 +480,11 @@ fn solve_gmres(A_fn, b, x0, n, tol, max_iter, restart) {
             var wj_norm = _lext_norm(wj, n);
             store64(h + ((j + 1) * m + j) * 8, wj_norm);  # H[j+1][j]
 
-            if (f64_gt(wj_norm, EPSILON_F64) == 1) {
+            # ⛔ `wj_norm` is a LENGTH in the caller's units against an absolute
+            # 1e-12, so Arnoldi declared a perfectly good basis vector degenerate
+            # and broke down early on any small system. The reciprocal on the next
+            # line is unbounded, so DBL_MIN is the bound, not an exact zero.
+            if (f64_lt(wj_norm, F64_TINY) == 0) {
                 var inv_w = f64_div(f64_from(1), wj_norm);
                 var l = 0;
                 while (l < n) {
@@ -496,7 +512,10 @@ fn solve_gmres(A_fn, b, x0, n, tol, max_iter, restart) {
             var hjj  = load64(h + (j * m + j) * 8);
             var hj1j = load64(h + ((j + 1) * m + j) * 8);
             var r_val = f64_sqrt(f64_add(f64_mul(hjj, hjj), f64_mul(hj1j, hj1j)));
-            if (f64_gt(r_val, EPSILON_F64) == 1) {
+            # ⭐ |hjj| <= r_val and |hj1j| <= r_val, so these quotients are in
+            # [-1,1] and cannot overflow at any non-zero radius — the exact-zero
+            # test is what the division requires, as in linalg_precision's Givens.
+            if (f64_gt(r_val, 0) == 1) {
                 store64(cs + j * 8, f64_div(hjj, r_val));
                 store64(sn + j * 8, f64_div(hj1j, r_val));
             } else {
@@ -533,8 +552,15 @@ fn solve_gmres(A_fn, b, x0, n, tol, max_iter, restart) {
                 jj = jj + 1;
             }
             var hii = load64(h + (i * m + i) * 8);
-            if (f64_gt(f64_abs(hii), EPSILON_F64) == 1) {
+            # ⛔ TWO DEFECTS. The absolute 1e-12 skipped the divide for a small but
+            # perfectly good pivot — and when it skipped, it stored the UNDIVIDED
+            # numerator as if it were the solution component. At hii = 0 the true
+            # y_i is unbounded, so the numerator is not an approximation of it; 0
+            # at least says "no contribution" rather than asserting a wrong one.
+            if (f64_lt(f64_abs(hii), F64_TINY) == 0) {
                 yi = f64_div(yi, hii);
+            } else {
+                yi = f64_from(0);
             }
             store64(y + i * 8, yi);
             i = i - 1;
@@ -717,7 +743,11 @@ fn solve_pgs(A, b, x, n, lo, hi, max_iter) {
         var i = 0;
         while (i < n) {
             var aii = ganita_mat_get(A, i, i);
-            if (f64_lt(f64_abs(aii), EPSILON_F64) == 1) {
+            # ⛔ A diagonal entry in the caller's units against an absolute 1e-12,
+            # so rows of a small system were silently skipped and left at their
+            # initial value. `sigma/aii` gives the best available answer for any
+            # non-zero aii, subnormal included; only an exact zero has no answer.
+            if (f64_gt(f64_abs(aii), 0) == 0) {
                 i = i + 1;
                 # skip near-zero diagonal
             } else {
@@ -737,8 +767,22 @@ fn solve_pgs(A, b, x, n, lo, hi, max_iter) {
                 i = i + 1;
             }
         }
-        # Early out if converged (use EPSILON_F64 as tolerance)
-        if (f64_lt(max_change, EPSILON_F64) == 1) {
+        # ⛔ `max_change` is a change in the SOLUTION, in the caller's units — an
+        # impulse in a contact solver — so an absolute 1e-12 declared convergence
+        # after one sweep on a small problem and refused to converge on a large
+        # one. ⚠ Nothing DIVIDES here, so DBL_MIN would be meaningless: the
+        # question is whether the iterate has stopped moving RELATIVE to its own
+        # size. The DBL_MIN floor keeps an exactly-zero solution terminating.
+        var x_mag = f64_from(0);
+        var xm = 0;
+        while (xm < n) {
+            var xv = f64_abs(load64(x + xm * 8));
+            if (f64_gt(xv, x_mag) == 1) { x_mag = xv; }
+            xm = xm + 1;
+        }
+        var pgs_tol = f64_mul(EPSILON_F64, x_mag);
+        if (f64_lt(pgs_tol, F64_TINY) == 1) { pgs_tol = F64_TINY; }
+        if (f64_lt(max_change, pgs_tol) == 1) {
             return 0;
         }
         iter = iter + 1;
@@ -883,21 +927,36 @@ fn eigen_power(A, n, max_iter, out_val, out_vec) {
             i = i + 1;
         }
 
-        if (f64_lt(f64_abs(max_val), EPSILON_F64) == 1) {
+        # ⛔ `max_val` is the largest component of A*v, in the caller's units, so
+        # an absolute 1e-12 made power iteration give up on any small-normed
+        # matrix — reporting NO_CONVERGENCE for a problem with a perfectly good
+        # dominant eigenvalue.
+        # ⭐ THE GUARD AND THE NORMALISATION ARE ONE REPAIR. Lowering the threshold
+        # alone is not enough while the loop multiplies by a RECIPROCAL: 1/max_val
+        # overflows for a subnormal max_val even though w_i/max_val would not.
+        # Dividing directly makes the exact-zero test the correct one, because
+        # every |w_i| <= |max_val| by construction.
+        # [measured: docs/audit/2026-09-09-epsilon-open.json]
+        if (f64_gt(f64_abs(max_val), 0) == 0) {
             return HSB_ERR_NO_CONVERGENCE;
         }
 
         var new_eigenvalue = max_val;
 
         # Normalize w -> v
-        var inv_max = f64_div(f64_from(1), max_val);
         i = 0;
         while (i < n) {
-            store64(v + i * 8, f64_mul(load64(w + i * 8), inv_max));
+            store64(v + i * 8, f64_div(load64(w + i * 8), max_val));
             i = i + 1;
         }
 
-        if (f64_lt(f64_abs(f64_sub(new_eigenvalue, eigenvalue)), tol) == 1) {
+        # ⛔ The convergence test compared an ABSOLUTE change in the eigenvalue
+        # against `tol`, and an eigenvalue carries the matrix's units — so the same
+        # problem converged in one iteration or never, depending on the caller's
+        # scale. `tol` is kept, now as a RELATIVE factor, which is what a caller
+        # passing 1e-12 always meant.
+        if (f64_lt(f64_abs(f64_sub(new_eigenvalue, eigenvalue)),
+            f64_mul(tol, f64_abs(new_eigenvalue))) == 1) {
             store64(out_val, new_eigenvalue);
             i = 0;
             while (i < n) {
@@ -1041,7 +1100,12 @@ fn lyapunov_max(A, n, iterations, out) {
 
         # Accumulate log of |R[0][0]| (dominant direction growth)
         var r00 = f64_abs(ganita_mat_get(R, 0, 0));
-        if (f64_gt(r00, EPSILON_F64) == 1) {
+        # ⛔ `r00` is a growth factor in the matrix's units against an absolute
+        # 1e-12, so genuine contraction was silently excluded from the average and
+        # the exponent came back biased. ⚠ NOT DBL_MIN: `ln` is defined for every
+        # positive double including subnormals, so a floor there would still drop
+        # samples the logarithm handles. Guard the domain, nothing more.
+        if (f64_gt(r00, 0) == 1) {
             sum_log = f64_add(sum_log, f64_ln(r00));
             count = count + 1;
         }
@@ -1138,6 +1202,11 @@ fn cmat_inverse(m) {
         # Find pivot
         var max_norm = 0;
         var pivot_row = col;
+        # The scale the pivot is judged RELATIVE to: the largest magnitude
+        # anywhere in the active submatrix row-band, so an all-zero column in a
+        # non-zero matrix is still recognised as a singular pivot rather than as
+        # "everything here is small".
+        var col_scale = f64_from(0);
         i = col;
         while (i < n) {
             var nrm = cx_norm_sq(cmat_get(aug, i, col));
@@ -1145,9 +1214,28 @@ fn cmat_inverse(m) {
                 max_norm = nrm;
                 pivot_row = i;
             }
+            var kk = col;
+            while (kk < n) {
+                var em = f64_sqrt(cx_norm_sq(cmat_get(aug, i, kk)));
+                if (f64_gt(em, col_scale) == 1) { col_scale = em; }
+                kk = kk + 1;
+            }
             i = i + 1;
         }
-        if (f64_lt(max_norm, EPSILON_F64) == 1) { return 0; }  # Singular
+        # ⛔ THREE THINGS WRONG ON ONE LINE. `max_norm` is a SQUARED modulus
+        # (cx_norm_sq) compared against an unsquared 1e-12; the comparison is
+        # absolute where pivoting is a question of relative magnitude; and the
+        # result is a silent 0 return that reads as "singular".
+        # ⭐ Un-square, make it relative to the column's own largest entry, and
+        # FLOOR it. ⚠ The floor is not belt-and-braces: with a bare relative test
+        # an ALL-ZERO matrix has scale 0, so the threshold is 0, `0 < 0` is false,
+        # the guard does not fire and the routine would return a zero MATRIX where
+        # it currently returns 0. Measured — that is a live behaviour, not a
+        # hypothetical. [measured: docs/audit/2026-09-09-epsilon-open.json]
+        if (f64_lt(max_norm, F64_TINY) == 1) { return 0; }  # genuinely singular
+        if (f64_lt(f64_sqrt(max_norm), f64_mul(EPSILON_F64, col_scale)) == 1) {
+            return 0;                                        # negligible pivot
+        }
         # Swap rows
         if (pivot_row != col) {
             var k = 0;

@@ -1508,6 +1508,323 @@ assert(f64_approx_eq(load64(ep_val), 0x400CF1BBCDCBFA54, EP_TOL),
 assert(f64_approx_eq(load64(ep_vec), 0x3FE3C6EF372FE94F, EP_TOL),
   "eigen_power v[0] = 1/phi = 0.6180339887498949");
 assert_eq(load64(ep_vec + 8), F64_ONE, "eigen_power v[1] = 1 (max component, exact)");
+
+# ================================================================
+# 2.15.0 — linalg_ext: twelve guards, and sparsity is not a tolerance
+# ================================================================
+# ⛔ `csr_from_dense` decided which entries EXIST by `|A_ij| > 1e-12`, so the
+# sparsity PATTERN of a matrix depended on the caller's units — the same matrix in
+# millimetres and in metres became different matrices.
+# ⛔ AND THE TWO PASSES DISAGREEING IS A MEMORY-SAFETY BUG, NOT A NUMERICAL ONE.
+# The counting pass sizes the arrays and the emitting pass fills them, so changing
+# ONE of them is not a wrong answer — it is a buffer overrun. Measured: reverting
+# only the counting pass to the old test kills the suite with SIGSEGV. The two are
+# now byte-identical by construction, and that mutant is the proof.
+# [measured: 14-mutant run over linalg_ext.cyr, 2026-09-10]
+# ⭐ The rest of the module splits the same three ways as linalg_precision:
+# unbounded reciprocals get DBL_MIN (Arnoldi, back-substitution), bounded
+# quotients get an exact-zero test (Givens, power iteration, PGS diagonal), and
+# the two CONVERGENCE tests — which divide nothing — become relative.
+# ⚠ `eigen_power` needed a paired change: lowering its threshold alone is useless
+# while the loop multiplies by 1/max_val, which overflows for a subnormal max_val
+# even though w_i/max_val cannot. Guard and normalisation moved together.
+
+test_group("linalg_ext 2.15.0: sparsity, solvers and power iteration");
+
+# --- SPARSITY IS STRUCTURAL. A = [[1,0,2],[0,3,0],[4,0,5]] has 5 stored entries
+# at every scale; scaling it cannot create or destroy structure.
+var LX_RUN = 0;
+var LX_BAD = 0;
+for (var lx_e = 0; lx_e < 400; lx_e = lx_e + 1) {
+    var lx_k = (1023 - lx_e) << 52;
+    var lx_d = ganita_mat_new(3, 3);
+    ganita_mat_set(lx_d, 0, 0, lx_k);
+    ganita_mat_set(lx_d, 0, 2, f64_mul(F64_TWO, lx_k));
+    ganita_mat_set(lx_d, 1, 1, f64_mul(f64_from(3), lx_k));
+    ganita_mat_set(lx_d, 2, 0, f64_mul(f64_from(4), lx_k));
+    ganita_mat_set(lx_d, 2, 2, f64_mul(f64_from(5), lx_k));
+    LX_RUN = LX_RUN + 1;
+    if (csr_nnz(csr_from_dense(lx_d)) != 5) { LX_BAD = LX_BAD + 1; }
+}
+assert_eq(LX_RUN, 400, "the CSR sparsity sweep actually ran 400 scales");
+assert_eq(LX_BAD, 0,
+  "csr_from_dense: 5 stored entries at every scale from 2^0 down to 2^-399");
+# ⭐ ANTI-DELETION: a structural zero must still not be stored.
+var lx_z = ganita_mat_new(2, 2);
+ganita_mat_set(lx_z, 0, 0, F64_ONE);
+ganita_mat_set(lx_z, 0, 1, f64_from(0));
+ganita_mat_set(lx_z, 1, 0, f64_from(0));
+ganita_mat_set(lx_z, 1, 1, F64_TWO);
+assert_eq(csr_nnz(csr_from_dense(lx_z)), 2,
+  "csr_from_dense: exact zeros are still structurally absent");
+
+# --- eigen_power. lambda(kA) = k*lambda(A), and the eigenVECTOR does not move at
+# all. The shipped guard reported NO_CONVERGENCE for any matrix scaled below 1e-12.
+var LX_EP_RUN = 0;
+var LX_EP_BAD = 0;
+for (var lx_p = 0; lx_p < 400; lx_p = lx_p + 1) {
+    var lx_pk = (1023 - lx_p) << 52;
+    var lx_pm = ganita_mat_new(2, 2);
+    ganita_mat_set(lx_pm, 0, 0, f64_mul(F64_TWO, lx_pk));
+    ganita_mat_set(lx_pm, 0, 1, lx_pk);
+    ganita_mat_set(lx_pm, 1, 0, lx_pk);
+    ganita_mat_set(lx_pm, 1, 1, f64_mul(f64_from(3), lx_pk));
+    var lx_pv = alloc(8);
+    var lx_pvec = alloc(16);
+    LX_EP_RUN = LX_EP_RUN + 1;
+    if (eigen_power(lx_pm, 2, 1000, lx_pv, lx_pvec) != HSB_ERR_NONE) {
+        LX_EP_BAD = LX_EP_BAD + 1;
+    } else {
+        # (5 + sqrt 5)/2 = 3.618033988749895, scaled by k.
+        if (f64_approx_eq(f64_div(load64(lx_pv), lx_pk), 0x400CF1BBCDCBFA54,
+            EP_TOL) != 1) {
+            LX_EP_BAD = LX_EP_BAD + 1;
+        }
+        # the eigenvector is scale-INVARIANT and its max component is exactly 1.
+        if (load64(lx_pvec + 8) != F64_ONE) { LX_EP_BAD = LX_EP_BAD + 1; }
+    }
+}
+assert_eq(LX_EP_RUN, 400, "the eigen_power scale sweep actually ran 400 scales");
+assert_eq(LX_EP_BAD, 0,
+  "eigen_power: lambda/k and the eigenvector are invariant to 2^-399");
+# ⭐ ANTI-DELETION: an exactly zero matrix has no dominant direction.
+var lx_z2 = ganita_mat_new(2, 2);
+ganita_mat_set(lx_z2, 0, 0, f64_from(0)); ganita_mat_set(lx_z2, 0, 1, f64_from(0));
+ganita_mat_set(lx_z2, 1, 0, f64_from(0)); ganita_mat_set(lx_z2, 1, 1, f64_from(0));
+assert_eq(eigen_power(lx_z2, 2, 100, alloc(8), alloc(16)), HSB_ERR_NO_CONVERGENCE,
+  "eigen_power: an exactly zero matrix still reports no convergence");
+
+# --- solve_pgs. A x = b and (kA) x = (kb) have the SAME x, so the solution of
+# [[4,1],[1,3]]x = [1,2] is [1/11, 7/11] at every k. Two guards are exercised: the
+# diagonal test and the convergence test, the latter now relative to |x|.
+var LX_PG_RUN = 0;
+var LX_PG_BAD = 0;
+var lx_pg_lo = alloc(16);
+var lx_pg_hi = alloc(16);
+store64(lx_pg_lo, f64_neg(f64_from(1000000)));
+store64(lx_pg_lo + 8, f64_neg(f64_from(1000000)));
+store64(lx_pg_hi, f64_from(1000000));
+store64(lx_pg_hi + 8, f64_from(1000000));
+for (var lx_g = 0; lx_g < 400; lx_g = lx_g + 1) {
+    var lx_gk = (1023 - lx_g) << 52;
+    var lx_gA = ganita_mat_new(2, 2);
+    ganita_mat_set(lx_gA, 0, 0, f64_mul(f64_from(4), lx_gk));
+    ganita_mat_set(lx_gA, 0, 1, lx_gk);
+    ganita_mat_set(lx_gA, 1, 0, lx_gk);
+    ganita_mat_set(lx_gA, 1, 1, f64_mul(f64_from(3), lx_gk));
+    var lx_gb = alloc(16);
+    store64(lx_gb, lx_gk);
+    store64(lx_gb + 8, f64_mul(F64_TWO, lx_gk));
+    var lx_gx = alloc(16);
+    store64(lx_gx, 0);
+    store64(lx_gx + 8, 0);
+    solve_pgs(lx_gA, lx_gb, lx_gx, 2, lx_pg_lo, lx_pg_hi, 200);
+    LX_PG_RUN = LX_PG_RUN + 1;
+    if (f64_approx_eq(load64(lx_gx), f64_div(F64_ONE, f64_from(11)), EP_TOL) != 1) {
+        LX_PG_BAD = LX_PG_BAD + 1;
+    }
+    if (f64_approx_eq(load64(lx_gx + 8), f64_div(f64_from(7), f64_from(11)),
+        EP_TOL) != 1) {
+        LX_PG_BAD = LX_PG_BAD + 1;
+    }
+}
+assert_eq(LX_PG_RUN, 400, "the solve_pgs scale sweep actually ran 400 scales");
+assert_eq(LX_PG_BAD, 0,
+  "solve_pgs: x = [1/11, 7/11] for system scales from 2^0 down to 2^-399");
+
+# --- cmat_inverse. inv(kM) = (1/k)*inv(M). M = [[1,0],[0,2]] gives inv = diag(1, 1/2).
+var LX_CI_RUN = 0;
+var LX_CI_BAD = 0;
+for (var lx_ci = 0; lx_ci < 400; lx_ci = lx_ci + 1) {
+    var lx_ck = (1023 - lx_ci) << 52;
+    var lx_cm = cmat_new(2, 2);
+    cmat_set(lx_cm, 0, 0, cx_new(lx_ck, f64_from(0)));
+    cmat_set(lx_cm, 0, 1, cx_new(f64_from(0), f64_from(0)));
+    cmat_set(lx_cm, 1, 0, cx_new(f64_from(0), f64_from(0)));
+    cmat_set(lx_cm, 1, 1, cx_new(f64_mul(F64_TWO, lx_ck), f64_from(0)));
+    var lx_cinv = cmat_inverse(lx_cm);
+    LX_CI_RUN = LX_CI_RUN + 1;
+    if (lx_cinv == 0) {
+        LX_CI_BAD = LX_CI_BAD + 1;
+    } else {
+        # inv[0][0] = 1/k and inv[1][1] = 1/(2k), both exact for power-of-two k.
+        if (HComplex_re(cmat_get(lx_cinv, 0, 0)) != (1023 + lx_ci) << 52) {
+            LX_CI_BAD = LX_CI_BAD + 1;
+        }
+        if (HComplex_re(cmat_get(lx_cinv, 1, 1)) != (1023 + lx_ci - 1) << 52) {
+            LX_CI_BAD = LX_CI_BAD + 1;
+        }
+    }
+}
+assert_eq(LX_CI_RUN, 400, "the cmat_inverse scale sweep actually ran 400 scales");
+assert_eq(LX_CI_BAD, 0,
+  "cmat_inverse: inv(kM) = (1/k)inv(M) bit-exact from 2^0 down to 2^-399");
+# ⭐ ANTI-DELETION, and it is the case the DBL_MIN floor exists for: with a bare
+# relative pivot test an all-zero matrix has scale 0, the threshold is 0, `0 < 0`
+# is false, the guard never fires and the routine returns a zero MATRIX instead of
+# the documented 0. Measured as a live behaviour, not a hypothetical.
+# [measured: docs/audit/2026-09-09-epsilon-open.json]
+var lx_cz = cmat_new(2, 2);
+cmat_set(lx_cz, 0, 0, cx_new(f64_from(0), f64_from(0)));
+cmat_set(lx_cz, 0, 1, cx_new(f64_from(0), f64_from(0)));
+cmat_set(lx_cz, 1, 0, cx_new(f64_from(0), f64_from(0)));
+cmat_set(lx_cz, 1, 1, cx_new(f64_from(0), f64_from(0)));
+assert_eq(cmat_inverse(lx_cz), 0,
+  "cmat_inverse: an all-zero matrix is still singular, not a zero matrix");
+
+# --- csr_add: the SUM's magnitude decided whether the entry exists, so adding two
+# small matrices produced a sparser matrix than adding two large ones.
+var LX_CA_RUN = 0;
+var LX_CA_BAD = 0;
+for (var lx_a = 0; lx_a < 400; lx_a = lx_a + 1) {
+    var lx_ak = (1023 - lx_a) << 52;
+    var lx_m1 = ganita_mat_new(2, 2);
+    var lx_m2 = ganita_mat_new(2, 2);
+    ganita_mat_set(lx_m1, 0, 0, lx_ak);
+    ganita_mat_set(lx_m1, 0, 1, f64_from(0));
+    ganita_mat_set(lx_m1, 1, 0, f64_from(0));
+    ganita_mat_set(lx_m1, 1, 1, lx_ak);
+    ganita_mat_set(lx_m2, 0, 0, lx_ak);
+    ganita_mat_set(lx_m2, 0, 1, f64_from(0));
+    ganita_mat_set(lx_m2, 1, 0, f64_from(0));
+    ganita_mat_set(lx_m2, 1, 1, lx_ak);
+    LX_CA_RUN = LX_CA_RUN + 1;
+    if (csr_nnz(csr_add(csr_from_dense(lx_m1), csr_from_dense(lx_m2))) != 2) {
+        LX_CA_BAD = LX_CA_BAD + 1;
+    }
+}
+assert_eq(LX_CA_RUN, 400, "the csr_add scale sweep actually ran 400 scales");
+assert_eq(LX_CA_BAD, 0,
+  "csr_add: the sum keeps its 2 stored entries at every scale to 2^-399");
+
+# --- solve_pgs CONVERGENCE, which the sweep above cannot reach. There A and b
+# both scale, so x stays O(1) and `max_change` never gets near 1e-12. Scaling ONLY
+# b makes the SOLUTION small, and an absolute convergence test then declares
+# victory after one sweep and returns a wrong answer.
+var LX_PC_RUN = 0;
+var LX_PC_BAD = 0;
+for (var lx_pc = 0; lx_pc < 200; lx_pc = lx_pc + 1) {
+    var lx_pck = (1023 - lx_pc) << 52;
+    var lx_pcA = ganita_mat_new(2, 2);
+    ganita_mat_set(lx_pcA, 0, 0, f64_from(4));
+    ganita_mat_set(lx_pcA, 0, 1, F64_ONE);
+    ganita_mat_set(lx_pcA, 1, 0, F64_ONE);
+    ganita_mat_set(lx_pcA, 1, 1, f64_from(3));
+    var lx_pcb = alloc(16);
+    store64(lx_pcb, lx_pck);
+    store64(lx_pcb + 8, f64_mul(F64_TWO, lx_pck));
+    var lx_pcx = alloc(16);
+    store64(lx_pcx, 0);
+    store64(lx_pcx + 8, 0);
+    solve_pgs(lx_pcA, lx_pcb, lx_pcx, 2, lx_pg_lo, lx_pg_hi, 200);
+    LX_PC_RUN = LX_PC_RUN + 1;
+    # x = k * [1/11, 7/11]; compare the RATIO, since x itself spans 200 decades.
+    if (f64_approx_eq(f64_div(load64(lx_pcx), lx_pck),
+        f64_div(F64_ONE, f64_from(11)), EP_TOL) != 1) {
+        LX_PC_BAD = LX_PC_BAD + 1;
+    }
+    if (f64_approx_eq(f64_div(load64(lx_pcx + 8), lx_pck),
+        f64_div(f64_from(7), f64_from(11)), EP_TOL) != 1) {
+        LX_PC_BAD = LX_PC_BAD + 1;
+    }
+}
+assert_eq(LX_PC_RUN, 200, "the solve_pgs solution-scale sweep actually ran 200");
+assert_eq(LX_PC_BAD, 0,
+  "solve_pgs: converges to k*[1/11, 7/11] for solution scales down to 2^-199");
+
+# --- eigen_power at a SUBNORMAL dominant value, which is the only place the
+# reciprocal and the direct divide disagree. At k = 2^-1024 the eigenvalue is
+# 3.618*k and 1/lambda OVERFLOWS to +Inf, so the old multiply-by-reciprocal
+# poisoned the whole eigenvector while w_i/lambda would have been fine.
+# ⚠ 2^-1035, NOT 2^-1024: at 2^-1024 the eigenvalue is 2.01e-308 and 1/lambda is
+# 4.97e307 — still FINITE, so the reciprocal and the direct divide agree and the
+# mutant survives. Overflow needs lambda < 1/DBL_MAX; measured, 2^-1035 gives
+# lambda = 9.83e-312 and 1/lambda = +Inf.
+# [measured: reciprocal overflow scan over subnormal scales, 2026-09-10]
+var lx_sk = 0x0000008000000000;                  # 2^-1035, deeply subnormal
+var lx_sm = ganita_mat_new(2, 2);
+ganita_mat_set(lx_sm, 0, 0, f64_mul(F64_TWO, lx_sk));
+ganita_mat_set(lx_sm, 0, 1, lx_sk);
+ganita_mat_set(lx_sm, 1, 0, lx_sk);
+ganita_mat_set(lx_sm, 1, 1, f64_mul(f64_from(3), lx_sk));
+var lx_sv = alloc(8);
+var lx_svec = alloc(16);
+assert_eq(eigen_power(lx_sm, 2, 1000, lx_sv, lx_svec), HSB_ERR_NONE,
+  "eigen_power: a subnormal dominant eigenvalue still converges");
+assert_eq(load64(lx_svec + 8), F64_ONE,
+  "eigen_power: and its eigenvector is finite, not poisoned by an infinite 1/lambda");
+
+# --- solve_gmres. A x = b and (kA) x = (kb) have the same x, so the three guards
+# inside — the Arnoldi norm, the Givens radius and the back-substitution pivot —
+# must not notice the scale. ⚠ The back-substitution one is the worst of the
+# three: when it skipped the divide it stored the UNDIVIDED numerator as the
+# solution component, which is not an approximation of anything.
+var LX_GM_K = F64_ONE;
+fn _lx_amul(x) {
+    # A = k * [[4,1],[1,3]]
+    var out = alloc(16);
+    store64(out, f64_mul(LX_GM_K,
+        f64_add(f64_mul(f64_from(4), load64(x)), load64(x + 8))));
+    store64(out + 8, f64_mul(LX_GM_K,
+        f64_add(load64(x), f64_mul(f64_from(3), load64(x + 8)))));
+    return out;
+}
+var LX_GM_RUN = 0;
+var LX_GM_BAD = 0;
+for (var lx_gm = 0; lx_gm < 300; lx_gm = lx_gm + 1) {
+    LX_GM_K = (1023 - lx_gm) << 52;
+    var lx_gmb = alloc(16);
+    store64(lx_gmb, LX_GM_K);
+    store64(lx_gmb + 8, f64_mul(F64_TWO, LX_GM_K));
+    var lx_gm0 = alloc(16);
+    store64(lx_gm0, 0);
+    store64(lx_gm0 + 8, 0);
+    # tol is on the RESIDUAL, which carries the system's scale, so it scales too.
+    var lx_gmx = solve_gmres(&_lx_amul, lx_gmb, lx_gm0, 2,
+      f64_mul(LX_GM_K, EP_TOL), 50, 2);
+    LX_GM_RUN = LX_GM_RUN + 1;
+    if (lx_gmx == 0) {
+        LX_GM_BAD = LX_GM_BAD + 1;
+    } else {
+        if (f64_approx_eq(load64(lx_gmx), f64_div(F64_ONE, f64_from(11)),
+            EP_TOL) != 1) { LX_GM_BAD = LX_GM_BAD + 1; }
+        if (f64_approx_eq(load64(lx_gmx + 8), f64_div(f64_from(7), f64_from(11)),
+            EP_TOL) != 1) { LX_GM_BAD = LX_GM_BAD + 1; }
+    }
+}
+LX_GM_K = F64_ONE;
+assert_eq(LX_GM_RUN, 300, "the solve_gmres scale sweep actually ran 300 scales");
+assert_eq(LX_GM_BAD, 0,
+  "solve_gmres: x = [1/11, 7/11] for system scales from 2^0 down to 2^-299");
+
+# --- lyapunov_max. For A = k*R with R a rotation, every step grows the dominant
+# direction by exactly k, so the exponent is ln(k) — and the samples must all be
+# COUNTED. The absolute 1e-12 silently dropped every contraction step below that,
+# biasing the average toward whatever survived.
+var LX_LY_RUN = 0;
+var LX_LY_BAD = 0;
+for (var lx_ly = 0; lx_ly < 200; lx_ly = lx_ly + 1) {
+    var lx_lyk = (1023 - lx_ly) << 52;
+    var lx_lyA = ganita_mat_new(2, 2);
+    ganita_mat_set(lx_lyA, 0, 0, f64_from(0));
+    ganita_mat_set(lx_lyA, 0, 1, f64_neg(lx_lyk));
+    ganita_mat_set(lx_lyA, 1, 0, lx_lyk);
+    ganita_mat_set(lx_lyA, 1, 1, f64_from(0));
+    var lx_lyo = alloc(8);
+    LX_LY_RUN = LX_LY_RUN + 1;
+    if (lyapunov_max(lx_lyA, 2, 20, lx_lyo) != HSB_ERR_NONE) {
+        LX_LY_BAD = LX_LY_BAD + 1;
+    } else {
+        # ln(2^-e) = -e*ln2, exactly the growth of a scaled rotation.
+        if (f64_approx_eq(load64(lx_lyo),
+            f64_mul(f64_neg(f64_from(lx_ly)), f64_ln(F64_TWO)), EP_TOL) != 1) {
+            LX_LY_BAD = LX_LY_BAD + 1;
+        }
+    }
+}
+assert_eq(LX_LY_RUN, 200, "the lyapunov_max scale sweep actually ran 200 scales");
+assert_eq(LX_LY_BAD, 0,
+  "lyapunov_max: the exponent of a scaled rotation is ln(k) down to 2^-199");
 # Residual ||A v - lambda v||_inf, recomputed from the two outputs.
 assert(f64_lt(f64_abs(f64_sub(f64_add(f64_mul(F64_TWO, load64(ep_vec)), load64(ep_vec + 8)),
         f64_mul(load64(ep_val), load64(ep_vec)))), EP_TOL) == 1, "eigen_power residual row 0");
