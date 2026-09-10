@@ -132,7 +132,6 @@ fn _hvec4_len_scaled(v) {
 # the subnormal band up to 11.8% wrong.
 # ⚠ And the `+Inf` short-circuit inside the helper is REQUIRED: without it
 # `Inf/Inf` is NaN and the documented infinity contract regresses.
-# costs **+12%** and is not distinguishable in any of the 72 tracked benchmarks.
 # [measured: 1106-scale two-sided sweep; naive wrong at 60, guarded at 0]
 fn hvec4_length(v) {
     var ls = hvec4_length_sq(v);

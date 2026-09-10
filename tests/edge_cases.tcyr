@@ -841,7 +841,14 @@ assert_eq(cmat_kronecker(cmat_new(17, 17), cmat_new(17, 17)), 0,
 # ================================================================
 # cx_div/cx_inv/cx_powf compared a SQUARED modulus against the unsquared
 # EPSILON_F64, so the effective cutoff was |z| < 1e-6 and legitimate small
-# divisors were silently flushed to zero. cx_is_zero always squared correctly.
+# divisors were silently flushed to zero.
+# ⛔ 2.17.0 — AND THE LINE THAT USED TO STAND HERE, *"cx_is_zero always squared
+# correctly"*, WAS WRONG. It squared both sides, which is dimensionally consistent
+# and is all that sentence ever checked; numerically both squares flush, so
+# `cx_is_zero(2^-700 + 0i, 2^-600)` answered 0 for a value a hundred binades below
+# its own tolerance. A dimensional argument is not a numerical one, and calling
+# this function correct in a comment is what kept it off three repair passes.
+# The pinning assertions are in tests/modules.tcyr under "complex 2.17.0".
 test_group("invariants: complex zero-divisor tolerance");
 
 var ec_small = cx_new(f64_div(F64_ONE, f64_from(1000000000)), 0);   # 1e-9

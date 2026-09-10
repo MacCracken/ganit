@@ -64,16 +64,19 @@ fn hvec2_dot(a, b) {
 fn hvec2_length_sq(v) { return hvec2_dot(v, v); }
 
 #must_use
+# ⭐ TWO LEGS IS THE ONE ARITY THE STDLIB ALREADY COVERS. This was a hand-rolled
+# scale-by-the-larger-leg loop until it was measured against `ganita_f64_hypot`
+# and found **bit-identical on 6294 comparisons** — every binade from 2^-1074 to
+# 2^1023, subnormals included, on equal legs, wildly asymmetric legs and negative
+# legs, plus zero and ±Inf. Its one divergence, (Inf, NaN), is unreachable from
+# `hvec2_length`: a NaN sum satisfies neither guard below and returns `sqrt(NaN)`
+# without ever entering the rescue.
+# ⚠ The 3- and 4-component helpers in vec3/vec4/quat/lie stay hand-rolled — there
+# is no stdlib function of that arity to delegate to. Two legs is the exception,
+# not the start of a pattern.
+# [measured: scratch equivalence probe, 2026-09-10]
 fn _hvec2_len_scaled(v) {
-    var x = HVec2_x(v);
-    var y = HVec2_y(v);
-    var mx = f64_max(f64_abs(x), f64_abs(y));
-    if (f64_gt(mx, 0) == 0) { return mx; }
-    # ⚠ Inf/Inf is NaN, so the infinity contract needs its own exit here.
-    if (f64_eq(mx, F64_POS_INF) == 1) { return mx; }
-    var xs = f64_div(x, mx);
-    var ys = f64_div(y, mx);
-    return f64_mul(mx, f64_sqrt(f64_add(f64_mul(xs, xs), f64_mul(ys, ys))));
+    return ganita_f64_hypot(HVec2_x(v), HVec2_y(v));
 }
 
 # ⛔ 2.17.0 — THIS SQUARED BEFORE SUMMING, AND LOST 537 BINADES AT THE BOTTOM AND
@@ -95,7 +98,6 @@ fn _hvec2_len_scaled(v) {
 # the subnormal band up to 11.8% wrong.
 # ⚠ And the `+Inf` short-circuit inside the helper is REQUIRED: without it
 # `Inf/Inf` is NaN and the documented infinity contract regresses.
-# costs **+12%** and is not distinguishable in any of the 72 tracked benchmarks.
 # [measured: 1106-scale two-sided sweep; naive wrong at 60, guarded at 0]
 fn hvec2_length(v) {
     var ls = hvec2_length_sq(v);

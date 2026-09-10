@@ -109,8 +109,33 @@ fn cx_norm_sq(a) {
       f64_mul(HComplex_im(a), HComplex_im(a)));
 }
 
+# ⛔ 2.17.0 — THIS SQUARED BEFORE SUMMING, so `cx_abs` — the modulus that `cx_ln`,
+# `cx_sqrt`, `cx_powf` and `cmat_exp` are every one of them built on — was wrong
+# on 994 of 2041 binades. `re*re` underflows to zero below 2^-537 and overflows to
+# +Inf above 2^511, so |3k + 4ki| came back as exactly 0 or exactly +Inf where 5k
+# is perfectly representable — measured +Inf at k = 2^700 for an answer of 5·2^700.
+# ⚠ And the silent band is worse than either end: at k = 2^-539 the sum is
+# SUBNORMAL, so the answer is finite, plausible and **13.1% too large**, with
+# nothing at all to signal it.
+# [measured: 2041-binade two-sided sweep on the 2.16.0 tree, 2026-09-10]
+#
+# ⭐ FAST PATH, NOT UNCONDITIONAL SCALING — the same shape as `hvec3_length`. The
+# naive sum announces its own failure: it is subnormal, zero or +Inf exactly when
+# it cannot be trusted, and exact otherwise, so take it when it is NORMAL and
+# rescale only when it is not.
+# ⭐ The rescue is `ganita_f64_hypot` rather than a hand-rolled copy of the
+# scale-by-the-larger-leg loop: the stdlib ships exactly this function for exactly
+# this reason, and this file already calls into ganita for `cx_arg`/`cx_powf`.
+# ⚠ A NaN never reaches the rescue — a NaN norm_sq satisfies neither guard and
+# falls through to `f64_sqrt`, so hisab's NaN-in/NaN-out contract is unchanged and
+# ganita's differing (Inf, NaN) rule is unreachable from here.
 #must_use
-fn cx_abs(a) { return f64_sqrt(cx_norm_sq(a)); }
+fn cx_abs(a) {
+    var ns = cx_norm_sq(a);
+    if (f64_lt(ns, F64_TINY) == 1) { return ganita_f64_hypot(HComplex_re(a), HComplex_im(a)); }
+    if (f64_eq(ns, F64_POS_INF) == 1) { return ganita_f64_hypot(HComplex_re(a), HComplex_im(a)); }
+    return f64_sqrt(ns);
+}
 
 #must_use
 fn cx_arg(a) { return ganita_f64_atan2(HComplex_im(a), HComplex_re(a)); }
@@ -165,18 +190,25 @@ fn cx_sqrt(a) {
 
 #must_use
 fn cx_powf(a, n) {
-    # ⚠ A THRESHOLD IS RIGHT HERE, unlike cx_div/cx_inv, because what follows is
-    # `ganita_f64_pow(cx_abs(a), n)` and `cx_abs` is itself `sqrt(cx_norm_sq)` —
-    # the value is already gone once |a|² is subnormal, so guarding the squared
-    # quantity at DBL_MIN cuts exactly where cx_abs stops carrying information.
-    # ⛔ The tempting sharper form `norm_sq == 0 && n <= 0` is REFUTED, not
-    # deferred: it does not fire at n = 0, so ganita's `pow(x,0) = 1` reaches
-    # cx_from_polar and `cx_powf(0+0i, 0)` returns 1.0 — measured, it fails
-    # tests/abuse.tcyr's 0^0 assertion. Changing that is a decision about hisab's
-    # 0^0, not a free sharpening, and is not folded in here.
-    # [measured: docs/audit/2026-09-09-epsilon-open.json]
-    if (f64_lt(cx_norm_sq(a), F64_TINY) == 1) { return cx_zero(); }
-    var r = ganita_f64_pow(cx_abs(a), n);
+    # ⛔ 2.17.0 — THIS GUARDED THE SQUARE. The 2.15.0 note it replaces argued a
+    # threshold on |a|² was exactly right here "because `cx_abs` is itself
+    # `sqrt(cx_norm_sq)`, so the value is already gone once |a|² is subnormal".
+    # That premise died with the rewrite of `cx_abs` above: the modulus is exact at
+    # every scale now, so the value is NOT gone and this guard was fabricating a
+    # zero for every modulus below ~1.5e-154. Measured: `cx_powf(2^-600 + 0i, 1)`
+    # returned exactly 0 where the answer is 2^-600, bit for bit.
+    # ⭐ Guard the MODULUS, not its square, and guard exactly what fails:
+    # `ganita_f64_pow(m, n)` needs a non-zero `m`, and `m == 0` holds only for an
+    # exactly zero `a`. There is no scale left to choose, which is the point.
+    # ⛔ The tempting sharper form `m == 0 && n <= 0` is REFUTED, not deferred: it
+    # does not fire at n = 0, so ganita's `pow(x,0) = 1` reaches cx_from_polar and
+    # `cx_powf(0+0i, 0)` returns 1.0 — measured, it fails tests/abuse.tcyr's 0^0
+    # assertion. Changing that is a decision about hisab's 0^0, not a free
+    # sharpening, and is not folded in here.
+    # [measured: scratch two-sided binade probe on the 2.16.0 tree, 2026-09-10]
+    var m = cx_abs(a);
+    if (f64_eq(m, 0) == 1) { return cx_zero(); }
+    var r = ganita_f64_pow(m, n);
     var theta = f64_mul(cx_arg(a), n);
     return cx_from_polar(r, theta);
 }
@@ -195,7 +227,19 @@ fn cx_cos(a) {
 
 #must_use
 fn cx_is_zero(a, tol) {
-    if (f64_lt(cx_norm_sq(a), f64_mul(tol, tol)) == 1) { return 1; }
+    # ⛔ 2.17.0 — THIS SQUARED BOTH SIDES: `cx_norm_sq(a) < tol*tol`. It is
+    # dimensionally consistent, which is why the note beside it in
+    # tests/edge_cases.tcyr called it correct while the rest of the module was
+    # being repaired — and it is still numerically wrong, because BOTH squares
+    # flush. Measured: `cx_is_zero(2^-700 + 0i, 2^-600)` answered 0 for a value a
+    # hundred binades BELOW the tolerance, since 2^-1400 and 2^-1200 both underflow
+    # to exactly 0 and `0 < 0` is false. The overflow end fails the same way:
+    # `cx_is_zero(2^600 + 0i, 2^700)` compares +Inf against +Inf.
+    # ⭐ Compare the modulus against the tolerance the caller actually passed.
+    # `cx_abs` is exact at every scale now, so nothing is squared and the caller's
+    # tolerance keeps the units it was written in.
+    # [measured: scratch probe on the 2.16.0 tree, 2026-09-10]
+    if (f64_lt(cx_abs(a), tol) == 1) { return 1; }
     return 0;
 }
 

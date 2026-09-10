@@ -208,7 +208,47 @@ fn hvec2_dot(a, b) {
 fn hvec2_length_sq(v) { return hvec2_dot(v, v); }
 
 #must_use
-fn hvec2_length(v) { return f64_sqrt(hvec2_length_sq(v)); }
+# ⭐ TWO LEGS IS THE ONE ARITY THE STDLIB ALREADY COVERS. This was a hand-rolled
+# scale-by-the-larger-leg loop until it was measured against `ganita_f64_hypot`
+# and found **bit-identical on 6294 comparisons** — every binade from 2^-1074 to
+# 2^1023, subnormals included, on equal legs, wildly asymmetric legs and negative
+# legs, plus zero and ±Inf. Its one divergence, (Inf, NaN), is unreachable from
+# `hvec2_length`: a NaN sum satisfies neither guard below and returns `sqrt(NaN)`
+# without ever entering the rescue.
+# ⚠ The 3- and 4-component helpers in vec3/vec4/quat/lie stay hand-rolled — there
+# is no stdlib function of that arity to delegate to. Two legs is the exception,
+# not the start of a pattern.
+# [measured: scratch equivalence probe, 2026-09-10]
+fn _hvec2_len_scaled(v) {
+    return ganita_f64_hypot(HVec2_x(v), HVec2_y(v));
+}
+
+# ⛔ 2.17.0 — THIS SQUARED BEFORE SUMMING, AND LOST 537 BINADES AT THE BOTTOM AND
+# 512 AT THE TOP. `x*x` underflows to zero for any component below 2^-537 and
+# overflows to +Inf above 2^511, so a perfectly ordinary vector got a length of
+# exactly 0 or exactly +Inf. ⚠ And it was materially wrong BEFORE it reached
+# either: a SUBNORMAL sum has already lost most of its mantissa, so the answer is
+# finite, plausible and wrong — measured 11.8% out at 2^-539, with nothing to
+# signal it. That silent band is the dangerous third of the class.
+# [measured: two-sided binade sweep, 2026-09-10]
+#
+# ⭐ FAST PATH, NOT UNCONDITIONAL SCALING. The naive sum announces its own failure:
+# it is subnormal, zero or +Inf exactly when it cannot be trusted, and exact
+# otherwise. So take it when it is NORMAL and rescale only when it is not.
+# Measured: unconditional scaling costs **+119%** on this helper; the fast path
+# costs **+12%** and is not distinguishable in any of the 72 tracked benchmarks
+# (median delta -0.03%, the largest move being a row that never calls it).
+# ⚠ The trigger is `< F64_TINY`, NOT `== 0` — measured, an `== 0` trigger leaves
+# the subnormal band up to 11.8% wrong.
+# ⚠ And the `+Inf` short-circuit inside the helper is REQUIRED: without it
+# `Inf/Inf` is NaN and the documented infinity contract regresses.
+# [measured: 1106-scale two-sided sweep; naive wrong at 60, guarded at 0]
+fn hvec2_length(v) {
+    var ls = hvec2_length_sq(v);
+    if (f64_lt(ls, F64_TINY) == 1) { return _hvec2_len_scaled(v); }
+    if (f64_eq(ls, F64_POS_INF) == 1) { return _hvec2_len_scaled(v); }
+    return f64_sqrt(ls);
+}
 
 #must_use
 fn hvec2_normalize(v) {
@@ -350,7 +390,46 @@ fn hvec3_cross(a, b) {
 fn hvec3_length_sq(v) { return hvec3_dot(v, v); }
 
 #must_use
-fn hvec3_length(v) { return f64_sqrt(hvec3_length_sq(v)); }
+fn _hvec3_len_scaled(v) {
+    var x = HVec3_x(v);
+    var y = HVec3_y(v);
+    var z = HVec3_z(v);
+    var mx = f64_max(f64_max(f64_abs(x), f64_abs(y)), f64_abs(z));
+    if (f64_gt(mx, 0) == 0) { return mx; }
+    # ⚠ Inf/Inf is NaN, so the infinity contract needs its own exit here.
+    if (f64_eq(mx, F64_POS_INF) == 1) { return mx; }
+    var xs = f64_div(x, mx);
+    var ys = f64_div(y, mx);
+    var zs = f64_div(z, mx);
+    return f64_mul(mx, f64_sqrt(f64_add(f64_add(f64_mul(xs, xs), f64_mul(ys, ys)), f64_mul(zs, zs))));
+}
+
+# ⛔ 2.17.0 — THIS SQUARED BEFORE SUMMING, AND LOST 537 BINADES AT THE BOTTOM AND
+# 512 AT THE TOP. `x*x` underflows to zero for any component below 2^-537 and
+# overflows to +Inf above 2^511, so a perfectly ordinary vector got a length of
+# exactly 0 or exactly +Inf. ⚠ And it was materially wrong BEFORE it reached
+# either: a SUBNORMAL sum has already lost most of its mantissa, so the answer is
+# finite, plausible and wrong — measured 11.8% out at 2^-539, with nothing to
+# signal it. That silent band is the dangerous third of the class.
+# [measured: two-sided binade sweep, 2026-09-10]
+#
+# ⭐ FAST PATH, NOT UNCONDITIONAL SCALING. The naive sum announces its own failure:
+# it is subnormal, zero or +Inf exactly when it cannot be trusted, and exact
+# otherwise. So take it when it is NORMAL and rescale only when it is not.
+# Measured: unconditional scaling costs **+119%** on this helper; the fast path
+# costs **+12%** and is not distinguishable in any of the 72 tracked benchmarks
+# (median delta -0.03%, the largest move being a row that never calls it).
+# ⚠ The trigger is `< F64_TINY`, NOT `== 0` — measured, an `== 0` trigger leaves
+# the subnormal band up to 11.8% wrong.
+# ⚠ And the `+Inf` short-circuit inside the helper is REQUIRED: without it
+# `Inf/Inf` is NaN and the documented infinity contract regresses.
+# [measured: 1106-scale two-sided sweep; naive wrong at 60, guarded at 0]
+fn hvec3_length(v) {
+    var ls = hvec3_length_sq(v);
+    if (f64_lt(ls, F64_TINY) == 1) { return _hvec3_len_scaled(v); }
+    if (f64_eq(ls, F64_POS_INF) == 1) { return _hvec3_len_scaled(v); }
+    return f64_sqrt(ls);
+}
 
 #must_use
 fn hvec3_normalize(v) {
@@ -558,7 +637,50 @@ fn hvec4_dot(a, b) {
 #must_use
 fn hvec4_length_sq(v) { return hvec4_dot(v, v); }
 #must_use
-fn hvec4_length(v) { return f64_sqrt(hvec4_length_sq(v)); }
+fn _hvec4_len_scaled(v) {
+    var x = HVec4_x(v);
+    var y = HVec4_y(v);
+    var z = HVec4_z(v);
+    var w = HVec4_w(v);
+    var mx = f64_max(f64_max(f64_max(f64_abs(x), f64_abs(y)), f64_abs(z)), f64_abs(w));
+    if (f64_gt(mx, 0) == 0) { return mx; }
+    # ⚠ Inf/Inf is NaN, so the infinity contract needs its own exit here.
+    if (f64_eq(mx, F64_POS_INF) == 1) { return mx; }
+    var xs = f64_div(x, mx);
+    var ys = f64_div(y, mx);
+    var zs = f64_div(z, mx);
+    var ws = f64_div(w, mx);
+    var acc = f64_add(f64_mul(xs, xs), f64_mul(ys, ys));
+    acc = f64_add(acc, f64_add(f64_mul(zs, zs), f64_mul(ws, ws)));
+    return f64_mul(mx, f64_sqrt(acc));
+}
+
+# ⛔ 2.17.0 — THIS SQUARED BEFORE SUMMING, AND LOST 537 BINADES AT THE BOTTOM AND
+# 512 AT THE TOP. `x*x` underflows to zero for any component below 2^-537 and
+# overflows to +Inf above 2^511, so a perfectly ordinary vector got a length of
+# exactly 0 or exactly +Inf. ⚠ And it was materially wrong BEFORE it reached
+# either: a SUBNORMAL sum has already lost most of its mantissa, so the answer is
+# finite, plausible and wrong — measured 11.8% out at 2^-539, with nothing to
+# signal it. That silent band is the dangerous third of the class.
+# [measured: two-sided binade sweep, 2026-09-10]
+#
+# ⭐ FAST PATH, NOT UNCONDITIONAL SCALING. The naive sum announces its own failure:
+# it is subnormal, zero or +Inf exactly when it cannot be trusted, and exact
+# otherwise. So take it when it is NORMAL and rescale only when it is not.
+# Measured: unconditional scaling costs **+119%** on this helper; the fast path
+# costs **+12%** and is not distinguishable in any of the 72 tracked benchmarks
+# (median delta -0.03%, the largest move being a row that never calls it).
+# ⚠ The trigger is `< F64_TINY`, NOT `== 0` — measured, an `== 0` trigger leaves
+# the subnormal band up to 11.8% wrong.
+# ⚠ And the `+Inf` short-circuit inside the helper is REQUIRED: without it
+# `Inf/Inf` is NaN and the documented infinity contract regresses.
+# [measured: 1106-scale two-sided sweep; naive wrong at 60, guarded at 0]
+fn hvec4_length(v) {
+    var ls = hvec4_length_sq(v);
+    if (f64_lt(ls, F64_TINY) == 1) { return _hvec4_len_scaled(v); }
+    if (f64_eq(ls, F64_POS_INF) == 1) { return _hvec4_len_scaled(v); }
+    return f64_sqrt(ls);
+}
 
 #must_use
 fn hvec4_normalize(v) {
@@ -673,7 +795,30 @@ fn hquat_dot(a, b) {
 #must_use
 fn hquat_length_sq(q) { return hquat_dot(q, q); }
 #must_use
-fn hquat_length(q) { return f64_sqrt(hquat_length_sq(q)); }
+fn _hquat_len_scaled(q) {
+    var x = HQuat_x(q); var y = HQuat_y(q); var z = HQuat_z(q); var w = HQuat_w(q);
+    var mx = f64_max(f64_max(f64_abs(x), f64_abs(y)), f64_max(f64_abs(z), f64_abs(w)));
+    if (f64_gt(mx, 0) == 0) { return mx; }
+    # ⚠ Inf/Inf is NaN, so the infinity contract needs its own exit here.
+    if (f64_eq(mx, F64_POS_INF) == 1) { return mx; }
+    var xs = f64_div(x, mx); var ys = f64_div(y, mx);
+    var zs = f64_div(z, mx); var ws = f64_div(w, mx);
+    var acc = f64_add(f64_mul(xs, xs), f64_mul(ys, ys));
+    acc = f64_add(acc, f64_add(f64_mul(zs, zs), f64_mul(ws, ws)));
+    return f64_mul(mx, f64_sqrt(acc));
+}
+
+# ⛔ 2.17.0 — same class as `hvec3_length`: squaring before summing loses 537
+# binades below and 512 above, and is silently wrong in the subnormal band
+# between. ⚠ This one matters beyond its own module: `hquat_normalize` and
+# `hquat_inverse` route through it, and 2.11.1 already repaired those two for
+# returning a fabricated IDENTITY — the guard was fixed then, the norm was not.
+fn hquat_length(q) {
+    var ls = hquat_length_sq(q);
+    if (f64_lt(ls, F64_TINY) == 1) { return _hquat_len_scaled(q); }
+    if (f64_eq(ls, F64_POS_INF) == 1) { return _hquat_len_scaled(q); }
+    return f64_sqrt(ls);
+}
 
 #must_use
 # 2.11.1: threshold was EPSILON_F64 (1e-12), which fabricated the identity for
@@ -1931,8 +2076,33 @@ fn cx_norm_sq(a) {
       f64_mul(HComplex_im(a), HComplex_im(a)));
 }
 
+# ⛔ 2.17.0 — THIS SQUARED BEFORE SUMMING, so `cx_abs` — the modulus that `cx_ln`,
+# `cx_sqrt`, `cx_powf` and `cmat_exp` are every one of them built on — was wrong
+# on 994 of 2041 binades. `re*re` underflows to zero below 2^-537 and overflows to
+# +Inf above 2^511, so |3k + 4ki| came back as exactly 0 or exactly +Inf where 5k
+# is perfectly representable — measured +Inf at k = 2^700 for an answer of 5·2^700.
+# ⚠ And the silent band is worse than either end: at k = 2^-539 the sum is
+# SUBNORMAL, so the answer is finite, plausible and **13.1% too large**, with
+# nothing at all to signal it.
+# [measured: 2041-binade two-sided sweep on the 2.16.0 tree, 2026-09-10]
+#
+# ⭐ FAST PATH, NOT UNCONDITIONAL SCALING — the same shape as `hvec3_length`. The
+# naive sum announces its own failure: it is subnormal, zero or +Inf exactly when
+# it cannot be trusted, and exact otherwise, so take it when it is NORMAL and
+# rescale only when it is not.
+# ⭐ The rescue is `ganita_f64_hypot` rather than a hand-rolled copy of the
+# scale-by-the-larger-leg loop: the stdlib ships exactly this function for exactly
+# this reason, and this file already calls into ganita for `cx_arg`/`cx_powf`.
+# ⚠ A NaN never reaches the rescue — a NaN norm_sq satisfies neither guard and
+# falls through to `f64_sqrt`, so hisab's NaN-in/NaN-out contract is unchanged and
+# ganita's differing (Inf, NaN) rule is unreachable from here.
 #must_use
-fn cx_abs(a) { return f64_sqrt(cx_norm_sq(a)); }
+fn cx_abs(a) {
+    var ns = cx_norm_sq(a);
+    if (f64_lt(ns, F64_TINY) == 1) { return ganita_f64_hypot(HComplex_re(a), HComplex_im(a)); }
+    if (f64_eq(ns, F64_POS_INF) == 1) { return ganita_f64_hypot(HComplex_re(a), HComplex_im(a)); }
+    return f64_sqrt(ns);
+}
 
 #must_use
 fn cx_arg(a) { return ganita_f64_atan2(HComplex_im(a), HComplex_re(a)); }
@@ -1987,18 +2157,25 @@ fn cx_sqrt(a) {
 
 #must_use
 fn cx_powf(a, n) {
-    # ⚠ A THRESHOLD IS RIGHT HERE, unlike cx_div/cx_inv, because what follows is
-    # `ganita_f64_pow(cx_abs(a), n)` and `cx_abs` is itself `sqrt(cx_norm_sq)` —
-    # the value is already gone once |a|² is subnormal, so guarding the squared
-    # quantity at DBL_MIN cuts exactly where cx_abs stops carrying information.
-    # ⛔ The tempting sharper form `norm_sq == 0 && n <= 0` is REFUTED, not
-    # deferred: it does not fire at n = 0, so ganita's `pow(x,0) = 1` reaches
-    # cx_from_polar and `cx_powf(0+0i, 0)` returns 1.0 — measured, it fails
-    # tests/abuse.tcyr's 0^0 assertion. Changing that is a decision about hisab's
-    # 0^0, not a free sharpening, and is not folded in here.
-    # [measured: docs/audit/2026-09-09-epsilon-open.json]
-    if (f64_lt(cx_norm_sq(a), F64_TINY) == 1) { return cx_zero(); }
-    var r = ganita_f64_pow(cx_abs(a), n);
+    # ⛔ 2.17.0 — THIS GUARDED THE SQUARE. The 2.15.0 note it replaces argued a
+    # threshold on |a|² was exactly right here "because `cx_abs` is itself
+    # `sqrt(cx_norm_sq)`, so the value is already gone once |a|² is subnormal".
+    # That premise died with the rewrite of `cx_abs` above: the modulus is exact at
+    # every scale now, so the value is NOT gone and this guard was fabricating a
+    # zero for every modulus below ~1.5e-154. Measured: `cx_powf(2^-600 + 0i, 1)`
+    # returned exactly 0 where the answer is 2^-600, bit for bit.
+    # ⭐ Guard the MODULUS, not its square, and guard exactly what fails:
+    # `ganita_f64_pow(m, n)` needs a non-zero `m`, and `m == 0` holds only for an
+    # exactly zero `a`. There is no scale left to choose, which is the point.
+    # ⛔ The tempting sharper form `m == 0 && n <= 0` is REFUTED, not deferred: it
+    # does not fire at n = 0, so ganita's `pow(x,0) = 1` reaches cx_from_polar and
+    # `cx_powf(0+0i, 0)` returns 1.0 — measured, it fails tests/abuse.tcyr's 0^0
+    # assertion. Changing that is a decision about hisab's 0^0, not a free
+    # sharpening, and is not folded in here.
+    # [measured: scratch two-sided binade probe on the 2.16.0 tree, 2026-09-10]
+    var m = cx_abs(a);
+    if (f64_eq(m, 0) == 1) { return cx_zero(); }
+    var r = ganita_f64_pow(m, n);
     var theta = f64_mul(cx_arg(a), n);
     return cx_from_polar(r, theta);
 }
@@ -2017,7 +2194,19 @@ fn cx_cos(a) {
 
 #must_use
 fn cx_is_zero(a, tol) {
-    if (f64_lt(cx_norm_sq(a), f64_mul(tol, tol)) == 1) { return 1; }
+    # ⛔ 2.17.0 — THIS SQUARED BOTH SIDES: `cx_norm_sq(a) < tol*tol`. It is
+    # dimensionally consistent, which is why the note beside it in
+    # tests/edge_cases.tcyr called it correct while the rest of the module was
+    # being repaired — and it is still numerically wrong, because BOTH squares
+    # flush. Measured: `cx_is_zero(2^-700 + 0i, 2^-600)` answered 0 for a value a
+    # hundred binades BELOW the tolerance, since 2^-1400 and 2^-1200 both underflow
+    # to exactly 0 and `0 < 0` is false. The overflow end fails the same way:
+    # `cx_is_zero(2^600 + 0i, 2^700)` compares +Inf against +Inf.
+    # ⭐ Compare the modulus against the tolerance the caller actually passed.
+    # `cx_abs` is exact at every scale now, so nothing is squared and the caller's
+    # tolerance keeps the units it was written in.
+    # [measured: scratch probe on the 2.16.0 tree, 2026-09-10]
+    if (f64_lt(cx_abs(a), tol) == 1) { return 1; }
     return 0;
 }
 
@@ -20471,11 +20660,42 @@ fn _su2_y(s) { return load64(s + 16); }
 fn _su2_z(s) { return load64(s + 24); }
 
 # Construct from raw quaternion components (w, x, y, z). Normalizes.
+# ⛔ 2.17.0 — EVERY MAP IN THIS MODULE AND IN `lie_ext` COMPUTED ITS NORM AS A RAW
+# SUM OF SQUARES, so a component below 2^-537 squared to zero and the norm came
+# back 0 for a vector that is not zero — collapsing the rotation to the identity
+# with no error channel. 2.16.0 repaired the LOG side and measured that the floor
+# then moved to the EXP side, which is this; the round-trip is exact to 2^-537 and
+# fails at 2^-538 for exactly that reason.
+# ⭐ Divide through by the largest component before squaring: every intermediate is
+# then O(1) and the floor becomes f64's own. Same technique as `cx_div`'s Smith's
+# algorithm (2.15.0) and the two log maps (2.16.0), now shared rather than copied.
+# ⚠ The `+Inf` exit is not optional — Inf/Inf is NaN, and without it an infinite
+# component turns a finite-looking answer into a NaN.
+# [measured: su2 round-trip exact to 2^-537, first bad at 2^-538, 2026-09-10]
+fn _lie_norm3(x, y, z) {
+    var mx = f64_max(f64_abs(x), f64_max(f64_abs(y), f64_abs(z)));
+    if (f64_gt(mx, 0) == 0) { return mx; }
+    if (f64_eq(mx, F64_POS_INF) == 1) { return mx; }
+    var xs = f64_div(x, mx); var ys = f64_div(y, mx); var zs = f64_div(z, mx);
+    return f64_mul(mx, f64_sqrt(f64_add(f64_add(f64_mul(xs, xs), f64_mul(ys, ys)),
+          f64_mul(zs, zs))));
+}
+
+fn _lie_norm4(w, x, y, z) {
+    var mx = f64_max(f64_max(f64_abs(w), f64_abs(x)), f64_max(f64_abs(y), f64_abs(z)));
+    if (f64_gt(mx, 0) == 0) { return mx; }
+    if (f64_eq(mx, F64_POS_INF) == 1) { return mx; }
+    var ws = f64_div(w, mx); var xs = f64_div(x, mx);
+    var ys = f64_div(y, mx); var zs = f64_div(z, mx);
+    var acc = f64_add(f64_mul(ws, ws), f64_mul(xs, xs));
+    acc = f64_add(acc, f64_add(f64_mul(ys, ys), f64_mul(zs, zs)));
+    return f64_mul(mx, f64_sqrt(acc));
+}
+
 fn su2_from_quat(q) {
     var qx = HQuat_x(q); var qy = HQuat_y(q);
     var qz = HQuat_z(q); var qw = HQuat_w(q);
-    var norm = f64_sqrt(f64_add(f64_add(f64_mul(qw, qw), f64_mul(qx, qx)),
-        f64_add(f64_mul(qy, qy), f64_mul(qz, qz))));
+    var norm = _lie_norm4(qw, qx, qy, qz);
     # ⛔ `norm` is the LENGTH of the caller's axis/vector in the caller's own units,
     # against an absolute 1e-12 — and every fallback here is a structurally valid
     # element (identity rotation, identity boost) returned with no rc, so a caller
@@ -20506,7 +20726,7 @@ fn su2_from_axis_angle(axis, angle) {
     var c_half = f64_cos(half);
     # Normalize axis
     var ax = HVec3_x(axis); var ay = HVec3_y(axis); var az = HVec3_z(axis);
-    var len = f64_sqrt(f64_add(f64_add(f64_mul(ax, ax), f64_mul(ay, ay)), f64_mul(az, az)));
+    var len = _lie_norm3(ax, ay, az);
     if (f64_lt(len, F64_TINY) == 1) {
         return _su2_alloc(F64_ONE, 0, 0, 0);
     }
@@ -20557,7 +20777,7 @@ fn su2_inv(s) {
 #   su2_to_rotation_matrix(su2_exp(w)) == so3_exp(w)   (the SU(2) -> SO(3) cover)
 fn su2_exp(v) {
     var ox = HVec3_x(v); var oy = HVec3_y(v); var oz = HVec3_z(v);
-    var norm = f64_sqrt(f64_add(f64_add(f64_mul(ox, ox), f64_mul(oy, oy)), f64_mul(oz, oz)));
+    var norm = _lie_norm3(ox, oy, oz);
     if (f64_lt(norm, F64_TINY) == 1) {
         return su2_identity();
     }
@@ -20604,13 +20824,13 @@ fn su2_log(s) {
     # intermediate O(1) and moves the floor to where the components themselves
     # stop being representable.
     # [measured: naive norm returns 0 at 2^-665; scaled norm is exact there]
-    var mx = f64_max(f64_abs(x), f64_max(f64_abs(y), f64_abs(z)));
-    if (f64_gt(mx, 0) == 0) {
+    # 2.17.0: this was 2.16.0's own inline copy of the scaling; it is now the
+    # shared `_lie_norm3`, so the technique has ONE implementation in this module
+    # rather than one per call site.
+    var sin_half = _lie_norm3(x, y, z);
+    if (f64_gt(sin_half, 0) == 0) {
         return hvec3_new(0, 0, 0);
     }
-    var xs = f64_div(x, mx); var ys = f64_div(y, mx); var zs = f64_div(z, mx);
-    var sin_half = f64_mul(mx,
-      f64_sqrt(f64_add(f64_add(f64_mul(xs, xs), f64_mul(ys, ys)), f64_mul(zs, zs))));
     var half_theta = ganita_f64_atan2(sin_half, w);
     var sc = f64_div(f64_mul(half_theta, F64_TWO), sin_half);
     return hvec3_new(f64_mul(sc, x), f64_mul(sc, y), f64_mul(sc, z));
@@ -20832,7 +21052,7 @@ fn lorentz_boost_z(eta) {
 # dir is a Vec3 (will be normalized).
 fn lorentz_boost(dir, eta) {
     var nx = HVec3_x(dir); var ny = HVec3_y(dir); var nz = HVec3_z(dir);
-    var norm = f64_sqrt(f64_add(f64_add(f64_mul(nx, nx), f64_mul(ny, ny)), f64_mul(nz, nz)));
+    var norm = _lie_norm3(nx, ny, nz);
     if (f64_lt(norm, F64_TINY) == 1) {
         return lorentz_identity();
     }
@@ -20873,7 +21093,7 @@ fn lorentz_boost(dir, eta) {
 # Time component unchanged; spatial block uses Rodrigues' formula.
 fn lorentz_rotate(axis, angle) {
     var nx = HVec3_x(axis); var ny = HVec3_y(axis); var nz = HVec3_z(axis);
-    var norm = f64_sqrt(f64_add(f64_add(f64_mul(nx, nx), f64_mul(ny, ny)), f64_mul(nz, nz)));
+    var norm = _lie_norm3(nx, ny, nz);
     if (f64_lt(norm, F64_TINY) == 1) {
         return lorentz_identity();
     }
@@ -21155,7 +21375,8 @@ fn _m3_commutator(a, b) {
 # where K = skew-symmetric matrix of normalized axis
 fn so3_from_axis_angle(axis, angle) {
     var nx = HVec3_x(axis); var ny = HVec3_y(axis); var nz = HVec3_z(axis);
-    var norm = f64_sqrt(f64_add(f64_add(f64_mul(nx, nx), f64_mul(ny, ny)), f64_mul(nz, nz)));
+    # 2.17.0: scaled norm, shared with lie.cyr — see `_lie_norm3` there.
+    var norm = _lie_norm3(nx, ny, nz);
     # ⛔ `norm` is the LENGTH of the caller's axis/vector in the caller's own units,
     # against an absolute 1e-12 — and every fallback here is a structurally valid
     # element (identity rotation, identity boost) returned with no rc, so a caller
@@ -21246,7 +21467,7 @@ fn so3_inverse(r) { return m3_transpose(r); }
 # Uses Rodrigues formula: exp([omega]_x) = I + sinc(theta)*K + (1-cos(theta))/theta^2 * K^2
 fn so3_exp(omega) {
     var ox = HVec3_x(omega); var oy = HVec3_y(omega); var oz = HVec3_z(omega);
-    var theta = f64_sqrt(f64_add(f64_add(f64_mul(ox, ox), f64_mul(oy, oy)), f64_mul(oz, oz)));
+    var theta = _lie_norm3(ox, oy, oz);
     if (f64_lt(theta, F64_TINY) == 1) {
         return m3_identity();
     }
@@ -21276,14 +21497,9 @@ fn so3_log(R) {
     var az = f64_sub(m3_get(R, 0, 1), m3_get(R, 1, 0));
     # ⚠ Scaled, for the same reason as `su2_log`: squaring first would flush the
     # antisymmetric part to zero below ~2^-511 and lose the rotation again.
-    var amx = f64_max(f64_abs(ax), f64_max(f64_abs(ay), f64_abs(az)));
-    var asym = 0;
-    if (f64_gt(amx, 0) == 1) {
-        var axs = f64_div(ax, amx); var ays = f64_div(ay, amx);
-        var azs = f64_div(az, amx);
-        asym = f64_mul(amx, f64_sqrt(f64_add(f64_add(f64_mul(axs, axs),
-                f64_mul(ays, ays)), f64_mul(azs, azs))));
-    }
+    # 2.17.0: this was 2.16.0's own inline copy of the technique; it is now the
+    # shared `_lie_norm3`, so there is one implementation rather than three.
+    var asym = _lie_norm3(ax, ay, az);
 
     # |antisym| == 0 is either the identity or a rotation by exactly pi; the trace
     # separates them, and only the pi case needs the eigenvector extraction below.
@@ -21508,7 +21724,7 @@ fn se3_exp(twist) {
     var vel = _twist_v(twist);
 
     var ox = HVec3_x(omega); var oy = HVec3_y(omega); var oz = HVec3_z(omega);
-    var theta = f64_sqrt(f64_add(f64_add(f64_mul(ox, ox), f64_mul(oy, oy)), f64_mul(oz, oz)));
+    var theta = _lie_norm3(ox, oy, oz);
 
     # ⛔ 2.16.0 — THE GUARD COULD NOT SIMPLY BE LOWERED, WHICH IS WHY THIS WAITED.
     # 2.15.0 measured that putting DBL_MIN here introduces a NEW defect: the V
@@ -21568,7 +21784,7 @@ fn se3_log(se) {
     # Get omega from rotation
     var omega = su2_log(rot);
     var ox = HVec3_x(omega); var oy = HVec3_y(omega); var oz = HVec3_z(omega);
-    var theta = f64_sqrt(f64_add(f64_add(f64_mul(ox, ox), f64_mul(oy, oy)), f64_mul(oz, oz)));
+    var theta = _lie_norm3(ox, oy, oz);
 
     # ⛔ Same story as `se3_exp`: V^-1 divides by theta^2, so the guard could not be
     # lowered until the coefficient could be computed at small theta.

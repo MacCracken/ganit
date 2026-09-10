@@ -11904,6 +11904,107 @@ assert_eq(HComplex_re(_cx_pi), 0x3FF0000000000000,
 assert_eq(HComplex_im(_cx_pi), 0xBFE0000000000000,
   "cx_div: a purely imaginary divisor gives im = -0.5");
 
+test_group("complex 2.17.0: the modulus is scale-free");
+
+# ⛔ `cx_abs` SQUARED BEFORE SUMMING, and it is the modulus that `cx_ln`,
+# `cx_sqrt`, `cx_powf` and `cmat_exp` are every one of them built on — so ONE
+# defect reached four public functions. Below 2^-537 `re*re` underflowed to zero
+# and above 2^511 it overflowed, so |3k + 4ki| came back as exactly 0 or exactly
+# +Inf where 5k is perfectly representable. Measured on the 2.16.0 tree: **994 of
+# these 2041 scales were wrong**, 483 below 1 and 511 at or above it.
+# ⭐ (3k, 4k) -> 5k is the fixture because all three are EXACT at every power of
+# two, so this compares bit for bit with no tolerance to hide behind.
+# ⚠ BOTH BANDS IN ONE LOOP. A one-sided sweep — the shape every earlier scale
+# sweep in this file used — would have left the overflow half untested, and that
+# half is the majority of the failures.
+# ⚠ What this sweep does NOT discriminate, said out loud: WIDENING the fast-path
+# trigger is a pure pessimisation, not a defect, because the rescue is exact at
+# every scale. Only narrowing it (to `== 0`, which leaves the subnormal band up to
+# 13.1% wrong) or deleting it changes an answer, and the sweep kills both — the
+# subnormal band is inside its range, at e = -539.
+# [measured: scratch two-sided binade probe on the 2.16.0 tree, 2026-09-10]
+# [measured: 10-mutant run over complex.cyr + vec2.cyr — 9 killed, 2026-09-10]
+var _CA_RUN = 0;
+var _CA_BAD = 0;
+for (var _ca_e = 0 - 1020; _ca_e <= 1020; _ca_e = _ca_e + 1) {
+    var _ca_k = _gp2(_ca_e);
+    _CA_RUN = _CA_RUN + 1;
+    if (cx_abs(cx_new(f64_mul(f64_from(3), _ca_k), f64_mul(f64_from(4), _ca_k)))
+      != f64_mul(f64_from(5), _ca_k)) { _CA_BAD = _CA_BAD + 1; }
+}
+assert_eq(_CA_RUN, 2041, "the cx_abs binade sweep actually ran 2041 scales");
+assert_eq(_CA_BAD, 0,
+  "cx_abs: |3k+4ki| = 5k bit-exact for k = 2^-1020 .. 2^1020");
+
+# ⭐ ANTI-DELETION and the boundary contracts, none of which the sweep reaches.
+assert_eq(cx_abs(cx_zero()), 0, "cx_abs: an exactly zero argument still has modulus 0");
+assert_eq(cx_abs(cx_new(F64_POS_INF, 0)), F64_POS_INF, "cx_abs: +Inf in, +Inf out");
+assert_eq(cx_abs(cx_new(0, f64_neg(F64_POS_INF))), F64_POS_INF,
+  "cx_abs: a negative infinite leg still gives +Inf");
+# NaN is the only value not equal to itself, which is the portable test here.
+var _ca_nan = cx_abs(cx_new(0x7FF8000000000000, 0));
+assert_eq(f64_eq(_ca_nan, _ca_nan), 0, "cx_abs: NaN propagates, it is not zeroed");
+
+# ⭐ `cx_ln` AND `cx_sqrt` ARE REPAIRED WITH NO CHANGE AT THEIR OWN LINES, and
+# these are the assertions that say so. Through 2.16.0 `cx_ln(2^-600 + 0i).re` was
+# `ln(0)` = -Inf and `cx_sqrt(2^-600 + 0i).re` was 0; both now agree bit for bit
+# with the real-valued stdlib call over the whole band the defect had eaten.
+# ⚠ Asserted against `f64_ln`/`f64_sqrt` rather than a hand-written constant so
+# the check cannot drift from the stdlib it is built on.
+var _CL_RUN = 0;
+var _CL_BAD = 0;
+for (var _cl_e = 0 - 1000; _cl_e <= 0 - 512; _cl_e = _cl_e + 1) {
+    var _cl_k = _gp2(_cl_e);
+    _CL_RUN = _CL_RUN + 1;
+    if (HComplex_re(cx_ln(cx_new(_cl_k, 0))) != f64_ln(_cl_k)) { _CL_BAD = _CL_BAD + 1; }
+    if (HComplex_re(cx_sqrt(cx_new(_cl_k, 0))) != f64_sqrt(_cl_k)) { _CL_BAD = _CL_BAD + 1; }
+    # cx_powf(k + 0i, 1) is k, and this is the band the old |a|^2 guard fabricated
+    # a zero over: 2^-600 came back as exactly 0.
+    if (HComplex_re(cx_powf(cx_new(_cl_k, 0), F64_ONE)) != _cl_k) { _CL_BAD = _CL_BAD + 1; }
+}
+assert_eq(_CL_RUN, 489, "the cx_ln / cx_sqrt / cx_powf inheritance sweep ran 489 scales");
+assert_eq(_CL_BAD, 0,
+  "cx_ln / cx_sqrt / cx_powf: exact from 2^-1000 to 2^-512, where all three were dead");
+
+# ⚠ AND A SUBNORMAL MODULUS, WHICH THE SWEEP ABOVE CANNOT REACH. `_gp2` encodes
+# only NORMAL powers of two, so the loop bottoms out at DBL_MIN however deep it
+# runs — and a repair that guards the modulus at `F64_TINY` instead of at zero
+# agrees with the real guard everywhere the sweep looks. Measured: with the sweep
+# alone that mutant SURVIVES; this one assertion kills it. There is no scale to
+# choose here, and this is the assertion that says so.
+# [measured: 10-mutant run over complex.cyr and vec2.cyr, 2026-09-10]
+var _cp_sub = 1 << 24;                            # 2^-1050, subnormal
+assert_eq(HComplex_re(cx_powf(cx_new(_cp_sub, 0), F64_ONE)), _cp_sub,
+  "cx_powf: a subnormal modulus survives — only an exactly zero base is guarded");
+
+# ⭐ ANTI-DELETION for cx_powf: the zero sentinel and the documented 0^0 stay.
+assert_eq(HComplex_re(cx_powf(cx_zero(), F64_ONE)), 0,
+  "cx_powf: an exactly zero base still returns the zero sentinel");
+assert_eq(HComplex_re(cx_powf(cx_zero(), 0)), 0,
+  "cx_powf: 0^0 is still the documented zero, not ganita's 1.0");
+
+# ⛔ `cx_is_zero` SQUARED BOTH SIDES — the value AND the tolerance the caller
+# passed. It is dimensionally consistent, which is why it survived every earlier
+# pass over this module, and it is still wrong at both ends: below ~1.5e-154 both
+# squares flush to exactly 0 and `0 < 0` is false, above ~1.3e154 both become +Inf
+# and `+Inf < +Inf` is false. Either way the answer is a confident 0.
+# ⚠ These four are DIRECTIONAL PAIRS. Asserting only the `== 1` cases would pass
+# on a `return 1` stub; asserting only the `== 0` cases passes on the defect
+# itself, which answered 0 everywhere it failed.
+assert_eq(cx_is_zero(cx_new(_gp2(0 - 700), 0), _gp2(0 - 600)), 1,
+  "cx_is_zero: 2^-700 is below a 2^-600 tolerance (both squares used to flush)");
+assert_eq(cx_is_zero(cx_new(_gp2(0 - 600), 0), _gp2(0 - 700)), 0,
+  "cx_is_zero: 2^-600 is NOT below a 2^-700 tolerance");
+assert_eq(cx_is_zero(cx_new(_gp2(600), 0), _gp2(700)), 1,
+  "cx_is_zero: 2^600 is below a 2^700 tolerance (both squares used to overflow)");
+assert_eq(cx_is_zero(cx_new(_gp2(700), 0), _gp2(600)), 0,
+  "cx_is_zero: 2^700 is NOT below a 2^600 tolerance");
+# The comparison is strict, and an exact zero is below ANY positive tolerance.
+assert_eq(cx_is_zero(cx_new(_gp2(0 - 600), 0), _gp2(0 - 600)), 0,
+  "cx_is_zero: a modulus exactly equal to the tolerance is not zero");
+assert_eq(cx_is_zero(cx_zero(), _gp2(0 - 1000)), 1,
+  "cx_is_zero: exact zero is below even a 2^-1000 tolerance");
+
 test_group("geo 2.14.0: ray/geometry guards are scale-free");
 
 # --- J. THE SIX JETS. Each guarded `den` (or dk/fk) against an absolute 1e-12
