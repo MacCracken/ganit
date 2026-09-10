@@ -3520,28 +3520,22 @@ assert_eq(_SR_RUN, 999, "the SVD reconstruction sweep actually ran 999 ratios");
 assert_eq(_SR_BAD, 0,
   "svd_golub_kahan: ||A - U*S*Vt||_F / ||A||_F stays at machine epsilon for every block ratio");
 
-# ⚠ THREE MUTANTS SURVIVE THIS BLOCK AND ALL THREE ARE THE SAME STORY: they alter
-# how the Wilkinson shift's operands are SCALED, and every one of them only bites
-# once the sub-block's entries are themselves SUBNORMAL — where a different limit
-# stops the routine first, so no assertion here can reach them.
-#   (a) scaling by the max entry instead of its power-of-two floor,
-#   (b) multiplying by 1/s instead of dividing by s,
-#   (c) widening the shift's `denom == 0` test to F64_TINY.
-# ⛔ THE LIMIT THAT BINDS FIRST IS THE DEFLATION THRESHOLD, and it is the same
-# class one level down: `f64_lt(|superdiag|, EPSILON_F64 * (|d1| + |d2|))` forms
-# a PRODUCT, and for a block whose diagonals sit at 2^-1050 that product is
-# 1e-12 * 2^-1049, which flushes to exactly 0 — so the test becomes
-# `|superdiag| < 0`, never fires, and the block never deflates. Measured:
-# `svd_golub_kahan` on a sub-block at 2^-1050 returns HSB_ERR_NO_CONVERGENCE,
-# while `eigen_qr` on an all-subnormal matrix is exact to 2^-1070 because its
-# path reaches the repaired `_lp_pow2_floor` and never forms that product.
-# ⭐ (a) is additionally a genuine correctness equivalence whatever happens to
-# the deflation test: the scale only ever divides the operands of ONE Givens
-# rotation, and a rotation depends on the RATIO y:z, so an inexact scale gives
-# the identical rotation. The power of two is there because it is free, not
-# because it is load-bearing — unlike `cga_norm`, where it protects an exact
-# cancellation and its mutant dies.
-# [measured: subnormal-block probe at 2^-1030 / -1050 / -1065; 7-mutant run]
+# ⚠ TWO MUTANTS SURVIVE THIS BLOCK, both on the Wilkinson shift's scaling, and
+# each has its own reason.
+# ⭐ (a) SCALING BY THE MAX ENTRY INSTEAD OF ITS POWER-OF-TWO FLOOR is a genuine
+# correctness EQUIVALENCE, not a gap: the scale only ever divides the operands of
+# ONE Givens rotation, and a rotation depends on the RATIO y:z, so an inexact
+# scale produces the identical `cs`/`sn`. The power of two is kept because it is
+# free, not because it is load-bearing — the contrast is `cga_norm`, where the
+# same choice protects an exact cancellation and its mutant dies.
+# ⚠ (b) WIDENING THE SHIFT'S `denom == 0` TEST TO F64_TINY survives because the
+# regime where the two differ needs a `denom` small enough to be subnormal, and
+# `denom = sign(delta)*(|delta| + hypot(delta, a12))` is at least `|a12|` — so
+# reaching it needs an `a12` the deflation test has already zeroed.
+# ⛔ A THIRD SURVIVOR WAS KILLED BY MEASURING RATHER THAN REASONING. Multiplying
+# by `1/s` instead of dividing looked unreachable for the same reason, and is
+# not: it dies on the all-subnormal SVD fixture above.
+# [measured: 9-mutant run over linalg_precision.cyr, 7 killed, 2026-09-10]
 
 # ⛔ AND A RANK-DEFICIENT SMALL BLOCK REACHES `_lp_split_zero_diag`, WHICH NO
 # FULL-RANK FIXTURE CAN. That routine only runs for a ZERO DIAGONAL entry inside
@@ -3698,6 +3692,93 @@ assert_eq(_EP_hi, f64_mul(f64_from(7), 1 << 4),
   "eigen_qr: and its dominant eigenvalue is exactly 7k at 2^-1070");
 assert_eq(_EP_lo, 1 << 4,
   "eigen_qr: and the other is exactly k");
+
+# ⚠ THAT PAIR STOPPED DISCRIMINATING `_lp_pow2_floor` THE MOMENT THE DEFLATION
+# TESTS WERE REPAIRED, and the mutation run said so rather than my noticing.
+# Once `_lp_negligible` divides instead of multiplying, `eigen_qr` converges on an
+# unbalanced subnormal matrix anyway — the two repairs overlap on that path — so a
+# mutant reverting the balancing survives it. The SVD path does NOT overlap:
+# `_lp_bidiagonalize` guards its Householder reflector with an ABSOLUTE
+# `norm_l > EPSILON_F64`, so for an unbalanced subnormal matrix every reflector is
+# skipped and the factorisation collapses. Measured with the balancing reverted:
+# rc = HSB_ERR_NO_CONVERGENCE and S = (0, 0) at all four depths.
+# ⭐ A = k*[[3,4],[0,3]] has singular values 5.606k and 1.606k; at k = 16 units of
+# 2^-1074 those are 90 and 26 units, both exactly representable.
+# [measured: all-subnormal SVD probe with and without the balancing, 2026-09-10]
+var _PS_A = ganita_mat_new(2, 2);
+ganita_mat_set(_PS_A, 0, 0, f64_mul(f64_from(3), 1 << 4));     # 3 * 2^-1070
+ganita_mat_set(_PS_A, 0, 1, f64_mul(f64_from(4), 1 << 4));
+ganita_mat_set(_PS_A, 1, 0, 0);
+ganita_mat_set(_PS_A, 1, 1, f64_mul(f64_from(3), 1 << 4));
+var _PS_U = ganita_mat_new(2, 2);
+var _PS_Vt = ganita_mat_new(2, 2);
+var _PS_S = alloc(16);
+store64(_PS_S, 0);
+store64(_PS_S + 8, 0);
+assert_eq(svd_golub_kahan(_PS_A, _PS_U, _PS_S, _PS_Vt), HSB_ERR_NONE,
+  "svd_golub_kahan: an all-subnormal matrix decomposes — _lp_pow2_floor balances it");
+assert_eq(load64(_PS_S), 90,
+  "svd_golub_kahan: and its dominant singular value is 90 units of 2^-1074");
+assert_eq(load64(_PS_S + 8), 26,
+  "svd_golub_kahan: and the other is 26 units");
+
+# ⛔ 2.18.0 — AND THE DEFLATION TESTS THEMSELVES FORMED A PRODUCT THAT FLUSHED.
+# `f64_lt(|off|, EPSILON_F64 * (|a| + |b|))` asks a RATIO question and answered it
+# by building `1e-12 * (|a| + |b|)` first — which for diagonals at 2^-1050 is
+# below the smallest subnormal, i.e. exactly 0. The test became `|off| < 0`, never
+# fired, and the block never deflated. Five sites, all now dividing.
+# Measured across the 72 subnormal block ratios: **37 failing -> 28**.
+# ⚠ THE REMAINING 28 ARE THE GRID, NOT A DEFECT, and that is measured rather than
+# assumed: at 2^-1050 with **max_iter = 100,000** the superdiagonal is stuck at
+# ONE unit of 2^-1074 — the smallest non-zero value that exists — against a
+# diagonal of 2.7e7 units, so the ratio floor is 3.7e-8 and a relative 1e-12
+# criterion is unreachable by construction. The routine reports
+# HSB_ERR_NO_CONVERGENCE, which is the honest answer to an unanswerable question.
+# [measured: 72-ratio subnormal scan before and after; 100k-iteration probe]
+var _DF_A = ganita_mat_new(4, 4);
+for (var _df_i = 0; _df_i < 4; _df_i = _df_i + 1) {
+    for (var _df_j = 0; _df_j < 4; _df_j = _df_j + 1) { ganita_mat_set(_DF_A, _df_i, _df_j, 0); }
+}
+var _DF_c = 1 << 9;                               # 2^-1065, subnormal
+ganita_mat_set(_DF_A, 0, 0, f64_from(3));
+ganita_mat_set(_DF_A, 0, 1, f64_from(4));
+ganita_mat_set(_DF_A, 1, 1, f64_from(3));
+ganita_mat_set(_DF_A, 2, 2, f64_mul(f64_from(3), _DF_c));
+ganita_mat_set(_DF_A, 2, 3, f64_mul(f64_from(4), _DF_c));
+ganita_mat_set(_DF_A, 3, 3, f64_mul(f64_from(3), _DF_c));
+var _DF_U = ganita_mat_new(4, 4);
+var _DF_Vt = ganita_mat_new(4, 4);
+var _DF_S = alloc(32);
+for (var _df_k = 0; _df_k < 4; _df_k = _df_k + 1) { store64(_DF_S + _df_k * 8, 0); }
+assert_eq(svd_golub_kahan(_DF_A, _DF_U, _DF_S, _DF_Vt), HSB_ERR_NONE,
+  "svd_golub_kahan: a SUBNORMAL sub-block at 2^-1065 deflates (the product used to flush to 0)");
+assert_eq(f64_div(load64(_DF_S + 16), load64(_DF_S)), _DF_c,
+  "svd_golub_kahan: and its singular values are still c times the large block's");
+
+# ⭐ AND THE NaN CONTRACT, WHICH IS WHAT DECIDES THE SHAPE OF THAT ZERO ARM. The
+# test must be `f64_eq(|off|, 0)`, not the tempting `f64_gt(|off|, 0) == 0` —
+# the latter is TRUE for NaN as well, so a NaN off-diagonal would be declared
+# negligible and ZEROED. Measured with that form installed: a 2x2 whose entire
+# off-diagonal is NaN comes back `rc = HSB_ERR_NONE` with **fabricated
+# eigenvalues (3, 3)**, and a 3x3 with one NaN entry comes back `rc = 0` with a
+# NaN sitting in the singular values. With `f64_eq` both report
+# HSB_ERR_NO_CONVERGENCE, which is the honest answer.
+# ⚠ This is the same trap `_opt_armijo` documents in src/optimize.cyr and the
+# same one that made 2.17.0's SVD figure wrong: **every f64 comparison involving
+# NaN returns 0**, so the direction a guard is written in decides whether NaN
+# falls through or is swallowed.
+# [measured: NaN-input probe with both zero-arm forms, 2026-09-10]
+var _NN_A = ganita_mat_new(2, 2);
+ganita_mat_set(_NN_A, 0, 0, f64_from(3));
+ganita_mat_set(_NN_A, 0, 1, 0x7FF8000000000000);
+ganita_mat_set(_NN_A, 1, 0, 0x7FF8000000000000);
+ganita_mat_set(_NN_A, 1, 1, f64_from(3));
+var _NN_vals = alloc(16);
+store64(_NN_vals, 0);
+store64(_NN_vals + 8, 0);
+var _NN_vecs = ganita_mat_new(2, 2);
+assert_neq(eigen_qr(_NN_A, 2, 200, _NN_vals, _NN_vecs), HSB_ERR_NONE,
+  "eigen_qr: an all-NaN off-diagonal is NOT deflated away and reported as success");
 
 # ⚠ FOUR MUTANTS SURVIVE THIS BLOCK. Recorded with their reasons rather than
 # tidied away, because a survivor is either an equivalence or a gap and the

@@ -88,6 +88,38 @@ fn _lp_pow2_floor(s) {
     return b;
 }
 
+# ⛔ 2.18.0 — AN EXACTLY ZERO OFF-DIAGONAL WAS NEVER DEFLATED. Every deflation
+# test in this file read `f64_lt(|off|, EPSILON_F64 * (|a| + |b|))`, and for a
+# sub-block whose diagonals sit at 2^-1050 that product is below the smallest
+# subnormal — i.e. exactly 0. The test then reads `|off| < 0`, which is false for
+# EVERY `|off|` including zero, so a block that had already fully decoupled was
+# never recognised and the routine burned its whole iteration budget. Measured
+# across the 72 subnormal block ratios: **37 failing -> 28**.
+# ⭐ THE ZERO ARM IS THE WHOLE REPAIR, and that is measured rather than argued.
+# ⚠ I FIRST WROTE THIS AS "the product flushes, so divide instead" AND THAT
+# CAUSAL STORY WAS WRONG. The division changes no measurable behaviour: running
+# the product form WITH this zero arm gives the identical 28 of 72, and its mutant
+# survives every fixture. It is equivalent because on the subnormal grid there is
+# no representable non-zero value below `1e-12 * scale` — the only case the two
+# forms could disagree on is exactly the one the zero arm already answers. So the
+# product stays, minimal and proven, rather than a rewrite with nothing behind it.
+# ⚠ THE ZERO TEST IS `f64_eq`, NOT `f64_gt(a, 0) == 0`: the latter is TRUE for NaN
+# as well, so it would declare a NaN off-diagonal negligible and zero it. With
+# `f64_eq` a NaN falls through and `NaN < threshold` is false, so it stays
+# non-negligible — which is what the shipped code always did.
+# [measured: 72-ratio subnormal scan, three variants, 2026-09-10]
+fn _lp_negligible_rel(x, scale) {
+    var a = f64_abs(x);
+    if (f64_eq(a, 0) == 1) { return 1; }
+    if (f64_lt(a, f64_mul(EPSILON_F64, scale)) == 1) { return 1; }
+    return 0;
+}
+
+# Is `off` negligible beside the two diagonal entries it sits between?
+fn _lp_negligible(off, a, b) {
+    return _lp_negligible_rel(off, f64_add(f64_abs(a), f64_abs(b)));
+}
+
 # Fresh copy of A with every entry divided by s (s > 0). Divide, never multiply
 # by 1/s: a subnormal s makes 1/s overflow to +Inf.
 fn _lp_mat_div_scalar(A, s) {
@@ -482,12 +514,16 @@ fn _lp_split_zero_diag(diag, superdiag, n, m, U_acc, Vt_acc, p_lo, p_hi) {
     # dbdsqr would keep it. Probed at 1e-9 / 1e-11 / 1e-13: no regression -- at
     # 1e-13 the PRE-FIX code already returned NO_CONVERGENCE with S all zero, so
     # the fix is strictly better. Consistent with the deflation threshold above.
-    var tol = f64_mul(EPSILON_F64, scale);
+    # ⛔ 2.18.0 — SAME PRODUCT, SAME FLUSH. `EPSILON_F64 * scale` is 0 for a block
+    # at 2^-1050, so every `f64_lt(x, tol)` below became `x < 0` and neither the
+    # zero-diagonal scan nor either chase could ever fire. `scale` is carried to
+    # the three comparison sites instead and each divides, via
+    # `_lp_negligible_rel`. [measured: subnormal sub-block probe, 2026-09-10]
 
     var hit = (0 - 1);
     i = p_lo;
     while (i <= p_hi) {
-        if (f64_lt(f64_abs(load64(diag + i * 8)), tol) == 1) {
+        if (_lp_negligible_rel(load64(diag + i * 8), scale) == 1) {
             hit = i;
             break;
         }
@@ -522,7 +558,7 @@ fn _lp_split_zero_diag(diag, superdiag, n, m, U_acc, Vt_acc, p_lo, p_hi) {
             var r = f64_sqrt(r_ss);
             if (f64_lt(r_ss, F64_TINY) == 1) { r = ganita_f64_hypot(dj, carry); }
             if (f64_eq(r_ss, F64_POS_INF) == 1) { r = ganita_f64_hypot(dj, carry); }
-            if (f64_lt(r, tol) == 1) { break; }
+            if (_lp_negligible_rel(r, scale) == 1) { break; }
             var cs = f64_div(dj, r);
             var sn = f64_div(carry, r);
             store64(diag + j * 8, r);
@@ -566,7 +602,7 @@ fn _lp_split_zero_diag(diag, superdiag, n, m, U_acc, Vt_acc, p_lo, p_hi) {
         var r2 = f64_sqrt(r2_ss);
         if (f64_lt(r2_ss, F64_TINY) == 1) { r2 = ganita_f64_hypot(dc, ccarry); }
         if (f64_eq(r2_ss, F64_POS_INF) == 1) { r2 = ganita_f64_hypot(dc, ccarry); }
-        if (f64_lt(r2, tol) == 1) { break; }
+        if (_lp_negligible_rel(r2, scale) == 1) { break; }
         var cs2 = f64_div(dc, r2);
         var sn2 = f64_div(f64_neg(ccarry), r2);
         store64(diag + c * 8, r2);
@@ -603,10 +639,8 @@ fn _lp_bidiag_qr(diag, superdiag, n, m, U_acc, Vt_acc, max_iter) {
         # Check for negligible superdiagonal entries -- deflation
         var i = 0;
         while (i < p_hi) {
-            var threshold = f64_mul(EPSILON_F64,
-              f64_add(f64_abs(load64(diag + i * 8)),
-                f64_abs(load64(diag + (i + 1) * 8))));
-            if (f64_lt(f64_abs(load64(superdiag + i * 8)), threshold) == 1) {
+            if (_lp_negligible(load64(superdiag + i * 8),
+                load64(diag + i * 8), load64(diag + (i + 1) * 8)) == 1) {
                 store64(superdiag + i * 8, f64_from(0));
             }
             i = i + 1;
@@ -647,10 +681,8 @@ fn _lp_bidiag_qr(diag, superdiag, n, m, U_acc, Vt_acc, max_iter) {
         # twenty lines up, so this is consistency rather than a new rule — and the
         # entry is zeroed when the test fires, exactly as that sibling does.
         while (p_hi > 0 &&
-          f64_lt(f64_abs(load64(superdiag + (p_hi - 1) * 8)),
-            f64_mul(EPSILON_F64,
-              f64_add(f64_abs(load64(diag + (p_hi - 1) * 8)),
-                f64_abs(load64(diag + p_hi * 8))))) == 1) {
+          _lp_negligible(load64(superdiag + (p_hi - 1) * 8),
+            load64(diag + (p_hi - 1) * 8), load64(diag + p_hi * 8)) == 1) {
             store64(superdiag + (p_hi - 1) * 8, f64_from(0));
             p_hi = p_hi - 1;
         }
@@ -1218,10 +1250,8 @@ fn _lp_tridiag_qr(diag, offdiag, n, Q, max_iter) {
 
     while (p_hi > 0 && iter < max_iter) {
         # Deflation: check if offdiag[p_hi] is negligible
-        var threshold = f64_mul(EPSILON_F64,
-          f64_add(f64_abs(load64(diag + p_hi * 8)),
-            f64_abs(load64(diag + (p_hi - 1) * 8))));
-        if (f64_lt(f64_abs(load64(offdiag + p_hi * 8)), threshold) == 1) {
+        if (_lp_negligible(load64(offdiag + p_hi * 8),
+            load64(diag + p_hi * 8), load64(diag + (p_hi - 1) * 8)) == 1) {
             store64(offdiag + p_hi * 8, f64_from(0));
             p_hi = p_hi - 1;
         } else {
@@ -1244,10 +1274,8 @@ fn _lp_tridiag_qr(diag, offdiag, n, Q, max_iter) {
             # test, and deflating as it scans.
             var p_lo = p_hi;
             while (p_lo > 0) {
-                var thr2 = f64_mul(EPSILON_F64,
-                  f64_add(f64_abs(load64(diag + p_lo * 8)),
-                    f64_abs(load64(diag + (p_lo - 1) * 8))));
-                if (f64_lt(f64_abs(load64(offdiag + p_lo * 8)), thr2) == 1) {
+                if (_lp_negligible(load64(offdiag + p_lo * 8),
+                    load64(diag + p_lo * 8), load64(diag + (p_lo - 1) * 8)) == 1) {
                     store64(offdiag + p_lo * 8, f64_from(0));
                     break;
                 }

@@ -453,14 +453,32 @@ sections. It has been declared out of scope twice, which is a stronger claim tha
       SILENT WRONG band at 2^-514..2^-518. **Trading 5 loud failures for 5 silent wrong answers is
       not an improvement**, which is why the scaling is part of the same change.
 
-- [ ] **[2.19.0]** **The deflation threshold underflows for a subnormal block.**
-      `f64_lt(|superdiag|, EPSILON_F64 * (|d1| + |d2|))` forms a PRODUCT, and for diagonals at
-      2^-1050 that product is 1e-12 · 2^-1049 — which flushes to exactly 0, so the test becomes
-      `|superdiag| < 0`, never fires, and the block never deflates. Measured: `svd_golub_kahan` on a
-      sub-block at 2^-1050 returns `HSB_ERR_NO_CONVERGENCE`. ⭐ `eigen_qr` is unaffected to 2^-1070
-      because its path never forms that product. ⚠ It is what stops three of this release's mutants
-      being killable, recorded in `tests/hisab.tcyr`. The fix is to divide rather than multiply
-      (`|sd| / (|d1| + |d2|) < EPSILON_F64`), with a zero-sum arm — about five sites.
+- [x] ✅ **DONE — an exactly zero off-diagonal was never deflated.** All five deflation tests read
+      `f64_lt(|off|, EPSILON_F64 * (|a| + |b|))`, and for a sub-block at 2^-1050 that product is
+      below the smallest subnormal, i.e. exactly 0 — so the test reads `|off| < 0`, which is false
+      for **every** `|off|` including zero, and a block that had fully decoupled was never
+      recognised. Measured across the 72 subnormal block ratios: **37 failing → 28.** Five sites now
+      share one helper.
+      ⛔ **THE CAUSAL STORY I WROTE FIRST WAS WRONG AND MEASUREMENT CAUGHT IT.** I filed this as
+      *"the product flushes, so divide instead"* and implemented the division. Running the PRODUCT
+      form with the new zero arm gives the identical 28 of 72, and the division's mutant survives
+      every fixture — it is equivalent, because on the subnormal grid there is no representable
+      non-zero value below `1e-12 * scale`, so the only case the two forms could disagree on is
+      exactly the one the zero arm answers. **The zero arm is the whole repair**; the division was
+      reverted rather than shipped as a rewrite with nothing behind it.
+      ⭐ **And the shape of the zero test is load-bearing**: `f64_eq(|off|, 0)`, not
+      `f64_gt(|off|, 0) == 0`. The latter is true for NaN too — measured, with it installed a 2x2
+      whose off-diagonal is entirely NaN returns `HSB_ERR_NONE` with **fabricated eigenvalues
+      (3, 3)**. Same trap as `_opt_armijo`, and the same one that made 2.17.0's SVD figure wrong.
+
+- [ ] **[2.19.0]** ⚠ **The remaining 28 subnormal block ratios are the GRID, not a defect —
+      measured, not assumed.** At 2^-1050 with **max_iter = 100,000** the superdiagonal is stuck at
+      ONE unit of 2^-1074 (the smallest non-zero value that exists) against a diagonal of 2.7e7
+      units, so the achievable ratio floor is 3.7e-8 and a relative 1e-12 deflation criterion is
+      unreachable by construction. `svd_golub_kahan` reports `HSB_ERR_NO_CONVERGENCE`, which is the
+      honest answer to an unanswerable question. **Open only as a decision**: whether to deflate at
+      the grid's own resolution and accept a ~1e-8 relative error on such a block, or keep failing
+      loudly. Not a defect either way.
 
 - [x] ~~**[2.18.0]** **`_lp_pow2_floor` skips balancing for a subnormal matrix.** It reads the
       exponent field, which is 0 for every subnormal, and returns `F64_ONE` — so an all-subnormal
