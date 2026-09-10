@@ -175,18 +175,45 @@ fn su2_exp(v) {
 #   (x,y,z) = sin(theta/2)*n_hat, so omega = theta*n_hat = theta/sin(theta/2)*(x,y,z).
 # Through 2.6.12 this used theta = acos(w) directly and divided by sin(theta),
 # returning half the correct vector — the log counterpart of the su2_exp bug above.
+# ⛔ 2.16.0 — THIS THREW THE ROTATION AWAY ENTIRELY BELOW theta ~ 2^-26, AND THE
+# GUARD WAS NOT THE CAUSE. It recovered the half-angle as `acos(w)`, and w is
+# cos(theta/2): for theta < ~1.5e-8 that rounds to EXACTLY 1.0, so acos returns 0,
+# sin(0) is 0, the guard fires and the answer is the zero vector. Measured on the
+# 2.15.0 tree: `su2_log(su2_exp((0,0,t)))` recovers t exactly down to t = 2^-24 and
+# returns exactly 0 from t = 2^-28 — a total loss, not a degradation.
+# [measured: round-trip probe over 60 decades, 2026-09-10]
+#
+# ⭐ THE INFORMATION IS IN THE VECTOR PART, NOT IN w. (x,y,z) = sin(theta/2)*n, and
+# sin retains full relative precision near 0 where cos retains none. Taking the
+# half-angle as `atan2(|xyz|, w)` is bit-exact down to 2^-300 (measured), handles
+# theta > pi correctly through atan2's own quadrant logic — which acos could not —
+# and needs no series, because `2*half/|xyz|` tends to 2 with both operands going
+# to zero together.
+# ⚠ The guard is now exactly what fails: |xyz| == 0 is the identity rotation, whose
+# logarithm is genuinely the zero vector.
+# [measured: round-trip probe over 60 decades, 2026-09-10]
 fn su2_log(s) {
     var w = f64_clamp(_su2_w(s), f64_neg(F64_ONE), F64_ONE);
-    var half_theta = ganita_f64_acos(w);
-    var sin_half = f64_sin(half_theta);
-    if (f64_lt(f64_abs(sin_half), EPSILON_F64) == 1) {
+    var x = _su2_x(s); var y = _su2_y(s); var z = _su2_z(s);
+    # ⚠ SCALED NORM, not the naive sum of squares — the same reason `cx_div` needs
+    # Smith's algorithm. Squaring first flushes to zero for components below
+    # ~2^-511, so a quaternion carrying a 2^-665 rotation would report a zero
+    # norm and the atan2 repair above would recover nothing: the log map would
+    # still lose the rotation, 485 decades later than acos did but just as
+    # completely. Dividing through by the largest component first keeps every
+    # intermediate O(1) and moves the floor to where the components themselves
+    # stop being representable.
+    # [measured: naive norm returns 0 at 2^-665; scaled norm is exact there]
+    var mx = f64_max(f64_abs(x), f64_max(f64_abs(y), f64_abs(z)));
+    if (f64_gt(mx, 0) == 0) {
         return hvec3_new(0, 0, 0);
     }
-    var theta = f64_mul(half_theta, F64_TWO);
-    var sc = f64_div(theta, sin_half);
-    return hvec3_new(f64_mul(sc, _su2_x(s)),
-      f64_mul(sc, _su2_y(s)),
-      f64_mul(sc, _su2_z(s)));
+    var xs = f64_div(x, mx); var ys = f64_div(y, mx); var zs = f64_div(z, mx);
+    var sin_half = f64_mul(mx,
+      f64_sqrt(f64_add(f64_add(f64_mul(xs, xs), f64_mul(ys, ys)), f64_mul(zs, zs))));
+    var half_theta = ganita_f64_atan2(sin_half, w);
+    var sc = f64_div(f64_mul(half_theta, F64_TWO), sin_half);
+    return hvec3_new(f64_mul(sc, x), f64_mul(sc, y), f64_mul(sc, z));
 }
 
 # Convert SU(2) to 3x3 rotation matrix (SO(3) representation)

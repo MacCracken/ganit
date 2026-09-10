@@ -2,6 +2,72 @@
 
 ## [Unreleased]
 
+## [2.16.0] - 2026-09-10 — the small-angle series, and the defect the guard was hiding
+
+2.15.0 deferred four maps because **lowering their guard alone would have made them worse**: `se3_exp`
+and `se3_log` divide by θ² and θ³, and at θ ≤ 2.2e-162 both `θ*θ` and `1 − cos θ` are exactly 0, so a
+DBL_MIN guard turns the coefficient into `0/0 = NaN`. The coefficients had to become computable at
+small θ first. That is this release. Suites **3789 → 3807**.
+
+⛔ **And the log maps turned out to have a much larger defect the guard was hiding.** Both recovered
+the angle with `acos` — `su2_log` as `acos(w)` with `w = cos(θ/2)`, `so3_log` as `acos((tr−1)/2)`.
+Below θ ≈ 1.5e-8 those arguments round to **exactly 1.0**, `acos` returns 0, and the entire rotation
+is gone. Not degraded — gone. Measured on the 2.15.0 tree: `su2_log(su2_exp((0,0,t)))` recovers `t`
+down to 2^-24 and returns **exactly 0 from 2^-28 down**.
+
+⭐ **The round-trip floor moves from 2^-26 to 2^-537 — 511 decades recovered.**
+
+### Fixed
+
+- **lie / lie_ext** — `su2_log` and `so3_log` take the angle from `atan2` instead of `acos`. The
+  information lives in the SINE, which keeps full relative precision near 0 where the cosine keeps
+  none: measured bit-exact to 2^-300. It also handles θ > π correctly, which `acos` could not
+  represent at all.
+- **lie_ext** — `se3_exp`'s `c1 = (1−cos θ)/θ²` needs no series and no θ² at all: the half-angle
+  identity `1 − cos t = 2 sin²(t/2)` turns it into `(sin h / h)² / 2`, with no subtraction of nearly
+  equal numbers anywhere.
+- **lie_ext** — `se3_exp`'s `c2 = (θ − sin θ)/θ³` and `se3_log`'s `c = (1 − (θ/2)/tan(θ/2))/θ²`
+  become Taylor series below θ = 0.1. ⚠ What that buys, measured: at θ = 1e-7 the closed `c2` reads
+  **0.172** against a true 1/6, and at 1e-8 it is **exactly 0**; `c` reads 0.0777 against a true
+  1/12, and 0 by 1e-8.
+- ⭐ **`su2_log` and `so3_log` also took their norms as a naive sum of squares**, which flushes to
+  zero for components below ~2^-511 — so the `atan2` repair alone would still have lost the rotation,
+  485 decades later than `acos` did but just as completely. Both now scale by the largest component
+  first, the same technique 2.15.0 gave `cx_div`. **Found only because a mutant would not die.**
+
+### Changed
+
+- **lie_ext** — `_LIE_SERIES_CUT` = 0.1, and the crossover is **measured, not chosen**: below it the
+  closed forms cancel catastrophically, above it the truncated series drifts (1.6e-7 relative at
+  θ = 1). At 0.1 the two agree to 2e-14, which is the closed form's own cancellation error, so the
+  series is the accurate one there. Constant gate 155 → **156**.
+- All four guards are now the exact-zero test the rest of the tree uses.
+
+### Notes on process
+
+- **7 mutants, 5 killed, 2 documented equivalences** — and both equivalences exist *because* the
+  repairs made each other redundant. `F64_TINY` on `se3_exp`'s guard was a **trap** in 2.15.0
+  (NaN over [DBL_MIN, 2.2e-162]); with c1 and c2 rewritten there is no θ² left to underflow, so the
+  guard choice stopped mattering. And `se3_log`'s series is unreachable through `su2_log`, whose own
+  floor is now 2^-537 where θ² is still non-zero — it is kept for symmetry and for callers who
+  assemble an SE(3) directly.
+- ⚠ **Two of my own bounds were wrong and measurement corrected both.** I asserted `c1` is exactly
+  1/2 below 2^-20; the θ²/24 correction is under the ULP only from 2^-24.4, so decades 20–24 failed
+  against *correct* output. And a fixture meant to reach `se3_log`'s coefficient never did —
+  `su2_exp`'s own guard returns the identity first, so `su2_log` gives a zero ω and `se3_log` returns
+  early.
+- ⚠ **The floor is now on the other side and is recorded, not hidden**: `su2_exp` and
+  `so3_from_axis_angle` still take their norms as a naive sum of squares, so they collapse the
+  rotation at 2^-538 before the log ever sees it. Same class, on the roadmap.
+- **No performance change is claimed, and the run cannot support one either way.** The box was under
+  load 1.7–2.3 throughout (an unrelated process pegged at 99.9% CPU), and **every row moved up
+  ~7.4%, the untouched ones MORE than the touched** — +7.49% median untouched against +5.26%
+  touched. That is the control doing its job: there is no regression attributable to this change,
+  and no speedup may be read out of it. Fourteen rows sit outside their own historical spread, all
+  in the same direction, which is what a busy machine looks like rather than what a code change
+  looks like.
+
+
 ## [2.15.0] - 2026-09-10 — the epsilon tier, closed: 73 of the remaining 74
 
 2.14.0 repaired 23 of the 97 confirmed epsilon defects and enumerated the rest. **This release

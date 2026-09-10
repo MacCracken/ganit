@@ -28,6 +28,15 @@
 # det R = 1 to ~1e-16, seven orders inside this bound, so a legitimate rotation
 # that has been through a compose chain is still accepted while a reflection
 # (det = -1), a shear or a scaled rotation is rejected by a wide margin.
+# 2.16.0 — where the small-angle SERIES takes over from the closed forms in
+# `se3_exp` and `se3_log`. MEASURED, not chosen: below this the closed forms
+# cancel catastrophically — at theta = 1e-7 `(theta - sin theta)/theta^3` reads
+# 0.172 against a true 1/6, and at 1e-8 it is exactly 0 — while above it the
+# truncated series starts to drift (1.6e-7 relative at theta = 1). At 0.1 the two
+# agree to 2e-14, which is the closed form's own cancellation error, so the series
+# is the accurate one there.
+# [measured: series-vs-closed-form comparison over theta = 1e-4 .. 1, 2026-09-10]
+var _LIE_SERIES_CUT = 0x3FB9_9999_9999_999A;  # 0.1
 var _SO3_ORTHO_TOL = 0x3E112E0BE826D695;  # 1e-9
 
 # ================================================================
@@ -220,14 +229,40 @@ fn so3_log(R) {
     var tr = m3_trace(R);
     var cos_theta = f64_mul(f64_sub(tr, F64_ONE), F64_HALF);
     cos_theta = f64_clamp(cos_theta, f64_neg(F64_ONE), F64_ONE);
-    var theta = ganita_f64_acos(cos_theta);
 
-    if (f64_lt(f64_abs(theta), EPSILON_F64) == 1) {
-        return hvec3_new(0, 0, 0);
+    # ⛔ 2.16.0 — SAME DEFECT AS `su2_log`, SAME CAUSE. `theta = acos((tr-1)/2)` and
+    # for a small rotation the trace is 3 - theta^2, so (tr-1)/2 rounds to EXACTLY
+    # 1.0 below theta ~ 1.5e-8 and acos returns 0. Measured on the 2.15.0 tree:
+    # `so3_log(so3_exp((0,0,t)))` recovers t down to 2^-24 and returns exactly 0
+    # from 2^-28 — the whole rotation, gone.
+    # ⭐ The antisymmetric part of R is 2*sin(theta)*n, and sin keeps full relative
+    # precision near 0 where cos keeps none, so the angle comes from
+    # `atan2(|antisym|/2, cos_theta)` instead. No series is needed: theta/|antisym|
+    # tends to 1/2 with both operands going to zero together.
+    # [measured: round-trip probe over 60 decades, 2026-09-10]
+    var ax = f64_sub(m3_get(R, 1, 2), m3_get(R, 2, 1));
+    var ay = f64_sub(m3_get(R, 2, 0), m3_get(R, 0, 2));
+    var az = f64_sub(m3_get(R, 0, 1), m3_get(R, 1, 0));
+    # ⚠ Scaled, for the same reason as `su2_log`: squaring first would flush the
+    # antisymmetric part to zero below ~2^-511 and lose the rotation again.
+    var amx = f64_max(f64_abs(ax), f64_max(f64_abs(ay), f64_abs(az)));
+    var asym = 0;
+    if (f64_gt(amx, 0) == 1) {
+        var axs = f64_div(ax, amx); var ays = f64_div(ay, amx);
+        var azs = f64_div(az, amx);
+        asym = f64_mul(amx, f64_sqrt(f64_add(f64_add(f64_mul(axs, axs),
+                f64_mul(ays, ays)), f64_mul(azs, azs))));
     }
 
-    var sin_theta = f64_sin(theta);
-    if (f64_lt(f64_abs(sin_theta), EPSILON_F64) == 1) {
+    # |antisym| == 0 is either the identity or a rotation by exactly pi; the trace
+    # separates them, and only the pi case needs the eigenvector extraction below.
+    if (f64_gt(asym, 0) == 0) {
+        if (f64_gt(cos_theta, 0) == 1) { return hvec3_new(0, 0, 0); }
+    }
+
+    var theta = ganita_f64_atan2(f64_mul(asym, F64_HALF), cos_theta);
+
+    if (f64_gt(asym, 0) == 0) {
         # theta ~ pi: use eigenvector extraction
         # Find the column of (R + I) with largest norm
         var rpi = m3_add(R, m3_identity());
@@ -246,16 +281,10 @@ fn so3_log(R) {
         return hvec3_scale(hvec3_normalize(best), theta);
     }
 
-    var sc = f64_div(theta, f64_mul(F64_TWO, sin_theta));
-    # R_ij in col-major: m3_get(m, col, row)
-    # R32 - R23 = m3_get(R, 2, 1) - m3_get(R, 1, 2)   (but note col-major!)
-    # Wait: m3_get(m, col, row). R_{row,col} = m3_get(m, col, row).
-    # R32 = R[row=2,col=1] = m3_get(R, 1, 2)
-    # R23 = R[row=1,col=2] = m3_get(R, 2, 1)
-    # omega_x = sc * (R32 - R23) = sc * (m3_get(R,1,2) - m3_get(R,2,1))
-    return hvec3_new(f64_mul(sc, f64_sub(m3_get(R, 1, 2), m3_get(R, 2, 1))),
-      f64_mul(sc, f64_sub(m3_get(R, 2, 0), m3_get(R, 0, 2))),
-      f64_mul(sc, f64_sub(m3_get(R, 0, 1), m3_get(R, 1, 0))));
+    # omega = theta * n, and (ax, ay, az) is 2*sin(theta)*n, so the scale is
+    # theta / |antisym| — one division, by a quantity already known non-zero.
+    var sc = f64_div(theta, asym);
+    return hvec3_new(f64_mul(sc, ax), f64_mul(sc, ay), f64_mul(sc, az));
 }
 
 # ================================================================
@@ -450,8 +479,15 @@ fn se3_exp(twist) {
     var ox = HVec3_x(omega); var oy = HVec3_y(omega); var oz = HVec3_z(omega);
     var theta = f64_sqrt(f64_add(f64_add(f64_mul(ox, ox), f64_mul(oy, oy)), f64_mul(oz, oz)));
 
-    if (f64_lt(theta, EPSILON_F64) == 1) {
-        # Small angle: R ~ I, t ~ v
+    # ⛔ 2.16.0 — THE GUARD COULD NOT SIMPLY BE LOWERED, WHICH IS WHY THIS WAITED.
+    # 2.15.0 measured that putting DBL_MIN here introduces a NEW defect: the V
+    # matrix divides by theta^2 and theta^3, and at theta <= 2.2e-162 both
+    # `theta*theta` and `1 - cos(theta)` are exactly 0, so the coefficient becomes
+    # 0/0 = NaN. The coefficients had to become computable at small theta FIRST.
+    # [measured: docs/audit/2026-09-09-epsilon-open.json]
+    # ⚠ An exactly zero twist has R = I and t = v, which is the identity of the
+    # group and not an approximation of anything.
+    if (f64_gt(theta, 0) == 0) {
         return _se3_alloc(su2_identity(), vel);
     }
 
@@ -461,11 +497,30 @@ fn se3_exp(twist) {
     # Compute V matrix: V = I + (1-cos)/theta^2 * K + (theta-sin)/theta^3 * K^2
     var K = _skew3(omega);
     var K2 = m3_mul(K, K);
-    var theta2 = f64_mul(theta, theta);
-    var theta3 = f64_mul(theta2, theta);
+    # ⭐ c1 NEEDS NO SERIES AND NO THETA^2 AT ALL. The half-angle identity
+    # 1 - cos(t) = 2 sin^2(t/2) turns it into (sin(h)/h)^2 / 2 with h = t/2 — one
+    # division by a quantity that is zero only when theta is, and no subtraction of
+    # nearly-equal numbers anywhere. It is exact as theta -> 0, where sin(h) IS h.
+    var hh = f64_mul(theta, F64_HALF);
+    var sinc_h = f64_div(f64_sin(hh), hh);
+    var c1 = f64_mul(F64_HALF, f64_mul(sinc_h, sinc_h));
 
-    var c1 = f64_div(f64_sub(F64_ONE, f64_cos(theta)), theta2);
-    var c2 = f64_div(f64_sub(theta, f64_sin(theta)), theta3);
+    # ⭐ c2 HAS NO SUCH IDENTITY, so this is the series the release is named for:
+    #   (t - sin t)/t^3  =  1/6 - t^2/120 + t^4/5040 - t^6/362880 + ...
+    # ⚠ Note what it buys: at theta = 1e-7 the closed form reads 0.172 against a
+    # true 1/6 — a 3% error — and at 1e-8 it is exactly 0. The series is exact in
+    # the limit and never touches theta^3, so a subnormal theta simply gives 1/6.
+    # [measured: series-vs-closed-form comparison, theta = 1e-4 .. 1, 2026-09-10]
+    var theta2 = f64_mul(theta, theta);
+    var c2 = 0;
+    if (f64_lt(theta, _LIE_SERIES_CUT) == 1) {
+        var t4 = f64_mul(theta2, theta2);
+        c2 = f64_sub(f64_div(F64_ONE, f64_from(6)), f64_div(theta2, f64_from(120)));
+        c2 = f64_add(c2, f64_div(t4, f64_from(5040)));
+        c2 = f64_sub(c2, f64_div(f64_mul(t4, theta2), f64_from(362880)));
+    } else {
+        c2 = f64_div(f64_sub(theta, f64_sin(theta)), f64_mul(theta2, theta));
+    }
 
     var V = m3_add(m3_add(m3_identity(), m3_scale(K, c1)), m3_scale(K2, c2));
     var trans = m3_mul_vec3(V, vel);
@@ -484,7 +539,9 @@ fn se3_log(se) {
     var ox = HVec3_x(omega); var oy = HVec3_y(omega); var oz = HVec3_z(omega);
     var theta = f64_sqrt(f64_add(f64_add(f64_mul(ox, ox), f64_mul(oy, oy)), f64_mul(oz, oz)));
 
-    if (f64_lt(theta, EPSILON_F64) == 1) {
+    # ⛔ Same story as `se3_exp`: V^-1 divides by theta^2, so the guard could not be
+    # lowered until the coefficient could be computed at small theta.
+    if (f64_gt(theta, 0) == 0) {
         # Near identity: v ~ t
         return _twist_from(omega, trans);
     }
@@ -498,9 +555,19 @@ fn se3_log(se) {
     var half_theta = f64_mul(theta, F64_HALF);
     var tan_half = f64_tan(half_theta);
 
+    # ⭐ THE OLD CODE ALREADY HAD A ONE-TERM SERIES — `c = 1/12` — but reached it
+    # only when |tan(theta/2)| < 1e-12, i.e. theta < 2e-12, while the closed form
+    # has already collapsed by 1e-7 (measured: it reads 0.0777 against a true
+    # 1/12 = 0.0833, and 0 by 1e-8). The series takes over where it is actually
+    # better, and carries enough terms to be exact there:
+    #   (1 - (t/2)/tan(t/2))/t^2 = 1/12 + t^2/720 + t^4/30240 + t^6/1209600 + ...
+    # [measured: series-vs-closed-form comparison, theta = 1e-4 .. 1, 2026-09-10]
     var c = 0;
-    if (f64_lt(f64_abs(tan_half), EPSILON_F64) == 1) {
-        c = f64_div(F64_ONE, f64_from(12));
+    if (f64_lt(theta, _LIE_SERIES_CUT) == 1) {
+        var s4 = f64_mul(theta2, theta2);
+        c = f64_add(f64_div(F64_ONE, f64_from(12)), f64_div(theta2, f64_from(720)));
+        c = f64_add(c, f64_div(s4, f64_from(30240)));
+        c = f64_add(c, f64_div(f64_mul(s4, theta2), f64_from(1209600)));
     } else {
         c = f64_div(f64_sub(F64_ONE, f64_div(half_theta, tan_half)), theta2);
     }

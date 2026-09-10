@@ -11545,6 +11545,178 @@ assert_eq(num_newton(&_nn_zero_f, &_nn_zero_df, F64_ONE, EPSILON_F64, 10, _nn_fl
 assert_eq(load64(_nn_flat), 0x4059000000000000,
   "num_newton: a refusal leaves the caller's out-parameter untouched");
 
+# ================================================================
+# 2.16.0 — the small-angle series: the four maps 2.15.0 could not repair
+# ================================================================
+# ⛔ 2.15.0 DEFERRED THESE BECAUSE LOWERING THE GUARD ALONE WOULD HAVE MADE THEM
+# WORSE. `se3_exp` and `se3_log` divide by theta^2 and theta^3, and at
+# theta <= 2.2e-162 both `theta*theta` and `1 - cos(theta)` are exactly 0, so a
+# DBL_MIN guard turns the coefficient into 0/0 = NaN. The coefficients had to be
+# made computable at small theta first — that is what this release is.
+#
+# ⛔ AND THE LOG MAPS HAD A SECOND, LARGER DEFECT THE GUARD WAS HIDING. Both
+# recovered the angle with `acos`: `su2_log` as acos(w) with w = cos(theta/2), and
+# `so3_log` as acos((tr-1)/2). For theta below ~1.5e-8 those arguments round to
+# EXACTLY 1.0, acos returns 0, and the entire rotation is gone — not degraded,
+# gone. Measured on the 2.15.0 tree: `su2_log(su2_exp((0,0,t)))` recovers t down to
+# 2^-24 and returns exactly 0 from 2^-28 down.
+# ⭐ The information lives in the SINE, which keeps full relative precision near 0
+# where the cosine keeps none, so the angle now comes from `atan2`. Measured
+# bit-exact to 2^-300, and it fixes theta > pi as a side effect, which acos could
+# not represent at all.
+# [measured: round-trip probes before and after, 2026-09-10]
+
+test_group("lie 2.16.0: the small-angle series and the atan2 log maps");
+
+# --- ROUND TRIP. log(exp(w)) is w for every rotation, at every angle.
+var _LS_RUN = 0;
+var _LS_BAD = 0;
+# ⚠ 538 DECADES, AND THE FLOOR IS NOW ON THE OTHER SIDE. Measured: exact to
+# 2^-537, first failure at 2^-538 — which is where a COMPONENT SQUARED
+# underflows (2^-1076 is below the smallest subnormal). The log maps no longer
+# set the limit; `su2_exp` and `so3_from_axis_angle` still take their norms as a
+# naive sum of squares, so they collapse the rotation before the log ever sees
+# it. That is the same class again and is recorded on the roadmap rather than
+# folded in here. ⭐ Before this release the floor was 2^-26.
+# [measured: depth bisect, 537 clean / 539 fails, 2026-09-10]
+for (var _ls_e = 0; _ls_e < 538; _ls_e = _ls_e + 1) {
+    var _ls_t = (1023 - _ls_e) << 52;
+    var _ls_w = hvec3_new(0, 0, _ls_t);
+    _LS_RUN = _LS_RUN + 1;
+    # ⚠ Compare the RATIO: the angle itself spans 500 decades.
+    var _ls_su = HVec3_z(su2_log(su2_exp(_ls_w)));
+    if (f64_approx_eq(f64_div(_ls_su, _ls_t), F64_ONE, LOOSE_TOL_M) != 1) {
+        _LS_BAD = _LS_BAD + 1;
+    }
+    var _ls_so = HVec3_z(so3_log(so3_exp(_ls_w)));
+    if (f64_approx_eq(f64_div(_ls_so, _ls_t), F64_ONE, LOOSE_TOL_M) != 1) {
+        _LS_BAD = _LS_BAD + 1;
+    }
+}
+assert_eq(_LS_RUN, 538, "the log/exp round-trip actually ran 538 angles");
+assert_eq(_LS_BAD, 0,
+  "su2_log / so3_log: log(exp(w)) recovers w for angles from 2^0 down to 2^-537");
+
+# --- SE(3) ROUND TRIP, which exercises the V matrix and its inverse together.
+var _LT_RUN = 0;
+var _LT_BAD = 0;
+for (var _lt_e = 0; _lt_e < 500; _lt_e = _lt_e + 1) {
+    var _lt_t = (1023 - _lt_e) << 52;
+    var _lt_tw = _twist_from(hvec3_new(0, 0, _lt_t), hvec3_new(F64_ONE, 0, 0));
+    var _lt_b = se3_log(se3_exp(_lt_tw));
+    _LT_RUN = _LT_RUN + 1;
+    if (f64_approx_eq(f64_div(HVec3_z(_twist_omega(_lt_b)), _lt_t),
+        F64_ONE, LOOSE_TOL_M) != 1) { _LT_BAD = _LT_BAD + 1; }
+    if (f64_approx_eq(HVec3_x(_twist_v(_lt_b)), F64_ONE, LOOSE_TOL_M) != 1) {
+        _LT_BAD = _LT_BAD + 1;
+    }
+}
+assert_eq(_LT_RUN, 500, "the SE(3) round-trip actually ran 500 angles");
+assert_eq(_LT_BAD, 0,
+  "se3_log(se3_exp(tw)) recovers both omega and v for angles to 2^-499");
+
+# ⭐ THE CASE THE DEFERRAL WAS ABOUT. At a deeply subnormal angle the old closed
+# forms are 0/0: theta^2 and theta^3 underflow to zero at the same time as
+# `1 - cos(theta)` and `theta - sin(theta)` do. The series has no theta^2 in it at
+# all, so it simply yields its leading term.
+var _ls_tiny = 0x0000008000000000;               # 2^-1035, deeply subnormal
+var _ls_st = _twist_from(hvec3_new(0, 0, _ls_tiny), hvec3_new(F64_ONE, F64_TWO, 0));
+var _ls_se = se3_exp(_ls_st);
+var _ls_tr = _se3_trans(_ls_se);
+assert_eq(HVec3_x(_ls_tr), F64_ONE,
+  "se3_exp: a subnormal angle gives V = I exactly, not a NaN translation");
+assert_eq(HVec3_y(_ls_tr), F64_TWO,
+  "se3_exp: and the second component too");
+var _ls_bk = se3_log(_ls_se);
+assert_eq(HVec3_x(_twist_v(_ls_bk)), F64_ONE,
+  "se3_log: a subnormal angle inverts V exactly, not a NaN velocity");
+
+# ⚠ THAT FIXTURE DOES NOT REACH `se3_log`'s COEFFICIENT, and measuring said so:
+# `su2_exp` has its own DBL_MIN guard, so a 2^-1035 rotation comes back as the
+# exact identity, `su2_log` gives a zero omega and `se3_log` returns early. The
+# coefficient is only reached for an angle ABOVE DBL_MIN whose SQUARE is still
+# zero — and that band is 140 decades wide. 2^-664 sits in it: theta^2 = 2^-1328
+# underflows, so the closed form is (1 - 1)/0 = 0/0 = NaN while the series is 1/12.
+# ⭐ Built directly rather than through se3_exp, because that is the reachable
+# shape: any SE(3) assembled from a rotation and a translation can land here.
+var _ls_ta = (1023 - 664) << 52;                 # 2^-664
+var _ls_dse = _se3_alloc(su2_from_axis_angle(hvec3_new(0, 0, F64_ONE), _ls_ta),
+  hvec3_new(F64_ONE, F64_TWO, 0));
+var _ls_dv = _twist_v(se3_log(_ls_dse));
+assert_eq(HVec3_x(_ls_dv), F64_ONE,
+  "se3_log: an angle whose SQUARE underflows still inverts V, not 0/0 = NaN");
+assert_eq(HVec3_y(_ls_dv), F64_TWO,
+  "se3_log: and the second component of that velocity too");
+
+# ⚠ TWO 2.16.0 MUTANTS SURVIVE AND ARE RECORDED, BOTH FOR THE SAME REASON: the
+# repairs made each other redundant.
+# (a) Disabling `se3_log`'s series and falling back to the closed form passes
+#     everything. The 0/0 it was written against is UNREACHABLE: theta there
+#     always comes from `su2_log`, which now bottoms out at 2^-537, and theta^2 is
+#     2^-1074 — subnormal but non-zero. Above that the closed form's cancellation
+#     costs relative accuracy in a term that is itself O(theta^2), so the absolute
+#     error stays at the ULP. It is kept for symmetry with `se3_exp`, where the
+#     same series IS discriminated, and because a caller assembling an SE(3)
+#     directly is not bound by su2_log's floor.
+# (b) `F64_TINY` on `se3_exp`'s guard also passes now — and that is the point of
+#     the release. In 2.15.0 it was a TRAP: with the old coefficients it produced
+#     NaN over the band [DBL_MIN, 2.2e-162]. With c1 written as (sin h / h)^2 / 2
+#     and c2 as a series, there is no theta^2 left to underflow, so the guard
+#     choice stopped mattering. The exact-zero form is kept because it is what the
+#     operation actually requires.
+# [measured: 7-mutant run over lie.cyr/lie_ext.cyr, 5 killed / 2 equivalent]
+
+# --- c1 = (1 - cos t)/t^2 -> 1/2, read directly out of the translation. For
+# omega = (0,0,t) and v = (1,0,0) the V matrix gives trans = (1 - c2 t^2, c1 t, 0),
+# so trans_y / t IS c1 with no cancellation anywhere.
+var _LC_RUN = 0;
+var _LC_BAD = 0;
+for (var _lc_e = 25; _lc_e < 500; _lc_e = _lc_e + 1) {
+    var _lc_t = (1023 - _lc_e) << 52;
+    var _lc_s = se3_exp(_twist_from(hvec3_new(0, 0, _lc_t), hvec3_new(F64_ONE, 0, 0)));
+    _LC_RUN = _LC_RUN + 1;
+    # ⚠ FROM 2^-25, AND THE BOUND IS DERIVED. c1 = 1/2 - t^2/24 + ..., so the
+    # correction is under the ULP of 1/2 only once t^2/12 < 2^-53, i.e. t < 2^-24.4.
+    # An earlier draft started at 2^-20 and failed decades 20..24 against CORRECT
+    # output — the correction is real there, not noise.
+    if (f64_div(HVec3_y(_se3_trans(_lc_s)), _lc_t) != 0x3FE0000000000000) {
+        _LC_BAD = _LC_BAD + 1;
+    }
+}
+assert_eq(_LC_RUN, 475, "the c1 sweep actually ran 475 angles");
+assert_eq(_LC_BAD, 0,
+  "se3_exp: (1-cos t)/t^2 is exactly 1/2 for angles from 2^-25 down to 2^-499");
+
+# --- AND THE CROSSOVER ITSELF, at three angles that straddle it. The series is
+# used below 0.1 and the closed form at or above it, so a wrong series, a wrong
+# crossover or a discontinuity all show here. Values computed independently.
+var _lx_a = _se3_trans(se3_exp(_twist_from(hvec3_new(0, 0,
+        f64_div(F64_ONE, f64_from(20))), hvec3_new(F64_ONE, 0, 0))));       # t = 0.05
+var _lx_b = _se3_trans(se3_exp(_twist_from(hvec3_new(0, 0,
+        f64_div(F64_ONE, f64_from(10))), hvec3_new(F64_ONE, 0, 0))));       # t = 0.1
+var _lx_c = _se3_trans(se3_exp(_twist_from(hvec3_new(0, 0,
+        f64_div(F64_ONE, f64_from(5))), hvec3_new(F64_ONE, 0, 0))));        # t = 0.2
+assert(f64_approx_eq(HVec3_x(_lx_a), 0x3FEFFC964BBF3D4B, LOOSE_TOL_M) == 1,
+  "se3_exp at t = 0.05 (series side): trans_x = 0.9995833854135666");
+assert(f64_approx_eq(HVec3_x(_lx_b), 0x3FEFF25A7E6EBDF7, LOOSE_TOL_M) == 1,
+  "se3_exp at t = 0.1 (the crossover): trans_x = 0.9983341664682815");
+assert(f64_approx_eq(HVec3_x(_lx_c), 0x3FEFC97EEC0D476B, LOOSE_TOL_M) == 1,
+  "se3_exp at t = 0.2 (closed-form side): trans_x = 0.9933466539753061");
+
+# ⭐ ANTI-DELETION: the identity of each group must still come back exactly.
+assert_eq(HVec3_x(su2_log(su2_identity())), 0,
+  "su2_log: the identity still has the zero logarithm");
+assert_eq(HVec3_x(so3_log(m3_identity())), 0,
+  "so3_log: the identity rotation still has the zero logarithm");
+var _ls_z = se3_exp(_twist_from(hvec3_new(0, 0, 0), hvec3_new(f64_from(7), 0, 0)));
+assert_eq(HVec3_x(_se3_trans(_ls_z)), f64_from(7),
+  "se3_exp: a pure translation is still exactly itself");
+# ⚠ And theta = pi must still take so3_log's eigenvector branch, where the
+# antisymmetric part is exactly zero and atan2 alone cannot give the axis.
+assert(f64_approx_eq(f64_abs(HVec3_z(so3_log(so3_exp(hvec3_new(0, 0, F64_PI))))),
+    F64_PI, LOOSE_TOL_M) == 1,
+  "so3_log: a rotation by exactly pi still recovers its axis and angle");
+
 test_group("lie 2.15.0: the exponential maps are scale-covariant");
 
 var _LE_RUN = 0;
