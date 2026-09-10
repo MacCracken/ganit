@@ -558,7 +558,28 @@ them is not a defect at all.
       repair currently has nothing to prove itself with. Write the test first.
       The disposition table for all nine sites is in
       [`issues/archived/2026-08-10-squared-epsilon-guards-in-geo-ray.md`](issues/archived/2026-08-10-squared-epsilon-guards-in-geo-ray.md).
-- [ ] **[2.18.0]** ⚠ **The seed-upgrade trade — DO NOT ACT ON THE NUMBER BELOW; it is void.** The "+19.4%" was
+- [x] ⛔ **DECLINED 2026-09-10, on a measurement that inverts the filing's premise.** The trade was
+      carried since 2.9.3 as a judgement call whose price was unknown. Re-measured on the 2.17.0
+      tree, the price is not the cost — it is the **ACCURACY**, and the direction is the opposite of
+      what the filing assumes.
+      **Random overlapping spheres judged against the EXACT closed form `ra + rb - |c1 - c2|`** (no
+      reference implementation, no harness):
+      | | mean | worst |
+      |---|---|---|
+      | `gjk_epa_3d` shipped, 1200 pairs | **1.41e-16** | **5.57e-16** |
+      | `gjk_epa_3d` upgraded, same pairs | 1.70e-14 | **2.03e-11** — 36,000x worse |
+      | over a wider 4000-pair sweep | 3.40e-10 → 2.85e-09 | 1.32e-06 → 1.14e-05 — 8.4x worse |
+      ⭐ **THE MECHANISM WAS ALREADY WRITTEN IN THE SOURCE.** `_epa_polish`'s own comment states the
+      returned depth is `min` over probed directions of `h_M(n)`, every `h_M(n)` is `>=` the true
+      MTV, so the polish "can only lower an upper bound" — monotone. **Certifying is an EARLY-OUT
+      that skips it.** The filing's premise is that certifying is the better state; it is the worse
+      one, and the polish was delivering the accuracy all along.
+      ⚠ **Two of the filing's four claims are false as written**: "every assertion in the suite
+      passes" (the box-fallback assertion fails, 12 → 6 — the filing's own tripwire, added after
+      that sentence was written) and "it alters no returned answer" (it alters them, for the worse).
+      ⭐ **A tripwire now pins it** in `tests/modules.tcyr`, so the trade cannot be taken by
+      accident: the upgrade fails two assertions.
+      ⚠ Cost was never needed. Original text: ⚠ **The seed-upgrade trade — DO NOT ACT ON THE NUMBER BELOW; it is void.** The "+19.4%" was
       priced against a `gjk_epa_sphere_box` baseline of **125.6 µs** which now reads **78.5 µs**
       (cycc 6.6.x accessor inlining). Its own linked filing has said since 2026-09-09: *"Do not
       rescale the old percentage — re-measure both halves."* Both the baseline and the added work
@@ -584,6 +605,21 @@ them is not a defect at all.
       upgrade's cost without gaining anything. **Root cause not established.** This is what the
       filing is actually about now.
       → [`issues/2026-08-06-epa-certificate-tests-the-seed-not-the-polytope.md`](issues/2026-08-06-epa-certificate-tests-the-seed-not-the-polytope.md)
+
+- [ ] **[2.19.0]** ⛔ **`mpr_penetration` and `gjk_epa_3d` disagree by up to 1.6e-5 on ordinary
+      overlapping spheres, and NOTHING checks it.** Found while re-measuring the seed trade, and it
+      is larger than the trade was. Both are public, both compute the same quantity, and against the
+      exact closed form over the same 1200 pairs:
+      `gjk_epa_3d` mean **1.41e-16** / worst **5.57e-16**; `mpr_penetration` mean **1.37e-08** /
+      worst **1.65e-05** — roughly **10^8 times** the error, on geometry with a one-line answer.
+      ⚠ **The suite cannot see it**: `_ag_mprpen` (`tests/modules.tcyr:811`) compares the two entry
+      points' RETURN CODES only, and no assertion anywhere compares their DEPTHS. That is the same
+      shape of gap the 2.13.0 suite release was about.
+      ⭐ Cheap to gate before it is cheap to fix: an assertion that the two public entry points agree
+      on depth to a stated tolerance over a randomised sphere sweep. ⚠ The cause is likely the
+      portal seed's `v0`, which `_epa_seed_portal` builds from the **+x axis** specifically — the
+      error concentrates where the centre offset is near-parallel or near-perpendicular to it — but
+      that is an inference from where the errors cluster, not a measurement.
 
 ### Decisions owed
 

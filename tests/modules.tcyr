@@ -9632,6 +9632,83 @@ assert_eq(_GA_EPA_POLISH_COUNT - epc_base, epc_calls,
   "gjk_epa_3d certifies NONE of 12 box overlaps -- every call falls back to the polish");
 assert_eq(epc_calls, 12, "the box sweep actually ran 12 calls");
 
+test_group("2.18.0 EPA: the seed trade, declined on measurement");
+
+# ⛔ THE SEED-STRICTNESS TRADE IS DECLINED, AND THE REASON IS THE OPPOSITE OF THE
+# ONE THE FILING ARGUES. Giving `_epa_seed_gjk` the strictness upgrade
+# `_epa_seed_portal` already performs was carried on the roadmap since 2.9.3 as a
+# judgement call whose price was unknown (its "+19.4%" was void — the baseline had
+# moved 125.6 us -> 78.5 us). Re-measured on the 2.17.0 tree, the price is not the
+# cost, it is the ACCURACY:
+# [measured: docs/development/issues/2026-08-06-epa-certificate-tests-the-seed-not-the-polytope.md]
+#
+#   random overlapping spheres, judged against the EXACT closed form
+#   depth = ra + rb - |c1 - c2| — no reference implementation, no harness:
+#      over this block's own 1200-pair sequence
+#         gjk_epa_3d shipped   mean 1.41e-16   worst 5.57e-16   (essentially exact)
+#         gjk_epa_3d upgraded  mean 1.70e-14   worst 2.03e-11   <- 36,000x WORSE
+#      over a wider 4000-pair sweep, where rarer near-degenerate configurations
+#      appear and both arms get harder
+#         gjk_epa_3d shipped   mean 3.40e-10   worst 1.32e-06
+#         gjk_epa_3d upgraded  mean 2.85e-09   worst 1.14e-05   <- 8.4x worse
+# [measured: 1200- and 4000-pair sphere sweeps, shipped vs upgraded, 2026-09-10]
+#
+# ⭐ THE MECHANISM IS IN THE SOURCE ALREADY. `_epa_polish`'s own comment states
+# that the returned depth is `min` over probed directions of `h_M(n)` and every
+# `h_M(n) >= ` the true MTV, so the polish "can only lower an upper bound" —
+# monotone. Certifying is an EARLY-OUT that skips it. The filing's premise is that
+# certifying is the better state; it is the worse one, and the polish is what was
+# delivering the accuracy all along.
+# ⚠ Two of the filing's four claims are also false as written: it says "every
+# assertion in the suite passes" (the box-fallback assertion above fails — 12 -> 6)
+# and "it alters no returned answer" (measured, it alters them, for the worse).
+# ⭐ This assertion is the tripwire: it passes on the shipped tree and fails on the
+# upgraded one, so the trade cannot be taken by accident.
+# [measured: upgrade installed, two assertions fail; reverted byte-identical]
+var _ES_N = 0;
+var _ES_SEED = 12345;
+var _ES_GWORST = 0;
+fn _es_rnd() {
+    _ES_SEED = (_ES_SEED * 1103515245 + 12345) & 0x7FFFFFFF;
+    return _ES_SEED;
+}
+fn _es_frnd() { return f64_div(f64_from(_es_rnd() % 1000000), f64_from(1000000)); }
+for (var _es_i = 0; _es_i < 1200; _es_i = _es_i + 1) {
+    var _es_ra = f64_add(F64_ONE, _es_frnd());
+    var _es_rb = f64_add(F64_ONE, _es_frnd());
+    var _es_ox = f64_mul(f64_sub(_es_frnd(), F64_HALF), F64_TWO);
+    var _es_oy = f64_mul(f64_sub(_es_frnd(), F64_HALF), F64_TWO);
+    var _es_oz = f64_mul(f64_sub(_es_frnd(), F64_HALF), F64_TWO);
+    var _es_d = hvec3_length(hvec3_new(_es_ox, _es_oy, _es_oz));
+    if (f64_gt(_es_d, 0) == 1) {
+        var _es_truth = f64_sub(f64_add(_es_ra, _es_rb), _es_d);
+        if (f64_gt(_es_truth, 0x3FB999999999999A) == 1) {
+            var _es_A = hvec4_new(0, 0, 0, _es_ra);
+            var _es_B = hvec4_new(_es_ox, _es_oy, _es_oz, _es_rb);
+            var _es_n = alloc(8);
+            var _es_dp = alloc(8);
+            store64(_es_n, 0);
+            store64(_es_dp, 0);
+            if (gjk_epa_3d(&_mpr_sup_sphere, _es_A, &_mpr_sup_sphere, _es_B,
+                _es_n, _es_dp) == 1) {
+                var _es_e = f64_abs(f64_div(f64_sub(load64(_es_dp), _es_truth), _es_truth));
+                _ES_N = _ES_N + 1;
+                if (f64_gt(_es_e, _ES_GWORST) == 1) { _ES_GWORST = _es_e; }
+            }
+        }
+    }
+}
+assert(_ES_N > 1000, "the EPA sphere-accuracy sweep actually ran (over 1000 overlapping pairs)");
+# ⚠ THE BOUND IS TIED TO THIS EXACT 1200-ITERATION SEQUENCE and is derived from
+# both arms of the measurement: 1e-12 sits ~1800x above the shipped worst
+# (5.57e-16) and ~20x below the upgraded worst (2.03e-11). ⛔ Do NOT change the
+# loop count without re-deriving it — at 4000 pairs the shipped worst is 1.32e-06,
+# because rarer near-degenerate configurations enter the sequence. A bound copied
+# across sample sizes here would be wrong by nine orders of magnitude.
+# [measured: both arms at 1200 and at 4000 pairs, 2026-09-10]
+assert(f64_lt(_ES_GWORST, 0x3D719799812DEA11) == 1,
+  "gjk_epa_3d: depth is within 1e-12 of the exact sphere formula on this sequence");
+
 # The half the 2.9.1 measurement never took, and the reason its conclusion did
 # not hold. Same 12 boxes, same refinement, the OTHER public entry point.
 # [measured: this assertion]
