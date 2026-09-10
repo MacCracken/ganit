@@ -91,8 +91,9 @@ items: they are tracked in `issues/` and discharged as a **precondition** of the
 |---|---|---|
 | ~~**2.12.0 — the safety release**~~ | ✅ **SHIPPED.** The abort tier (4 entry points) + the allocation tier — which was **4 sites, not the 2 this row estimated**. ⭐ Two were found by refusing to trust the list: one by a **mutant that did not die**, one by grepping for the shape after the first was repaired. | — |
 | ~~**2.13.0 — the suite release**~~ | ✅ **SHIPPED.** 842 truncating assertion sites -> **16**; `foundation.tcyr` 89% -> **0%**. ⭐ The migration was self-verifying, and the four sites that failed on conversion were four different real defects. Named tolerance helpers added to all five suites. | 2.12.0 |
-| **2.14.0 — the epsilon release** | The epsilon tier — guards moved onto the quantity that actually fails, each with a scale-covariance assertion | **2.13.0**, for a measured reason — see below |
-| **3.0.0** | `Result<T,E>` API — breaking. ⚠ Re-scope before planning: it is the **v6.6.0 value form**, not the boxed form this file was written against | 2.14.0 |
+| ~~**2.14.0 — the epsilon release**~~ | ✅ **SHIPPED, PARTIALLY.** ⛔ **This row said "~20 sites"; the census found 136 guards and 97 confirmed defects in 23 modules** — the estimate came from the 2026-08-11 audit's *confirmed* table, which is a list of instances someone reproduced, not a census of the class. **23 confirmed sites repaired, 58 mutants killed, +83 assertions.** ⭐ Three repairs were NOT on the census list and came from grepping for the shape. **74 remain, enumerated with evidence.** | 2.13.0 |
+| **2.15.0 — the epsilon tier, remainder** | The other **74 confirmed** epsilon defects — see [`docs/audit/2026-09-09-epsilon-census.md`](../audit/2026-09-09-epsilon-census.md). Largest: `geo_advanced` 18, `linalg_ext` 12, `linalg_precision` 9, `collision_core` 6, `lie` 6. ⭐ Includes `cx_div`, which `complex.cyr:58` has named in a comment **since 2.6.14** and which is still fabricating zero. | 2.14.0 |
+| **3.0.0** | `Result<T,E>` API — breaking. ⚠ Re-scope before planning: it is the **v6.6.0 value form**, not the boxed form this file was written against | 2.15.0 |
 
 ### ⛔ Why the epsilon tier is no longer first, and why its old gate is gone
 

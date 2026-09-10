@@ -18,7 +18,7 @@
 var _GA_F64_QUARTER     = 0x3FD0_0000_0000_0000;  # 0.25
 var _GA_F64_NEG_HALF    = 0xBFE0_0000_0000_0000;  # -0.5
 var _GA_F64_NEG_ONE     = 0xBFF0_0000_0000_0000;  # -1.0
-var _GA_F64_POS_INF     = 0x7FF0_0000_0000_0000;  # +Infinity
+var _GA_F64_POS_INF = F64_POS_INF;   # alias of error.cyr
 var _GA_F64_NEG_INF     = 0xFFF0_0000_0000_0000;  # -Infinity
 # _GA_F64_001 (0.01) is gone: its only consumer was time_of_impact's sampling
 # step, and an absolute world length was exactly the wrong thing for that loop

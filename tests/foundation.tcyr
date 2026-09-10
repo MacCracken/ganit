@@ -1217,6 +1217,79 @@ assert_eq(hvec3_angle(hvec3_new(_fa_under, 0, 0), hvec3_new(0, _fa_under, 0)), 0
   "hvec3_angle: one ULP below DBL_MIN the guard fires");
 
 # --- misc singletons
+# ================================================================
+# 2.14.0 — scale covariance for the normalize family
+# ================================================================
+# ⛔ hvec2/3/4_normalize ALL had the same guard: `len < 1e-12` -> return the ZERO
+# VECTOR. `len` is a LENGTH, degree one in the caller's units, so a perfectly
+# good short vector normalised to something of length 0 — not an error value, a
+# wrong answer. ⚠ hvec3_normalize was not even on the triage list; it was found
+# by grepping for the shape, and it is the one that feeds geo_ray_new, EPA and
+# every unit-direction path in the tree.
+#
+# ⭐ The repair tests the RECIPROCAL for OVERFLOW ONLY, and the "only" is
+# load-bearing: `f64_lt(|inv|, F64_POS_INF) == 0` is also true for NaN, and
+# tests/abuse.tcyr pins this API's contract as **NaN in, NaN out**. Measured —
+# that version fails 2 abuse assertions. `f64_eq(|inv|, +Inf)` catches len = 0
+# and any len too small to invert while letting NaN through.
+# [measured: full-suite run of both guard forms, 2026-09-09]
+var _NM_RUN = 0;
+var _NM_BAD = 0;
+for (var _nm_k = 0; _nm_k < 530; _nm_k = _nm_k + 1) {
+    var _nm_s = (1023 - _nm_k) << 52;             # 2^-k
+    _NM_RUN = _NM_RUN + 1;
+    # An axis vector normalises to exactly the axis at every length.
+    if (HVec2_x(hvec2_normalize(hvec2_new(_nm_s, 0))) != 0x3FF0000000000000) {
+        _NM_BAD = _NM_BAD + 1;
+    }
+    if (HVec3_x(hvec3_normalize(hvec3_new(_nm_s, 0, 0))) != 0x3FF0000000000000) {
+        _NM_BAD = _NM_BAD + 1;
+    }
+    if (HVec4_x(hvec4_normalize(hvec4_new(_nm_s, 0, 0, 0))) != 0x3FF0000000000000) {
+        _NM_BAD = _NM_BAD + 1;
+    }
+    # ⚠ A DIAGONAL too. An axis vector alone does not discriminate everything:
+    # the fabricated zero has x = 0 there as well, but a diagonal also pins that
+    # the two components stay EQUAL, which a partial repair could break.
+    var _nm_d = hvec3_normalize(hvec3_new(_nm_s, _nm_s, 0));
+    if (HVec3_x(_nm_d) != 0x3FE6A09E667F3BCC) { _NM_BAD = _NM_BAD + 1; }
+    if (HVec3_y(_nm_d) != 0x3FE6A09E667F3BCC) { _NM_BAD = _NM_BAD + 1; }
+}
+assert_eq(_NM_RUN, 530, "the normalize scale sweep actually ran 530 scales");
+assert_eq(_NM_BAD, 0,
+  "hvec2/3/4_normalize: unit output at every length from 2^0 down to 2^-529");
+
+# ⭐ ANTI-DELETION. A genuinely zero vector must still return zero, or the repair
+# is a deletion wearing a comment.
+assert_eq(HVec3_x(hvec3_normalize(hvec3_new(0, 0, 0))), 0,
+  "hvec3_normalize: the zero vector still normalises to zero, not +Inf");
+assert_eq(HVec2_x(hvec2_normalize(hvec2_new(0, 0))), 0,
+  "hvec2_normalize: the zero vector still normalises to zero");
+assert_eq(HVec4_x(hvec4_normalize(hvec4_new(0, 0, 0, 0))), 0,
+  "hvec4_normalize: the zero vector still normalises to zero");
+# ⭐ AND THE NaN CONTRACT, asserted here beside the guard that could break it.
+# NaN is the only value not equal to itself, which is the portable test here.
+var _nm_nan = HVec3_x(hvec3_normalize(hvec3_new(0x7FF8000000000000, 0, 0)));
+assert_eq(f64_eq(_nm_nan, _nm_nan), 0,
+  "hvec3_normalize: NaN propagates, it is not silently zeroed");
+
+# ⚠ AND ONE MUTANT SURVIVES ON PURPOSE, WITH THE REASON PINNED HERE. Swapping the
+# guard for `f64_lt(len, F64_TINY)` passes every assertion above, and that is an
+# EQUIVALENT MUTANT rather than a hole: `hvecN_length` SQUARES its components
+# before the sqrt, so any vector whose length would fall below DBL_MIN has already
+# underflowed to a length of exactly 0. The smallest non-zero length the function
+# can produce is 2^-537 — roughly 1e-162, some 146 decades ABOVE DBL_MIN — so on
+# the reachable domain `len < DBL_MIN` and `1/len overflows` are the same test.
+# ⭐ The floor is ASSERTED, not assumed, so the equivalence stays a checked fact:
+# if hvec3_length is ever rewritten in a hypot style that avoids the intermediate
+# square, these two assertions fail and the two guards stop being interchangeable.
+# The reciprocal-overflow form is kept because it remains correct either way.
+# [measured: 4-mutant run; F64_TINY survives, EPSILON_F64/NaN-hole/deletion die]
+assert(hvec3_length(hvec3_new((1023 - 537) << 52, 0, 0)) != 0,
+  "hvec3_length: 2^-537 is the smallest vector with a non-zero length");
+assert_eq(hvec3_length(hvec3_new((1023 - 538) << 52, 0, 0)), 0,
+  "hvec3_length: one step smaller underflows to exactly 0, far above DBL_MIN");
+
 assert_eq(hisab_is_err(0), 0, "hisab_is_err(0) is false");
 assert_eq(hisab_is_err(0 - 5), 1, "hisab_is_err(negative) is true");
 assert(f64_lt(f64_abs(f64_tan(0)), LOOSE_TOL) == 1, "f64_tan(0) = 0");

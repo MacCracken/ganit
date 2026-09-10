@@ -8928,7 +8928,33 @@ var ep_box = _mpr_mkbox(F64_TWO, 0, 0, F64_ONE, F64_ONE, F64_ONE);
 assert_eq(gjk_epa_3d(&_mpr_sup_sphere, ep_sph, &_mpr_sup_box, ep_box, ep_n, ep_d), 1,
   "tangent sphere/box: gjk_epa reports contact (was 0)");
 assert_eq(load64(ep_d), 0, "tangent sphere/box: depth is exactly 0");
-assert_eq(_ac_comp_e9(ep_n, 0), (0 - 1000000000), "tangent sphere/box: normal is exactly -x");
+# ⛔ 2.14.0 — THIS ASSERTED -x AND -x WAS THE FABRICATION. The tangent case is the
+# only one of the three that reaches EPA's DEGENERATE path, and that path ran
+# through `hvec3_normalize`, which used to return the ZERO VECTOR for any input
+# shorter than 1e-12. Repairing that guard flipped this to +x — so the pinned sign
+# had been produced by the zeroing, not by the geometry.
+# ⭐ +x is right, and it is settled by CONTINUITY rather than by argument: the same
+# sphere and box OVERLAPPING (box centre 1.5 and 1.75, which never enter the
+# degenerate path) return normal +x with depths exactly 0.5 and 0.25. Tangency is
+# the limit of that family as the overlap goes to 0, so a normal that flips sign
+# there was inconsistent with its own neighbourhood. It also matches the stated
+# contract — "translating B by depth * normal separates the pair" — since +x moves
+# the box away from the sphere and -x drives it in.
+# [measured: probe over box centres 1.5 / 1.75 / 2.0 on the repaired tree]
+assert_eq(_ac_comp_e9(ep_n, 0), 1000000000, "tangent sphere/box: normal is exactly +x");
+# ⚠ And the continuity itself is now asserted, so the sign cannot drift back
+# without the overlapping neighbours disagreeing out loud.
+var ep_ov = _mpr_mkbox(f64_div(f64_from(3), F64_TWO), 0, 0, F64_ONE, F64_ONE, F64_ONE);
+assert_eq(gjk_epa_3d(&_mpr_sup_sphere, ep_sph, &_mpr_sup_box, ep_ov, ep_n, ep_d), 1,
+  "overlapping sphere/box: gjk_epa reports contact");
+assert_eq(_ac_comp_e9(ep_n, 0), 1000000000,
+  "overlapping sphere/box: normal is +x, the same sign the tangent case must take");
+# ⚠ APPROXIMATE, and deliberately so: EPA refines iteratively, so the depth is
+# 0.500000000001391 — 1.4e-12 out, its convergence tolerance, not a defect.
+# The SIGN above is the assertion that discriminates and it is bit-exact.
+# [measured: bit pattern 0x3FE00000000030F1 vs 0.5, 12529 ULP, 2026-09-09]
+assert(f64_approx_eq(load64(ep_d), F64_HALF, LOOSE_TOL_M) == 1,
+  "overlapping sphere/box: depth converges to 0.5");
 assert_eq(_ac_comp_e9(ep_n, 1), 0, "tangent sphere/box: normal has no y component");
 assert_eq(_ac_comp_e9(ep_n, 2), 0, "tangent sphere/box: normal has no z component");
 

@@ -14,7 +14,7 @@
 # Local constants
 # ================================================================
 
-var _SP_F64_POS_INF = 0x7FF0_0000_0000_0000;  # +Infinity
+var _SP_F64_POS_INF = F64_POS_INF;   # alias of error.cyr
 var _SP_QUADTREE_MAX_PER_NODE = 8;             # items before split
 
 # Hard ceiling on quadtree_new / octree_new's `max_depth`, and therefore on

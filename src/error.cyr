@@ -44,6 +44,24 @@ var EPSILON_F64 = 0x3D719799812DEA11;        # 1e-12 as f64 bits
 # parameter in [0,1] — where an absolute tolerance means something.
 var F64_TINY = 0x0010_0000_0000_0000;        # 2.2250738585072014e-308 (DBL_MIN)
 
+# +Infinity, as a bit pattern.
+#
+# ⭐ THE FIFTH INSTANCE — this one was overdue. `_COL_F64_POS_INF`,
+# `_SP_F64_POS_INF`, `_GA_F64_POS_INF` and `_GEO_F64_POS_INF` are byte-identical
+# and are now aliases of this one, so the value has a single definition and the
+# constant gate has one literal to check instead of five.
+# ⚠ `interval.cyr` keeps its own `_IVL_F64_POS_INF` literal on purpose: it is one
+# of the four fully STANDALONE modules and does not include `error`, so aliasing
+# it here would be a dependency, not a de-duplication.
+#
+# ⭐ Its main use is not a sentinel but a GUARD. When the operation that can fail
+# is a RECIPROCAL, `f64_lt(f64_abs(1/x), F64_POS_INF)` is the exact test: it is 1
+# for every finite reciprocal and 0 for both +Inf and NaN, so one comparison
+# rejects x = 0, any x too small to invert, and a NaN — with no scale chosen for
+# it. ⚠ `F64_TINY` is NOT equivalent there and is one binade too strict:
+# 1/2^-1023 = 2^1023 is finite, so DBL_MIN refuses inputs that work.
+var F64_POS_INF = 0x7FF0_0000_0000_0000;     # +Infinity
+
 fn hisab_is_err(code) {
     if (code < 0) { return 1; }
     return 0;

@@ -100,6 +100,18 @@ fn hvec4_length(v) { return f64_sqrt(hvec4_length_sq(v)); }
 #must_use
 fn hvec4_normalize(v) {
     var len = hvec4_length(v);
-    if (f64_lt(f64_abs(len), EPSILON_F64) == 1) { return hvec4_zero(); }
-    return hvec4_scale(v, f64_div(F64_ONE, len));
+    # ⛔ `len` is a LENGTH — degree one in the caller's units — and this tested it
+    # against an absolute 1e-12, so a perfectly good short vector normalised to
+    # the ZERO VECTOR: not an error value, just a wrong answer with no length.
+    # ⭐ What fails is `1 / len`, so test THAT — and test it for OVERFLOW ONLY.
+    # ⛔ The obvious `f64_lt(|inv|, F64_POS_INF) == 0` is wrong here and
+    # `tests/abuse.tcyr` says so out loud: it is false for NaN too, so it would
+    # silently zero a NaN vector, and this API's documented contract is **NaN in,
+    # NaN out**. `f64_eq(|inv|, +Inf)` catches len = 0 and any len too small to
+    # invert, while a NaN falls through and propagates as the contract requires.
+    # ⚠ F64_TINY would be one binade too strict here: 1/2^-1023 is finite.
+    # [measured: tests/foundation.tcyr normalize scale sweep, 2026-09-09]
+    var inv = f64_div(F64_ONE, len);
+    if (f64_eq(f64_abs(inv), F64_POS_INF) == 1) { return hvec4_zero(); }
+    return hvec4_scale(v, inv);
 }

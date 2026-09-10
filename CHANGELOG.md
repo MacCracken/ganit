@@ -2,6 +2,99 @@
 
 ## [Unreleased]
 
+## [2.14.0] - 2026-09-09 — the epsilon release: guards moved onto the quantity that actually fails
+
+The roadmap sized this tier at **"~20 sites"**. A census of every `EPSILON_F64` comparison guard in
+`src/` found **136 guards in 25 modules**, of which **97 are confirmed defects across 23 modules** —
+independently re-derived by a second agent instructed to refute the first. ⚠ **The estimate came
+from a summary rather than from the code**, exactly as 2.11.3 sized the ganita migration at 8 call
+sites when it was 536. **23 confirmed sites are repaired here, every one mutation-proven; the other
+74 are enumerated with their evidence in [`docs/audit/2026-09-09-epsilon-census.md`](docs/audit/2026-09-09-epsilon-census.md).**
+
+The class is one guard comparing a **dimensioned** quantity against an **absolute** 1e-12 and then
+**fabricating a plausible answer**: a ray test returning 0, which this module defines as *miss*; a
+closest-point returning a point that really is on the sphere but on the +x axis whatever the caller
+asked; barycentric weights of (1/3, 1/3, 1/3), which sum to 1 and lie inside the triangle. None is an
+Inf or a NaN a caller could test for.
+
+### Fixed
+
+- **vec3** — `hvec3_angle` guarded `|a|·|b|`, a length *squared*, against 1e-12. Two **exactly
+  perpendicular** vectors returned π/2 at lengths 1, 1e-3 and 1e-6 and **0 rad at 1e-18** — and 0 is
+  the value meaning *parallel*, so it reported the opposite of the truth. → `F64_TINY`.
+- **calc_ext** — five guards on knot spans, key times and grid intervals. `calc_bspline` and
+  `calc_nurbs` returned the **last control point**; `calc_hermite_tcb` returned the last key's value
+  for a query on key 1 of 3; `calc_monotone_cubic` returned 0.0, which is simultaneously a legal
+  interpolated value and its documented error return. ⚠ Two are **not** threshold swaps:
+  `calc_hermite_tcb`'s end-key clamp protects `h10·m0` from `0·Inf`, not a division, so it becomes
+  exact equality (deletion is mutation-refuted twice); and `calc_monotone_cubic`'s comment said "not
+  sorted" while the code tested "smaller than 1e-12" — it becomes `f64_gt(hi, 0) == 0`, a **not-greater**
+  test, because `f64_lt(NaN, x)` is 0 and the old shape let a NaN abscissa through.
+- **geo** — six public entry points: `geo_ray_plane`, `geo_ray_sphere`, `geo_ray_triangle`,
+  `geo_ray_capsule`, `geo_closest_point_on_sphere`, `geo_barycentric_coords`.
+- **geo** — ⛔ **and four guards 2.10.2 already "repaired", where it fixed the threshold and left the
+  exponent wrong.** `geo_triangle_unit_normal` guards `len_sq`, a cross product **squared** and so
+  degree *four* in the caller's units, against `_GEO_F64_TINY`, a threshold for a degree-*one*
+  quantity — it still returned a fabricated (0,1,0) for a well-formed right triangle from legs of
+  1e-77 down. **2.10.2 proved that repair with a 10-decade sweep that bottomed out at 1e-9**, so the
+  sweep could only ever show the old threshold was wrong, never that the new one was right.
+- **geo_diff** — all six ray/surface jets guarded `den` against 1e-12 while the thing that fails is
+  `1/den` on the very next line, reporting "grazing, non-differentiable" for ordinary geometry in
+  small units. ⭐ **`geo_jet_plane` was not on the census list**; it was found by grepping for the
+  shape, and it mattered most, because its primal `geo_ray_plane` is repaired in this same release —
+  leaving it would have left the jet rejecting rays its own primal accepts.
+- **vec2 / vec3 / vec4** — `hvecN_normalize` returned the **zero vector** for any input shorter than
+  1e-12: not an error value, a wrong answer with no length. ⭐ `hvec3_normalize` was not on the census
+  list either, and it is the one feeding `geo_ray_new`, EPA and every unit-direction path in the tree.
+- **collision (via `hvec3_normalize`)** — ⛔ **a test was pinning the fabrication.** `gjk_epa_3d` on
+  an exactly tangent sphere/box asserted a contact normal of **−x**; repairing normalize flipped it to
+  **+x**. +x is right, settled by **continuity**: the same pair *overlapping* (box centre 1.5 and 1.75,
+  which never reach EPA's degenerate path) returns +x with depths 0.5 and 0.25, and tangency is the
+  limit of that family. The old sign was produced by the zeroing, not by the geometry. The continuity
+  itself is now asserted so the sign cannot drift back silently.
+
+### Changed
+
+- **error** — `F64_POS_INF` extracted (**fifth** instance): `_COL_`/`_SP_`/`_GA_`/`_GEO_F64_POS_INF`
+  are now aliases. ⚠ `interval.cyr` keeps its own literal deliberately — it is one of the four
+  standalone modules and does not include `error`. Constant gate 159 → 154 literals.
+- **error** — `F64_TINY` extracted (third instance); `_GEO_`/`_AD_`/`_QUAT_F64_TINY` are aliases.
+- ⭐ **Where the operation is a RECIPROCAL, the guard is now the reciprocal itself** —
+  `f64_lt(|1/x|, F64_POS_INF)` is 1 for every finite reciprocal and 0 for both +Inf and NaN, so one
+  comparison rejects x = 0, any x too small to invert, and a NaN, with **no scale chosen for it**.
+  ⚠ `F64_TINY` is *not* equivalent there and is one binade too strict: `1/2^-1023 = 2^1023` is finite.
+  ⚠ And it is **wrong for `1/sqrt(x)`**, where `f64_gt(x, 0) == 0` is right, because sqrt of any
+  non-zero double is normal. Three different operations, three different exact guards.
+
+### Added
+
+- **tests** — 83 assertions, all scale-covariance or boundary. Suites **3574 → 3657**.
+- ⭐ **Sweep depths are now DERIVED, not chosen.** `hvec3_angle` runs **154 decades** because that is
+  where `denom` first goes subnormal; `_sc_sweep` went **10 → 80** because at decade 80 the quartic
+  `len_sq` goes subnormal and precision dies regardless of any threshold; the normalize sweep runs 530.
+  ⚠ A 20-decade version of the angle sweep let a **1e-100** threshold survive, and decade-stepping
+  left a **2.65-decade blind spot** just above DBL_MIN, so there is a sub-decade probe and a `2^-511`
+  fixture that squares to *exactly* DBL_MIN, pinning the threshold to the last ULP.
+
+### Notes on process
+
+- **58 mutants installed, all killed**, restore verified byte-identical after every cycle.
+- ⛔ **My own mutation harness was wrong before the code was**: it read the last line of output, which
+  for five mutants was a compiler *note*, and printed "killed" for all eleven. With a correct
+  extractor **four had survived** — including deletion of a guard, and three repairs the sweep could
+  not discriminate at all. **Check the probe before believing the probe**, for the fourth release running.
+- ⚠ **A `<` guard that also catches NaN broke a documented contract.** `tests/abuse.tcyr` pins
+  `hvec3_normalize` as **NaN in, NaN out**; the natural finite-reciprocal test is false for NaN too and
+  silently zeroed it. The suite caught it. The guard tests for **overflow only**.
+- ⚠ **One mutant survives on purpose and the reason is asserted, not asserted-away.** `F64_TINY` in
+  the normalize family is an **equivalent mutant**: `hvecN_length` squares before the sqrt, so the
+  smallest non-zero length it can produce is `2^-537` — ~146 decades *above* DBL_MIN — and the two
+  guards coincide on the reachable domain. That floor is now pinned by two assertions, so if the
+  function is ever rewritten in a hypot style they stop being interchangeable and the tests say so.
+- ⚠ **The census's own first run lost 30 of 41 agents to a session limit** and returned 11 results
+  that read exactly like a complete answer. The resumed run completed 121 agents with 0 errors.
+
+
 ## [2.13.0] - 2026-09-09 — the suite release: the suite could not see an error of 0.9
 
 The audit's self-declared **highest-value item**, and the number that justifies it was measured, not
