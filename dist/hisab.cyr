@@ -5798,7 +5798,30 @@ fn gjk_intersect_3d(support_a, shape_a, support_b, shape_b) {
 var _EPA_FACE_SIZE = 48;
 # Pattern-search budget for _epa_polish: 4 support calls per round, and the
 # angular step halves whenever a round finds nothing.
-var _EPA_POLISH_ITER = 64;
+#
+# ⛔ 2.19.0 — 64 WAS NOT ENOUGH TO REACH THE LOOP'S OWN EXIT CONDITION, and that
+# is arithmetic rather than opinion. The search starts at 0.25 rad and breaks when
+# the step falls under `EPSILON_F64`, which takes **38 halvings**
+# (0.25 * 2^-38 < 1e-12); every round that MOVES consumes budget without halving.
+# A cap of 64 therefore leaves at most 26 rounds for moves, and a seed that starts
+# further from the answer needs more than that — so the loop was returning while
+# still walking, not because it had converged.
+# ⛔ THE CONSEQUENCE WAS A SILENT ACCURACY GAP BETWEEN TWO PUBLIC ENTRY POINTS.
+# `mpr_penetration` reaches `_epa_refine` through the PORTAL seed and `gjk_epa_3d`
+# through the GJK seed; the portal seed starts further out, so it was the one
+# running out. Measured against the exact closed form `ra + rb - |c1 - c2|` over
+# 4000 random overlapping sphere pairs: `gjk_epa_3d` worst **5.57e-16**,
+# `mpr_penetration` worst **1.65e-05** — and at 128 the two are the same to the
+# last bits (6.3e-16). ⚠ It is RARE, not systematic: 7 of 4000 pairs exceed 1e-10.
+# ⭐ 128 leaves 90 rounds for moves after the 38 halvings, and is measured
+# sufficient for every pair in the sweep; 256 changes nothing further.
+# ⚠ NO MEASURABLE COST. The extra rounds are only spent on the calls that were
+# hitting the cap, and the tracked benchmarks do not contain such a case: the EPA
+# rows moved +0.1% to +2.5% and the CONTROL rows that never reach EPA moved +1.6%
+# to +2.9% in the same pair of runs, i.e. the whole board drifted and the change
+# is not separable from it.
+# [measured: 4000-pair sphere sweep at 64/128/256; 2x2 benchmark runs with controls]
+var _EPA_POLISH_ITER = 128;
 
 # Relative convergence tolerance for the EPA upper/lower bound gap. Relative,
 # not absolute: see note 2 above.

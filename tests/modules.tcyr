@@ -9709,6 +9709,86 @@ assert(_ES_N > 1000, "the EPA sphere-accuracy sweep actually ran (over 1000 over
 assert(f64_lt(_ES_GWORST, 0x3D719799812DEA11) == 1,
   "gjk_epa_3d: depth is within 1e-12 of the exact sphere formula on this sequence");
 
+# ⛔ 2.19.0 — TWO PUBLIC ENTRY POINTS COMPUTING THE SAME QUANTITY DISAGREED BY
+# 1.65e-05, AND NOTHING IN THIS SUITE COULD SEE IT. `_ag_mprpen` above compares
+# the two entry points' RETURN CODES; no assertion anywhere compared their
+# DEPTHS. Measured against the exact closed form `ra + rb - |c1 - c2|` over 1200
+# random overlapping sphere pairs: `gjk_epa_3d` worst **5.57e-16**,
+# `mpr_penetration` worst **1.65e-05** — roughly 10^10 apart, on geometry whose
+# answer is one line of algebra.
+# ⭐ THE CAUSE IS THE POLISH BUDGET, AND IT IS ARITHMETIC. `_epa_polish` starts at
+# 0.25 rad and breaks when its step falls under EPSILON_F64, which takes 38
+# halvings; every round that MOVES spends budget without halving, so a cap of 64
+# left at most 26 moving rounds. `mpr_penetration` reaches the refinement through
+# the PORTAL seed, which starts further out, so it was the one running out of
+# budget — it was returning while still walking, not because it had converged.
+# ⚠ TWO HYPOTHESES WERE REFUTED BY MEASUREMENT BEFORE THIS ONE SURVIVED, and both
+# had been written down as likely:
+#   (a) "the portal builds v0 from the +x axis, so the error is orientation
+#       dependent" — REFUTED. Swapping which axis carries the large offset
+#       component leaves the error IDENTICAL (3.167e-04 both ways), and counting
+#       outliers per orientation bucket gives 2/1/1/2/1 across the range. The
+#       10^5 difference in bucket MEANS that suggested it was one outlier landing
+#       in one bucket: **the mean of a heavy-tailed sample is not a correlation.**
+#   (b) "mpr certifies more often, and certifying skips the polish" — REFUTED.
+#       Both entry points take the polish on every one of these cases.
+# [measured: 4000-pair sweep, axis swap, per-bucket outlier counts, polish counters]
+var _MP_RUN = 0;
+var _MP_BADG = 0;
+var _MP_BADM = 0;
+var _MP_SEED = 12345;
+fn _mp_rnd() {
+    _MP_SEED = (_MP_SEED * 1103515245 + 12345) & 0x7FFFFFFF;
+    return _MP_SEED;
+}
+fn _mp_frnd() { return f64_div(f64_from(_mp_rnd() % 1000000), f64_from(1000000)); }
+for (var _mp_i = 0; _mp_i < 1200; _mp_i = _mp_i + 1) {
+    var _mp_ra = f64_add(F64_ONE, _mp_frnd());
+    var _mp_rb = f64_add(F64_ONE, _mp_frnd());
+    var _mp_ox = f64_mul(f64_sub(_mp_frnd(), F64_HALF), F64_TWO);
+    var _mp_oy = f64_mul(f64_sub(_mp_frnd(), F64_HALF), F64_TWO);
+    var _mp_oz = f64_mul(f64_sub(_mp_frnd(), F64_HALF), F64_TWO);
+    var _mp_d = hvec3_length(hvec3_new(_mp_ox, _mp_oy, _mp_oz));
+    if (f64_gt(_mp_d, 0) == 1) {
+        var _mp_t = f64_sub(f64_add(_mp_ra, _mp_rb), _mp_d);
+        if (f64_gt(_mp_t, 0x3FB999999999999A) == 1) {
+            var _mp_A = hvec4_new(0, 0, 0, _mp_ra);
+            var _mp_B = hvec4_new(_mp_ox, _mp_oy, _mp_oz, _mp_rb);
+            var _mp_gn = alloc(8);
+            var _mp_gd = alloc(8);
+            store64(_mp_gd, 0);
+            var _mp_mn = alloc(8);
+            var _mp_md = alloc(8);
+            store64(_mp_md, 0);
+            _MP_RUN = _MP_RUN + 1;
+            if (gjk_epa_3d(&_mpr_sup_sphere, _mp_A, &_mpr_sup_sphere, _mp_B,
+                _mp_gn, _mp_gd) == 1) {
+                if (f64_gt(f64_abs(f64_div(f64_sub(load64(_mp_gd), _mp_t), _mp_t)),
+                    0x3D06849B86A12B9B) == 1) { _MP_BADG = _MP_BADG + 1; }
+            }
+            if (mpr_penetration(&_mpr_sup_sphere, _mp_A, &_mpr_sup_sphere, _mp_B,
+                _mp_mn, _mp_md) == 1) {
+                if (f64_gt(f64_abs(f64_div(f64_sub(load64(_mp_md), _mp_t), _mp_t)),
+                    0x3D06849B86A12B9B) == 1) { _MP_BADM = _MP_BADM + 1; }
+            }
+        }
+    }
+}
+assert(_MP_RUN > 1000, "the two-entry-point sphere sweep actually ran over 1000 pairs");
+assert_eq(_MP_BADG, 0,
+  "gjk_epa_3d: depth within 1e-14 of the exact sphere formula at every pair");
+assert_eq(_MP_BADM, 0,
+  "mpr_penetration: the same — it was 1.65e-05 out until the polish budget was derived");
+
+# ⚠ ONE MUTANT SURVIVES AND IT IS A HEADROOM CHOICE, NOT A THRESHOLD. A budget of
+# **96** also passes every pair here, so 128 is not the smallest sufficient value
+# and no assertion can make it look like one. What IS derived is the floor: 38 of
+# the rounds are mandatory halvings (0.25 rad down to EPSILON_F64), so a cap of 64
+# leaves at most 26 for moves and provably cannot finish a search that needs more.
+# 96 leaves 58 and 128 leaves 90; the corpus needs somewhere between 27 and 58,
+# and 128 is that measurement plus roughly half again. A tighter cap would be
+# fitting the constant to this fixture. [measured: 4-mutant run, 2026-09-10]
+
 # The half the 2.9.1 measurement never took, and the reason its conclusion did
 # not hold. Same 12 boxes, same refinement, the OTHER public entry point.
 # [measured: this assertion]

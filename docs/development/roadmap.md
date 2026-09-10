@@ -606,7 +606,27 @@ them is not a defect at all.
       filing is actually about now.
       → [`issues/2026-08-06-epa-certificate-tests-the-seed-not-the-polytope.md`](issues/2026-08-06-epa-certificate-tests-the-seed-not-the-polytope.md)
 
-- [ ] **[2.19.0]** ⛔ **`mpr_penetration` and `gjk_epa_3d` disagree by up to 1.6e-5 on ordinary
+- [x] ✅ **DONE — and the cause was the POLISH BUDGET, not either of the two things this row guessed.**
+      `_epa_polish` starts at 0.25 rad and breaks when its step falls under `EPSILON_F64`, which takes
+      **38 halvings**; every round that MOVES spends budget without halving, so a cap of 64 left at
+      most 26 moving rounds. `mpr_penetration` reaches the refinement through the PORTAL seed, which
+      starts further out, so it was the one running out — **returning while still walking, not
+      because it had converged.** Budget 64 → 128 (38 mandatory halvings + 90 moving rounds):
+      `mpr_penetration` worst **1.65e-05 → 6.3e-16**, the same as `gjk_epa_3d` to the last bits.
+      ⚠ **NO MEASURABLE COST**: the EPA benchmark rows moved +0.1% to +2.5% and the CONTROL rows that
+      never reach EPA moved +1.6% to +2.9% in the same pair of runs — the board drifted and the
+      change is not separable from it. Only calls that were hitting the cap spend the extra rounds.
+      ⛔ **BOTH HYPOTHESES THIS ROW RECORDED WERE REFUTED BY MEASUREMENT.**
+      (a) *"the cause is likely the portal seed's `v0`, built from the +x axis"* — **refuted**:
+      swapping which axis carries the large offset component leaves the error IDENTICAL
+      (3.167e-04 either way), and counting outliers per orientation bucket gives 2/1/1/2/1 across
+      the range. The 10^5 spread in bucket MEANS that suggested the hypothesis was one outlier
+      landing in one bucket — **the mean of a heavy-tailed sample is not a correlation measure.**
+      (b) *certification skipping the polish* (the 2.18.0 EPA mechanism) — **refuted**: both entry
+      points take the polish on every one of these cases.
+      ⭐ The gate the row asked for exists now: a 1200-pair sweep asserting both public entry points
+      agree with the closed form to 1e-14.
+      Original text follows. ~~⛔ **`mpr_penetration` and `gjk_epa_3d` disagree by up to 1.6e-5 on ordinary
       overlapping spheres, and NOTHING checks it.** Found while re-measuring the seed trade, and it
       is larger than the trade was. Both are public, both compute the same quantity, and against the
       exact closed form over the same 1200 pairs:
