@@ -90,7 +90,30 @@ fn hquat_dot(a, b) {
 #must_use
 fn hquat_length_sq(q) { return hquat_dot(q, q); }
 #must_use
-fn hquat_length(q) { return f64_sqrt(hquat_length_sq(q)); }
+fn _hquat_len_scaled(q) {
+    var x = HQuat_x(q); var y = HQuat_y(q); var z = HQuat_z(q); var w = HQuat_w(q);
+    var mx = f64_max(f64_max(f64_abs(x), f64_abs(y)), f64_max(f64_abs(z), f64_abs(w)));
+    if (f64_gt(mx, 0) == 0) { return mx; }
+    # ⚠ Inf/Inf is NaN, so the infinity contract needs its own exit here.
+    if (f64_eq(mx, F64_POS_INF) == 1) { return mx; }
+    var xs = f64_div(x, mx); var ys = f64_div(y, mx);
+    var zs = f64_div(z, mx); var ws = f64_div(w, mx);
+    var acc = f64_add(f64_mul(xs, xs), f64_mul(ys, ys));
+    acc = f64_add(acc, f64_add(f64_mul(zs, zs), f64_mul(ws, ws)));
+    return f64_mul(mx, f64_sqrt(acc));
+}
+
+# ⛔ 2.17.0 — same class as `hvec3_length`: squaring before summing loses 537
+# binades below and 512 above, and is silently wrong in the subnormal band
+# between. ⚠ This one matters beyond its own module: `hquat_normalize` and
+# `hquat_inverse` route through it, and 2.11.1 already repaired those two for
+# returning a fabricated IDENTITY — the guard was fixed then, the norm was not.
+fn hquat_length(q) {
+    var ls = hquat_length_sq(q);
+    if (f64_lt(ls, F64_TINY) == 1) { return _hquat_len_scaled(q); }
+    if (f64_eq(ls, F64_POS_INF) == 1) { return _hquat_len_scaled(q); }
+    return f64_sqrt(ls);
+}
 
 #must_use
 # 2.11.1: threshold was EPSILON_F64 (1e-12), which fabricated the identity for

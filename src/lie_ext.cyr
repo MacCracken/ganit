@@ -124,7 +124,8 @@ fn _m3_commutator(a, b) {
 # where K = skew-symmetric matrix of normalized axis
 fn so3_from_axis_angle(axis, angle) {
     var nx = HVec3_x(axis); var ny = HVec3_y(axis); var nz = HVec3_z(axis);
-    var norm = f64_sqrt(f64_add(f64_add(f64_mul(nx, nx), f64_mul(ny, ny)), f64_mul(nz, nz)));
+    # 2.17.0: scaled norm, shared with lie.cyr — see `_lie_norm3` there.
+    var norm = _lie_norm3(nx, ny, nz);
     # ⛔ `norm` is the LENGTH of the caller's axis/vector in the caller's own units,
     # against an absolute 1e-12 — and every fallback here is a structurally valid
     # element (identity rotation, identity boost) returned with no rc, so a caller
@@ -215,7 +216,7 @@ fn so3_inverse(r) { return m3_transpose(r); }
 # Uses Rodrigues formula: exp([omega]_x) = I + sinc(theta)*K + (1-cos(theta))/theta^2 * K^2
 fn so3_exp(omega) {
     var ox = HVec3_x(omega); var oy = HVec3_y(omega); var oz = HVec3_z(omega);
-    var theta = f64_sqrt(f64_add(f64_add(f64_mul(ox, ox), f64_mul(oy, oy)), f64_mul(oz, oz)));
+    var theta = _lie_norm3(ox, oy, oz);
     if (f64_lt(theta, F64_TINY) == 1) {
         return m3_identity();
     }
@@ -245,14 +246,9 @@ fn so3_log(R) {
     var az = f64_sub(m3_get(R, 0, 1), m3_get(R, 1, 0));
     # ⚠ Scaled, for the same reason as `su2_log`: squaring first would flush the
     # antisymmetric part to zero below ~2^-511 and lose the rotation again.
-    var amx = f64_max(f64_abs(ax), f64_max(f64_abs(ay), f64_abs(az)));
-    var asym = 0;
-    if (f64_gt(amx, 0) == 1) {
-        var axs = f64_div(ax, amx); var ays = f64_div(ay, amx);
-        var azs = f64_div(az, amx);
-        asym = f64_mul(amx, f64_sqrt(f64_add(f64_add(f64_mul(axs, axs),
-                f64_mul(ays, ays)), f64_mul(azs, azs))));
-    }
+    # 2.17.0: this was 2.16.0's own inline copy of the technique; it is now the
+    # shared `_lie_norm3`, so there is one implementation rather than three.
+    var asym = _lie_norm3(ax, ay, az);
 
     # |antisym| == 0 is either the identity or a rotation by exactly pi; the trace
     # separates them, and only the pi case needs the eigenvector extraction below.
@@ -477,7 +473,7 @@ fn se3_exp(twist) {
     var vel = _twist_v(twist);
 
     var ox = HVec3_x(omega); var oy = HVec3_y(omega); var oz = HVec3_z(omega);
-    var theta = f64_sqrt(f64_add(f64_add(f64_mul(ox, ox), f64_mul(oy, oy)), f64_mul(oz, oz)));
+    var theta = _lie_norm3(ox, oy, oz);
 
     # ⛔ 2.16.0 — THE GUARD COULD NOT SIMPLY BE LOWERED, WHICH IS WHY THIS WAITED.
     # 2.15.0 measured that putting DBL_MIN here introduces a NEW defect: the V
@@ -537,7 +533,7 @@ fn se3_log(se) {
     # Get omega from rotation
     var omega = su2_log(rot);
     var ox = HVec3_x(omega); var oy = HVec3_y(omega); var oz = HVec3_z(omega);
-    var theta = f64_sqrt(f64_add(f64_add(f64_mul(ox, ox), f64_mul(oy, oy)), f64_mul(oz, oz)));
+    var theta = _lie_norm3(ox, oy, oz);
 
     # ⛔ Same story as `se3_exp`: V^-1 divides by theta^2, so the guard could not be
     # lowered until the coefficient could be computed at small theta.

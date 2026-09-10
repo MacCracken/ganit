@@ -1235,7 +1235,14 @@ assert_eq(hvec3_angle(hvec3_new(_fa_under, 0, 0), hvec3_new(0, _fa_under, 0)), 0
 # [measured: full-suite run of both guard forms, 2026-09-09]
 var _NM_RUN = 0;
 var _NM_BAD = 0;
-for (var _nm_k = 0; _nm_k < 530; _nm_k = _nm_k + 1) {
+# ⭐ 2.17.0 — DEEPENED FROM 530 TO 1000, AND THAT IS THE POINT OF THE NORM REPAIR.
+# Through 2.16.0 this stopped at 2^-529 because `hvecN_length` COULD NOT PRODUCE a
+# smaller non-zero length — the sweep was bounded by the defect, not by f64. Now it
+# can, so the sweep goes to where f64 does. ⚠ This is also what finally kills the
+# `F64_TINY` mutant on the guard above: a length under DBL_MIN is reachable at
+# last, so the two tests stop agreeing and the equivalence recorded here through
+# 2.16.0 is retired.
+for (var _nm_k = 0; _nm_k < 1000; _nm_k = _nm_k + 1) {
     var _nm_s = (1023 - _nm_k) << 52;             # 2^-k
     _NM_RUN = _NM_RUN + 1;
     # An axis vector normalises to exactly the axis at every length.
@@ -1255,9 +1262,9 @@ for (var _nm_k = 0; _nm_k < 530; _nm_k = _nm_k + 1) {
     if (HVec3_x(_nm_d) != 0x3FE6A09E667F3BCC) { _NM_BAD = _NM_BAD + 1; }
     if (HVec3_y(_nm_d) != 0x3FE6A09E667F3BCC) { _NM_BAD = _NM_BAD + 1; }
 }
-assert_eq(_NM_RUN, 530, "the normalize scale sweep actually ran 530 scales");
+assert_eq(_NM_RUN, 1000, "the normalize scale sweep actually ran 1000 scales");
 assert_eq(_NM_BAD, 0,
-  "hvec2/3/4_normalize: unit output at every length from 2^0 down to 2^-529");
+  "hvec2/3/4_normalize: unit output at every length from 2^0 down to 2^-999");
 
 # ⭐ ANTI-DELETION. A genuinely zero vector must still return zero, or the repair
 # is a deletion wearing a comment.
@@ -1273,22 +1280,110 @@ var _nm_nan = HVec3_x(hvec3_normalize(hvec3_new(0x7FF8000000000000, 0, 0)));
 assert_eq(f64_eq(_nm_nan, _nm_nan), 0,
   "hvec3_normalize: NaN propagates, it is not silently zeroed");
 
-# ⚠ AND ONE MUTANT SURVIVES ON PURPOSE, WITH THE REASON PINNED HERE. Swapping the
-# guard for `f64_lt(len, F64_TINY)` passes every assertion above, and that is an
-# EQUIVALENT MUTANT rather than a hole: `hvecN_length` SQUARES its components
-# before the sqrt, so any vector whose length would fall below DBL_MIN has already
-# underflowed to a length of exactly 0. The smallest non-zero length the function
-# can produce is 2^-537 — roughly 1e-162, some 146 decades ABOVE DBL_MIN — so on
-# the reachable domain `len < DBL_MIN` and `1/len overflows` are the same test.
-# ⭐ The floor is ASSERTED, not assumed, so the equivalence stays a checked fact:
-# if hvec3_length is ever rewritten in a hypot style that avoids the intermediate
-# square, these two assertions fail and the two guards stop being interchangeable.
-# The reciprocal-overflow form is kept because it remains correct either way.
-# [measured: 4-mutant run; F64_TINY survives, EPSILON_F64/NaN-hole/deletion die]
+# ⭐ 2.17.0 — AND THE ONE BAND THAT SEPARATES THE TWO GUARDS, which the sweep above
+# STILL cannot reach. `(1023 - k) << 52` encodes only NORMAL powers of two, so the
+# loop bottoms out AT DBL_MIN however deep it runs — and both guards agree there.
+# They differ only for a length in (2^-1024, 2^-1022): the reciprocal is still
+# finite, so the real guard passes it, while an `F64_TINY` test rejects it. That
+# band was UNREACHABLE through 2.16.0 because `hvecN_length` could not produce a
+# length below 2^-537 at all; the norm repair is what makes it reachable, and this
+# is the assertion that retires the equivalence recorded above.
+# ⚠ Measured: with the sweep alone at any depth the `F64_TINY` mutant SURVIVES.
+# [measured: 8-mutant run over the four length helpers, 2026-09-10]
+var _nm_sub = 0x0008000000000000;                 # 2^-1023, subnormal
+assert_eq(HVec3_x(hvec3_normalize(hvec3_new(_nm_sub, 0, 0))), 0x3FF0000000000000,
+  "hvec3_normalize: a subnormal length still normalises (1/len is finite there)");
+assert_eq(HVec2_x(hvec2_normalize(hvec2_new(_nm_sub, 0))), 0x3FF0000000000000,
+  "hvec2_normalize: the same band, the same answer");
+assert_eq(HVec4_x(hvec4_normalize(hvec4_new(_nm_sub, 0, 0, 0))), 0x3FF0000000000000,
+  "hvec4_normalize: the same band, the same answer");
+
+# ⭐ 2.17.0 — THE EQUIVALENCE THIS BLOCK RECORDED HAS BEEN RETIRED, EXACTLY AS THE
+# BLOCK ITSELF SAID IT WOULD BE. Through 2.16.0 a `f64_lt(len, F64_TINY)` mutant of
+# the normalize guard survived, and the note here explained why that was a genuine
+# equivalence rather than a hole: `hvecN_length` squared before the sqrt, so any
+# vector whose length would fall below DBL_MIN had ALREADY underflowed to exactly
+# 0, putting the reachable floor at 2^-537 — some 146 decades above DBL_MIN.
+# ⭐ It also said what would end that: *"if hvec3_length is ever rewritten in a
+# hypot style that avoids the intermediate square, these two assertions fail and
+# the two guards stop being interchangeable."* 2.17.0 rewrote it, the assertion
+# below duly failed, and the equivalence is gone — lengths below DBL_MIN are now
+# reachable, so `F64_TINY` and the reciprocal-overflow test are no longer the same
+# test and the mutant that used to survive now dies.
+# ⛔ THE OLD ASSERTION PINNED THE DEFECT. It read
+# `assert_eq(hvec3_length(2^-538), 0)` — it asserted that a non-zero vector has
+# zero length, which is the bug, stated as a requirement. Its partner asserted
+# 2^-537 was "the smallest vector with a non-zero length"; that stayed true by
+# accident and its message became false, which is the 2.11.4 vacuous-assertion
+# class. Both are replaced by the floor the repaired code actually has.
+# [measured: two-sided 1106-scale sweep; the naive form is wrong at 60 scales]
 assert(hvec3_length(hvec3_new((1023 - 537) << 52, 0, 0)) != 0,
-  "hvec3_length: 2^-537 is the smallest vector with a non-zero length");
-assert_eq(hvec3_length(hvec3_new((1023 - 538) << 52, 0, 0)), 0,
-  "hvec3_length: one step smaller underflows to exactly 0, far above DBL_MIN");
+  "hvec3_length: 2^-537 still has a non-zero length (it always did)");
+assert_eq(hvec3_length(hvec3_new((1023 - 538) << 52, 0, 0)), (1023 - 538) << 52,
+  "hvec3_length: 2^-538 is now EXACTLY 2^-538 — it used to be exactly 0");
+assert_eq(hvec3_length(hvec3_new((1023 - 1000) << 52, 0, 0)), (1023 - 1000) << 52,
+  "hvec3_length: and so is 2^-1000, 462 binades past the old floor");
+# ⭐ The other end, which the old block never looked at at all: squaring overflows
+# above 2^511 and the length came back +Inf for a finite vector.
+assert_eq(hvec3_length(hvec3_new((1023 + 600) << 52, 0, 0)), (1023 + 600) << 52,
+  "hvec3_length: 2^600 has length 2^600, not +Inf");
+
+# ⭐ THE TWO-SIDED SWEEP. `|(3k, 4k, 12k)| = 13k` exactly for every power-of-two k,
+# so this is a bit-exact identity across the whole representable range — and the
+# depth is the ARITHMETIC's, not a guard's: it runs until 13k itself stops being
+# finite and normal, which is where f64 ends rather than where the code does.
+# ⚠ Measured on the 2.16.0 tree: 482 of 1020 downward scales and 510 of 1019
+# upward scales were WRONG. The old block asserted a single point at 2^-537 and
+# saw none of it.
+# [measured: two-sided binade sweep of hvec3_length, 2026-09-10]
+var _NM2_RUN = 0;
+var _NM2_BAD = 0;
+for (var _nm2_e = 0; _nm2_e < 1020; _nm2_e = _nm2_e + 1) {
+    var _nm2_k = (1023 - _nm2_e) << 52;
+    _NM2_RUN = _NM2_RUN + 1;
+    if (hvec3_length(hvec3_new(f64_mul(f64_from(3), _nm2_k),
+          f64_mul(f64_from(4), _nm2_k), f64_mul(f64_from(12), _nm2_k)))
+      != f64_mul(f64_from(13), _nm2_k)) { _NM2_BAD = _NM2_BAD + 1; }
+}
+for (var _nm2_u = 0; _nm2_u < 1015; _nm2_u = _nm2_u + 1) {
+    var _nm2_uk = (1023 + _nm2_u) << 52;
+    _NM2_RUN = _NM2_RUN + 1;
+    if (hvec3_length(hvec3_new(f64_mul(f64_from(3), _nm2_uk),
+          f64_mul(f64_from(4), _nm2_uk), f64_mul(f64_from(12), _nm2_uk)))
+      != f64_mul(f64_from(13), _nm2_uk)) { _NM2_BAD = _NM2_BAD + 1; }
+}
+assert_eq(_NM2_RUN, 2035, "the two-sided length sweep actually ran 2035 scales");
+assert_eq(_NM2_BAD, 0,
+  "hvec3_length: |(3k,4k,12k)| = 13k bit-exact from 2^+1014 down to 2^-1019");
+
+# ⚠ THE SILENT BAND, which is the dangerous third of this class. Between the
+# working range and the zero, the SUM is subnormal — it has already lost most of
+# its mantissa, so the answer comes back finite, plausible and wrong with nothing
+# to signal it. Measured 11.8% out at 2^-539 on the 2.16.0 tree. This is also why
+# the fast path tests `< F64_TINY` rather than `== 0`.
+# [measured: two-sided binade sweep of hvec3_length, 2026-09-10]
+assert_eq(hvec3_length(hvec3_new(f64_mul(f64_from(3), (1023 - 539) << 52),
+      f64_mul(f64_from(4), (1023 - 539) << 52), f64_mul(f64_from(12), (1023 - 539) << 52))),
+  f64_mul(f64_from(13), (1023 - 539) << 52),
+  "hvec3_length: the subnormal-sum band is exact, not 11.8% wrong");
+
+# ⭐ ANTI-DELETION and the contracts the rescue path must not break.
+assert_eq(hvec3_length(hvec3_new(0, 0, 0)), 0,
+  "hvec3_length: the zero vector still has length 0");
+assert_eq(hvec3_length(hvec3_new(0x7FF0000000000000, 0, 0)), 0x7FF0000000000000,
+  "hvec3_length: an infinite component still gives +Inf, not NaN");
+var _nm2_nan = hvec3_length(hvec3_new(0x7FF8000000000000, 0, 0));
+assert_eq(f64_eq(_nm2_nan, _nm2_nan), 0,
+  "hvec3_length: NaN still propagates, as tests/abuse.tcyr requires");
+# and the same three for the siblings, since each carries its own copy.
+assert_eq(hvec2_length(hvec2_new((1023 - 600) << 52, 0)), (1023 - 600) << 52,
+  "hvec2_length: 2^-600 has length 2^-600");
+assert_eq(hvec4_length(hvec4_new((1023 - 600) << 52, 0, 0, 0)), (1023 - 600) << 52,
+  "hvec4_length: 2^-600 has length 2^-600");
+assert_eq(hquat_length(hquat_new((1023 - 600) << 52, 0, 0, 0)), (1023 - 600) << 52,
+  "hquat_length: 2^-600 has length 2^-600");
+assert_eq(hvec4_length(hvec4_new(0x7FF0000000000000, 0, 0, 0)), 0x7FF0000000000000,
+  "hvec4_length: an infinite component still gives +Inf, not NaN");
 
 # ================================================================
 # 2.15.0 — m3_inverse / m4_inverse / m4_transform_point

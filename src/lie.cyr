@@ -71,11 +71,42 @@ fn _su2_y(s) { return load64(s + 16); }
 fn _su2_z(s) { return load64(s + 24); }
 
 # Construct from raw quaternion components (w, x, y, z). Normalizes.
+# ⛔ 2.17.0 — EVERY MAP IN THIS MODULE AND IN `lie_ext` COMPUTED ITS NORM AS A RAW
+# SUM OF SQUARES, so a component below 2^-537 squared to zero and the norm came
+# back 0 for a vector that is not zero — collapsing the rotation to the identity
+# with no error channel. 2.16.0 repaired the LOG side and measured that the floor
+# then moved to the EXP side, which is this; the round-trip is exact to 2^-537 and
+# fails at 2^-538 for exactly that reason.
+# ⭐ Divide through by the largest component before squaring: every intermediate is
+# then O(1) and the floor becomes f64's own. Same technique as `cx_div`'s Smith's
+# algorithm (2.15.0) and the two log maps (2.16.0), now shared rather than copied.
+# ⚠ The `+Inf` exit is not optional — Inf/Inf is NaN, and without it an infinite
+# component turns a finite-looking answer into a NaN.
+# [measured: su2 round-trip exact to 2^-537, first bad at 2^-538, 2026-09-10]
+fn _lie_norm3(x, y, z) {
+    var mx = f64_max(f64_abs(x), f64_max(f64_abs(y), f64_abs(z)));
+    if (f64_gt(mx, 0) == 0) { return mx; }
+    if (f64_eq(mx, F64_POS_INF) == 1) { return mx; }
+    var xs = f64_div(x, mx); var ys = f64_div(y, mx); var zs = f64_div(z, mx);
+    return f64_mul(mx, f64_sqrt(f64_add(f64_add(f64_mul(xs, xs), f64_mul(ys, ys)),
+          f64_mul(zs, zs))));
+}
+
+fn _lie_norm4(w, x, y, z) {
+    var mx = f64_max(f64_max(f64_abs(w), f64_abs(x)), f64_max(f64_abs(y), f64_abs(z)));
+    if (f64_gt(mx, 0) == 0) { return mx; }
+    if (f64_eq(mx, F64_POS_INF) == 1) { return mx; }
+    var ws = f64_div(w, mx); var xs = f64_div(x, mx);
+    var ys = f64_div(y, mx); var zs = f64_div(z, mx);
+    var acc = f64_add(f64_mul(ws, ws), f64_mul(xs, xs));
+    acc = f64_add(acc, f64_add(f64_mul(ys, ys), f64_mul(zs, zs)));
+    return f64_mul(mx, f64_sqrt(acc));
+}
+
 fn su2_from_quat(q) {
     var qx = HQuat_x(q); var qy = HQuat_y(q);
     var qz = HQuat_z(q); var qw = HQuat_w(q);
-    var norm = f64_sqrt(f64_add(f64_add(f64_mul(qw, qw), f64_mul(qx, qx)),
-        f64_add(f64_mul(qy, qy), f64_mul(qz, qz))));
+    var norm = _lie_norm4(qw, qx, qy, qz);
     # ⛔ `norm` is the LENGTH of the caller's axis/vector in the caller's own units,
     # against an absolute 1e-12 — and every fallback here is a structurally valid
     # element (identity rotation, identity boost) returned with no rc, so a caller
@@ -106,7 +137,7 @@ fn su2_from_axis_angle(axis, angle) {
     var c_half = f64_cos(half);
     # Normalize axis
     var ax = HVec3_x(axis); var ay = HVec3_y(axis); var az = HVec3_z(axis);
-    var len = f64_sqrt(f64_add(f64_add(f64_mul(ax, ax), f64_mul(ay, ay)), f64_mul(az, az)));
+    var len = _lie_norm3(ax, ay, az);
     if (f64_lt(len, F64_TINY) == 1) {
         return _su2_alloc(F64_ONE, 0, 0, 0);
     }
@@ -157,7 +188,7 @@ fn su2_inv(s) {
 #   su2_to_rotation_matrix(su2_exp(w)) == so3_exp(w)   (the SU(2) -> SO(3) cover)
 fn su2_exp(v) {
     var ox = HVec3_x(v); var oy = HVec3_y(v); var oz = HVec3_z(v);
-    var norm = f64_sqrt(f64_add(f64_add(f64_mul(ox, ox), f64_mul(oy, oy)), f64_mul(oz, oz)));
+    var norm = _lie_norm3(ox, oy, oz);
     if (f64_lt(norm, F64_TINY) == 1) {
         return su2_identity();
     }
@@ -204,13 +235,13 @@ fn su2_log(s) {
     # intermediate O(1) and moves the floor to where the components themselves
     # stop being representable.
     # [measured: naive norm returns 0 at 2^-665; scaled norm is exact there]
-    var mx = f64_max(f64_abs(x), f64_max(f64_abs(y), f64_abs(z)));
-    if (f64_gt(mx, 0) == 0) {
+    # 2.17.0: this was 2.16.0's own inline copy of the scaling; it is now the
+    # shared `_lie_norm3`, so the technique has ONE implementation in this module
+    # rather than one per call site.
+    var sin_half = _lie_norm3(x, y, z);
+    if (f64_gt(sin_half, 0) == 0) {
         return hvec3_new(0, 0, 0);
     }
-    var xs = f64_div(x, mx); var ys = f64_div(y, mx); var zs = f64_div(z, mx);
-    var sin_half = f64_mul(mx,
-      f64_sqrt(f64_add(f64_add(f64_mul(xs, xs), f64_mul(ys, ys)), f64_mul(zs, zs))));
     var half_theta = ganita_f64_atan2(sin_half, w);
     var sc = f64_div(f64_mul(half_theta, F64_TWO), sin_half);
     return hvec3_new(f64_mul(sc, x), f64_mul(sc, y), f64_mul(sc, z));
@@ -432,7 +463,7 @@ fn lorentz_boost_z(eta) {
 # dir is a Vec3 (will be normalized).
 fn lorentz_boost(dir, eta) {
     var nx = HVec3_x(dir); var ny = HVec3_y(dir); var nz = HVec3_z(dir);
-    var norm = f64_sqrt(f64_add(f64_add(f64_mul(nx, nx), f64_mul(ny, ny)), f64_mul(nz, nz)));
+    var norm = _lie_norm3(nx, ny, nz);
     if (f64_lt(norm, F64_TINY) == 1) {
         return lorentz_identity();
     }
@@ -473,7 +504,7 @@ fn lorentz_boost(dir, eta) {
 # Time component unchanged; spatial block uses Rodrigues' formula.
 fn lorentz_rotate(axis, angle) {
     var nx = HVec3_x(axis); var ny = HVec3_y(axis); var nz = HVec3_z(axis);
-    var norm = f64_sqrt(f64_add(f64_add(f64_mul(nx, nx), f64_mul(ny, ny)), f64_mul(nz, nz)));
+    var norm = _lie_norm3(nx, ny, nz);
     if (f64_lt(norm, F64_TINY) == 1) {
         return lorentz_identity();
     }

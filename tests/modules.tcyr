@@ -11571,15 +11571,17 @@ test_group("lie 2.16.0: the small-angle series and the atan2 log maps");
 # --- ROUND TRIP. log(exp(w)) is w for every rotation, at every angle.
 var _LS_RUN = 0;
 var _LS_BAD = 0;
-# ⚠ 538 DECADES, AND THE FLOOR IS NOW ON THE OTHER SIDE. Measured: exact to
-# 2^-537, first failure at 2^-538 — which is where a COMPONENT SQUARED
-# underflows (2^-1076 is below the smallest subnormal). The log maps no longer
-# set the limit; `su2_exp` and `so3_from_axis_angle` still take their norms as a
-# naive sum of squares, so they collapse the rotation before the log ever sees
-# it. That is the same class again and is recorded on the roadmap rather than
-# folded in here. ⭐ Before this release the floor was 2^-26.
-# [measured: depth bisect, 537 clean / 539 fails, 2026-09-10]
-for (var _ls_e = 0; _ls_e < 538; _ls_e = _ls_e + 1) {
+# ⭐ 1022 DECADES — THE WHOLE NORMAL RANGE. The history of this one number is the
+# history of three releases: through 2.15.0 the floor was **2^-26**, because both
+# log maps took the angle from `acos` of a value that rounds to exactly 1.0;
+# 2.16.0's `atan2` moved it to **2^-537**, where a COMPONENT SQUARED underflows;
+# and 2.17.0's scaled norms move it to **2^-1022**, which is DBL_MIN — below that
+# the quaternion components themselves are subnormal and the limit is f64's, not
+# this code's. ⚠ Each of those floors was invisible until the one above it was
+# repaired, which is why the sweep depth is re-derived every time rather than
+# carried forward.
+# [measured: floor bisect after each repair — 537 before 2.17.0, 1022 after]
+for (var _ls_e = 0; _ls_e < 1022; _ls_e = _ls_e + 1) {
     var _ls_t = (1023 - _ls_e) << 52;
     var _ls_w = hvec3_new(0, 0, _ls_t);
     _LS_RUN = _LS_RUN + 1;
@@ -11593,9 +11595,31 @@ for (var _ls_e = 0; _ls_e < 538; _ls_e = _ls_e + 1) {
         _LS_BAD = _LS_BAD + 1;
     }
 }
-assert_eq(_LS_RUN, 538, "the log/exp round-trip actually ran 538 angles");
+assert_eq(_LS_RUN, 1022, "the log/exp round-trip actually ran 1022 angles");
 assert_eq(_LS_BAD, 0,
-  "su2_log / so3_log: log(exp(w)) recovers w for angles from 2^0 down to 2^-537");
+  "su2_log / so3_log: log(exp(w)) recovers w for angles from 2^0 down to 2^-1021");
+
+# ⭐ 2.17.0 — `su2_from_quat` NORMALISES, so it carries the same norm and the same
+# defect. A quaternion whose components are 2^-600 is perfectly well formed; the
+# raw sum of squares makes its norm 0 and the function hands back the IDENTITY.
+var _ln_q = su2_from_quat(hquat_new((1023 - 600) << 52, 0, 0, 0));
+assert_eq(_su2_x(_ln_q), 0x3FF0000000000000,
+  "su2_from_quat: a 2^-600 quaternion normalises to a unit x, not the identity");
+assert_eq(_su2_w(_ln_q), 0,
+  "su2_from_quat: and its w is 0, which the identity fallback would have made 1");
+
+# ⚠ AND THE INFINITY EXIT INSIDE THE SHARED NORM, tested on the HELPER'S OWN
+# CONTRACT rather than through a caller. `Inf/Inf` is NaN, so a scaled norm
+# without its own +Inf exit reports the norm of an infinite vector as NaN instead
+# of +Inf. ⛔ A first draft of this asserted that `so3_from_axis_angle` therefore
+# returns a non-NaN matrix, and that is FALSE both before and after: the caller
+# does `component * (1/norm)` = `Inf * 0` = NaN whatever the norm says. The exit
+# is about the norm's own answer, and that is what is asserted.
+assert_eq(_lie_norm3(0x7FF0000000000000, 0, 0), 0x7FF0000000000000,
+  "_lie_norm3: the norm of an infinite vector is +Inf, not NaN");
+assert_eq(_lie_norm4(0, 0x7FF0000000000000, 0, 0), 0x7FF0000000000000,
+  "_lie_norm4: the same for the quaternion form");
+assert_eq(_lie_norm3(0, 0, 0), 0, "_lie_norm3: the zero vector still has norm 0");
 
 # --- SE(3) ROUND TRIP, which exercises the V matrix and its inverse together.
 var _LT_RUN = 0;
