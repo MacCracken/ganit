@@ -76,21 +76,21 @@ test_group("edge: vec zero-length normalize");
 
 # Vec2 normalize zero → returns zero (not NaN)
 var en_v2z = hvec2_normalize(hvec2_zero());
-assert_eq(f64_to(HVec2_x(en_v2z)), 0, "v2 norm zero.x=0");
-assert_eq(f64_to(HVec2_y(en_v2z)), 0, "v2 norm zero.y=0");
+assert_eq(HVec2_x(en_v2z), f64_from(0), "v2 norm zero.x=0");
+assert_eq(HVec2_y(en_v2z), f64_from(0), "v2 norm zero.y=0");
 
 # Vec3 normalize zero → returns zero
 var en_v3z = hvec3_normalize(hvec3_zero());
-assert_eq(f64_to(HVec3_x(en_v3z)), 0, "v3 norm zero.x=0");
-assert_eq(f64_to(HVec3_y(en_v3z)), 0, "v3 norm zero.y=0");
-assert_eq(f64_to(HVec3_z(en_v3z)), 0, "v3 norm zero.z=0");
+assert_eq(HVec3_x(en_v3z), f64_from(0), "v3 norm zero.x=0");
+assert_eq(HVec3_y(en_v3z), f64_from(0), "v3 norm zero.y=0");
+assert_eq(HVec3_z(en_v3z), f64_from(0), "v3 norm zero.z=0");
 
 # Vec4 normalize zero → returns zero
 var en_v4z = hvec4_normalize(hvec4_zero());
-assert_eq(f64_to(HVec4_x(en_v4z)), 0, "v4 norm zero.x=0");
-assert_eq(f64_to(HVec4_y(en_v4z)), 0, "v4 norm zero.y=0");
-assert_eq(f64_to(HVec4_z(en_v4z)), 0, "v4 norm zero.z=0");
-assert_eq(f64_to(HVec4_w(en_v4z)), 0, "v4 norm zero.w=0");
+assert_eq(HVec4_x(en_v4z), f64_from(0), "v4 norm zero.x=0");
+assert_eq(HVec4_y(en_v4z), f64_from(0), "v4 norm zero.y=0");
+assert_eq(HVec4_z(en_v4z), f64_from(0), "v4 norm zero.z=0");
+assert_eq(HVec4_w(en_v4z), f64_from(0), "v4 norm zero.w=0");
 
 # ================================================================
 # Vec3 — Degenerate cross products (parallel vectors)
@@ -99,23 +99,29 @@ test_group("edge: vec3 parallel cross");
 
 # Parallel same direction: (1,0,0) x (2,0,0) = (0,0,0)
 var ecr_par = hvec3_cross(hvec3_unit_x(), hvec3_scale(hvec3_unit_x(), F64_TWO));
-assert_eq(f64_to(HVec3_x(ecr_par)), 0, "parallel cross.x=0");
-assert_eq(f64_to(HVec3_y(ecr_par)), 0, "parallel cross.y=0");
-assert_eq(f64_to(HVec3_z(ecr_par)), 0, "parallel cross.z=0");
+assert_eq(HVec3_x(ecr_par), f64_from(0), "parallel cross.x=0");
+assert_eq(HVec3_y(ecr_par), f64_from(0), "parallel cross.y=0");
+assert_eq(HVec3_z(ecr_par), f64_from(0), "parallel cross.z=0");
 
 # Anti-parallel: (1,0,0) x (-1,0,0) = (0,0,0)
 var ecr_anti = hvec3_cross(hvec3_unit_x(), hvec3_neg(hvec3_unit_x()));
-assert_eq(f64_to(HVec3_x(ecr_anti)), 0, "antiparallel cross.x=0");
-assert_eq(f64_to(HVec3_y(ecr_anti)), 0, "antiparallel cross.y=0");
-assert_eq(f64_to(HVec3_z(ecr_anti)), 0, "antiparallel cross.z=0");
+assert_eq(HVec3_x(ecr_anti), f64_from(0), "antiparallel cross.x=0");
+# ⚠ 2.13.0 — this component is NEGATIVE zero (0x8000000000000000), not +0.
+# `f64_to` mapped both to 0 and hid the distinction for the life of this test.
+# -0.0 is the correct IEEE result here (0*1 - 0*(-1) = 0 - -0 ... the sign
+# survives the subtraction), and it compares EQUAL to +0 under `f64_eq`, so the
+# maths is right and only the bit pattern differs. Asserted through `f64_eq`
+# rather than bits, which is what "is zero" actually means for a signed zero.
+assert_eq(f64_eq(HVec3_y(ecr_anti), f64_from(0)), 1, "antiparallel cross.y is zero (it is -0.0)");
+assert_eq(HVec3_z(ecr_anti), f64_from(0), "antiparallel cross.z=0");
 
 # Scaled parallel: (3,6,9) x (1,2,3) = (0,0,0)
 var ecr_a = hvec3_new(f64_from(3), f64_from(6), f64_from(9));
 var ecr_b = hvec3_new(F64_ONE, F64_TWO, f64_from(3));
 var ecr_sc = hvec3_cross(ecr_a, ecr_b);
-assert_eq(f64_to(HVec3_x(ecr_sc)), 0, "scaled parallel cross.x=0");
-assert_eq(f64_to(HVec3_y(ecr_sc)), 0, "scaled parallel cross.y=0");
-assert_eq(f64_to(HVec3_z(ecr_sc)), 0, "scaled parallel cross.z=0");
+assert_eq(HVec3_x(ecr_sc), f64_from(0), "scaled parallel cross.x=0");
+assert_eq(HVec3_y(ecr_sc), f64_from(0), "scaled parallel cross.y=0");
+assert_eq(HVec3_z(ecr_sc), f64_from(0), "scaled parallel cross.z=0");
 
 # ================================================================
 # Quaternion — Slerp edge cases
@@ -156,25 +162,25 @@ test_group("edge: mat4 singular inverse");
 var em_zero = m4_new();
 var em_inv = m4_inverse(em_zero);
 # Fallback should return identity
-assert_eq(f64_to(m4_get(em_inv, 0, 0)), 1, "singular inv [0,0]=1");
-assert_eq(f64_to(m4_get(em_inv, 1, 1)), 1, "singular inv [1,1]=1");
-assert_eq(f64_to(m4_get(em_inv, 2, 2)), 1, "singular inv [2,2]=1");
-assert_eq(f64_to(m4_get(em_inv, 3, 3)), 1, "singular inv [3,3]=1");
-assert_eq(f64_to(m4_get(em_inv, 0, 1)), 0, "singular inv [0,1]=0");
+assert_eq(m4_get(em_inv, 0, 0), f64_from(1), "singular inv [0,0]=1");
+assert_eq(m4_get(em_inv, 1, 1), f64_from(1), "singular inv [1,1]=1");
+assert_eq(m4_get(em_inv, 2, 2), f64_from(1), "singular inv [2,2]=1");
+assert_eq(m4_get(em_inv, 3, 3), f64_from(1), "singular inv [3,3]=1");
+assert_eq(m4_get(em_inv, 0, 1), f64_from(0), "singular inv [0,1]=0");
 
 test_group("edge: mat4 determinant zero");
 
 # Determinant of zero matrix = 0
-assert_eq(f64_to(m4_determinant(em_zero)), 0, "det(zero matrix)=0");
+assert_eq(m4_determinant(em_zero), f64_from(0), "det(zero matrix)=0");
 
 # Determinant of identity = 1
-assert_eq(f64_to(m4_determinant(m4_identity())), 1, "det(I)=1");
+assert_eq(m4_determinant(m4_identity()), f64_from(1), "det(I)=1");
 
 # Rank-deficient matrix (duplicate rows) has det=0
 var em_dup = m4_new();
 m4_set(em_dup, 0, 0, F64_ONE); m4_set(em_dup, 0, 1, F64_TWO);
 m4_set(em_dup, 1, 0, F64_ONE); m4_set(em_dup, 1, 1, F64_TWO);
-assert_eq(f64_to(m4_determinant(em_dup)), 0, "det(rank deficient)=0");
+assert_eq(m4_determinant(em_dup), f64_from(0), "det(rank deficient)=0");
 
 # ================================================================
 # Transform compose with identity = self
@@ -235,7 +241,7 @@ var eg_tang_t = geo_ray_sphere(eg_tang_ray, eg_sph);
 # Tangent should be a hit (discriminant=0 → single intersection)
 assert(eg_tang_t != 0, "ray tangent sphere hit");
 # t should be ~5 (closest approach at z=5)
-assert_eq(f64_to(eg_tang_t), 5, "ray tangent sphere t=5");
+assert_eq(eg_tang_t, f64_from(5), "ray tangent sphere t=5");
 
 # ================================================================
 # Geo — AABB touching (shared face) → overlap
@@ -274,8 +280,8 @@ test_group("edge: geo closest point at center");
 var eg_sph_unit = geo_sphere_new(hvec3_zero(), F64_ONE);
 var eg_cp = geo_closest_point_on_sphere(eg_sph_unit, hvec3_zero());
 # Fallback: should return center + (r,0,0) → (1,0,0)
-assert_eq(f64_to(HVec3_x(eg_cp)), 1, "closest sphere at center.x=1");
-assert_eq(f64_to(HVec3_y(eg_cp)), 0, "closest sphere at center.y=0");
+assert_eq(HVec3_x(eg_cp), f64_from(1), "closest sphere at center.x=1");
+assert_eq(HVec3_y(eg_cp), f64_from(0), "closest sphere at center.y=0");
 
 # ================================================================
 # Geo — Degenerate triangle (zero area)
@@ -287,7 +293,7 @@ var eg_degen = geo_triangle_new(hvec3_zero(),
   hvec3_new(F64_ONE, 0, 0),
   hvec3_new(F64_TWO, 0, 0));
 var eg_degen_area = geo_triangle_area(eg_degen);
-assert_eq(f64_to(eg_degen_area), 0, "degenerate triangle area=0");
+assert_eq(eg_degen_area, f64_from(0), "degenerate triangle area=0");
 
 # ================================================================
 # Geo — Segment zero length
@@ -296,17 +302,17 @@ test_group("edge: geo segment zero length");
 
 var eg_seg0 = geo_segment_new(hvec3_new(F64_ONE, F64_TWO, f64_from(3)),
   hvec3_new(F64_ONE, F64_TWO, f64_from(3)));
-assert_eq(f64_to(geo_segment_length(eg_seg0)), 0, "zero segment length=0");
+assert_eq(geo_segment_length(eg_seg0), f64_from(0), "zero segment length=0");
 
 # Closest point on zero-length segment = the point itself
 var eg_seg0_cp = geo_segment_closest_point(eg_seg0, hvec3_zero());
-assert_eq(f64_to(HVec3_x(eg_seg0_cp)), 1, "zero seg closest.x");
-assert_eq(f64_to(HVec3_y(eg_seg0_cp)), 2, "zero seg closest.y");
+assert_eq(HVec3_x(eg_seg0_cp), f64_from(1), "zero seg closest.x");
+assert_eq(HVec3_y(eg_seg0_cp), f64_from(2), "zero seg closest.y");
 
 # Direction of zero-length segment → fallback to unit_x
 var eg_seg0_dir = geo_segment_direction(eg_seg0);
-assert_eq(f64_to(HVec3_x(eg_seg0_dir)), 1, "zero seg dir.x=1");
-assert_eq(f64_to(HVec3_y(eg_seg0_dir)), 0, "zero seg dir.y=0");
+assert_eq(HVec3_x(eg_seg0_dir), f64_from(1), "zero seg dir.x=1");
+assert_eq(HVec3_y(eg_seg0_dir), f64_from(0), "zero seg dir.y=0");
 
 # ================================================================
 # Calc — Simpson with 0 steps → error
@@ -320,7 +326,7 @@ assert_eq(ec_rc_0, HSB_ERR_ZERO_STEPS, "simpson 0 steps → err");
 # Simpson with 1 step (odd → rounds to 2)
 var ec_rc_1 = calc_integral_simpson(&_ec_const5, 0, F64_ONE, 1, ec_out);
 assert_eq(ec_rc_1, 0, "simpson 1 step ok");
-assert_eq(f64_to(load64(ec_out)), 5, "simpson 1 step const=5");
+assert_eq(load64(ec_out), f64_from(5), "simpson 1 step const=5");
 
 # ================================================================
 # Calc — Derivative of constant = 0
@@ -328,11 +334,11 @@ assert_eq(f64_to(load64(ec_out)), 5, "simpson 1 step const=5");
 test_group("edge: calc derivative constant");
 
 var ec_dc = calc_derivative(&_ec_const5, F64_ONE, F64_ONE);
-assert_eq(f64_to(ec_dc), 0, "deriv const = 0");
+assert_eq(ec_dc, f64_from(0), "deriv const = 0");
 
 # Derivative of identity at x=0 with h=1: (1 - (-1))/2 = 1
 var ec_did = calc_derivative(&_ec_identity, 0, F64_ONE);
-assert_eq(f64_to(ec_did), 1, "deriv identity = 1");
+assert_eq(ec_did, f64_from(1), "deriv identity = 1");
 
 # ================================================================
 # Calc — Bezier endpoints
@@ -346,12 +352,12 @@ var ec_bz2 = hvec2_new(f64_from(4), f64_from(5));
 var ec_bz3 = hvec2_new(f64_from(5), f64_from(0));
 
 var ec_c0 = calc_bezier_cubic_2d(ec_bz0, ec_bz1, ec_bz2, ec_bz3, 0);
-assert_eq(f64_to(HVec2_x(ec_c0)), 0, "cubic bezier t=0 x");
-assert_eq(f64_to(HVec2_y(ec_c0)), 0, "cubic bezier t=0 y");
+assert_eq(HVec2_x(ec_c0), f64_from(0), "cubic bezier t=0 x");
+assert_eq(HVec2_y(ec_c0), f64_from(0), "cubic bezier t=0 y");
 
 var ec_c1 = calc_bezier_cubic_2d(ec_bz0, ec_bz1, ec_bz2, ec_bz3, F64_ONE);
-assert_eq(f64_to(HVec2_x(ec_c1)), 5, "cubic bezier t=1 x");
-assert_eq(f64_to(HVec2_y(ec_c1)), 0, "cubic bezier t=1 y");
+assert_eq(HVec2_x(ec_c1), f64_from(5), "cubic bezier t=1 x");
+assert_eq(HVec2_y(ec_c1), f64_from(0), "cubic bezier t=1 y");
 
 # 3D cubic bezier endpoints
 var ec_b3_0 = hvec3_new(0, 0, 0);
@@ -360,10 +366,10 @@ var ec_b3_2 = hvec3_new(F64_TWO, f64_from(3), 0);
 var ec_b3_3 = hvec3_new(f64_from(3), 0, 0);
 
 var ec_bc0 = calc_bezier_cubic_3d(ec_b3_0, ec_b3_1, ec_b3_2, ec_b3_3, 0);
-assert_eq(f64_to(HVec3_x(ec_bc0)), 0, "3d bezier t=0 x");
+assert_eq(HVec3_x(ec_bc0), f64_from(0), "3d bezier t=0 x");
 var ec_bc1 = calc_bezier_cubic_3d(ec_b3_0, ec_b3_1, ec_b3_2, ec_b3_3, F64_ONE);
-assert_eq(f64_to(HVec3_x(ec_bc1)), 3, "3d bezier t=1 x");
-assert_eq(f64_to(HVec3_y(ec_bc1)), 0, "3d bezier t=1 y");
+assert_eq(HVec3_x(ec_bc1), f64_from(3), "3d bezier t=1 x");
+assert_eq(HVec3_y(ec_bc1), f64_from(0), "3d bezier t=1 y");
 
 # ================================================================
 # Num — Newton with zero derivative → error
@@ -452,15 +458,15 @@ test_group("edge: num kahan empty/single");
 var en_kdata = alloc(8);
 store64(en_kdata, f64_from(42));
 var en_k0 = num_kahan_sum(en_kdata, 0);
-assert_eq(f64_to(en_k0), 0, "kahan empty=0");
+assert_eq(en_k0, f64_from(0), "kahan empty=0");
 
 # Single element
 var en_k1 = num_kahan_sum(en_kdata, 1);
-assert_eq(f64_to(en_k1), 42, "kahan single=42");
+assert_eq(en_k1, f64_from(42), "kahan single=42");
 
 # Neumaier empty
 var en_n0 = num_neumaier_sum(en_kdata, 0);
-assert_eq(f64_to(en_n0), 0, "neumaier empty=0");
+assert_eq(en_n0, f64_from(0), "neumaier empty=0");
 
 # ================================================================
 # Complex — Division by zero → large result
@@ -479,15 +485,15 @@ assert(ec_div0 != 0, "cx div by zero produces result");
 # ================================================================
 test_group("edge: complex abs/conj boundary");
 
-assert_eq(f64_to(cx_abs(cx_zero())), 0, "cx_abs(0+0i)=0");
-assert_eq(f64_to(cx_abs(cx_one())), 1, "cx_abs(1+0i)=1");
-assert_eq(f64_to(cx_abs(cx_i())), 1, "cx_abs(0+i)=1");
+assert_eq(cx_abs(cx_zero()), f64_from(0), "cx_abs(0+0i)=0");
+assert_eq(cx_abs(cx_one()), f64_from(1), "cx_abs(1+0i)=1");
+assert_eq(cx_abs(cx_i()), f64_from(1), "cx_abs(0+i)=1");
 
 # cx_conj of purely real → same
 var ec_real = cx_real(f64_from(7));
 var ec_rc = cx_conj(ec_real);
-assert_eq(f64_to(HComplex_re(ec_rc)), 7, "conj real.re=7");
-assert_eq(f64_to(HComplex_im(ec_rc)), 0, "conj real.im=0");
+assert_eq(HComplex_re(ec_rc), f64_from(7), "conj real.re=7");
+assert_eq(HComplex_im(ec_rc), f64_from(0), "conj real.im=0");
 
 # ================================================================
 # Complex — Pauli anticommutator {σi, σi} = 2I
@@ -498,29 +504,29 @@ var ep_sx = pauli_x();
 var ep_anti_xx = cmat_anticommutator(ep_sx, ep_sx);
 # {σx, σx} = 2I → trace = 4 (2*2), and [0,0] = 2+0i
 var ep_axx00 = cmat_get(ep_anti_xx, 0, 0);
-assert_eq(f64_to(HComplex_re(ep_axx00)), 2, "{sx,sx}_00.re=2");
-assert_eq(f64_to(HComplex_im(ep_axx00)), 0, "{sx,sx}_00.im=0");
+assert_eq(HComplex_re(ep_axx00), f64_from(2), "{sx,sx}_00.re=2");
+assert_eq(HComplex_im(ep_axx00), f64_from(0), "{sx,sx}_00.im=0");
 var ep_axx01 = cmat_get(ep_anti_xx, 0, 1);
-assert_eq(f64_to(HComplex_re(ep_axx01)), 0, "{sx,sx}_01.re=0");
+assert_eq(HComplex_re(ep_axx01), f64_from(0), "{sx,sx}_01.re=0");
 var ep_axx_tr = cmat_trace(ep_anti_xx);
-assert_eq(f64_to(HComplex_re(ep_axx_tr)), 4, "{sx,sx} trace=4");
+assert_eq(HComplex_re(ep_axx_tr), f64_from(4), "{sx,sx} trace=4");
 
 # {σy, σy} = 2I
 var ep_sy = pauli_y();
 var ep_anti_yy = cmat_anticommutator(ep_sy, ep_sy);
 var ep_ayy_tr = cmat_trace(ep_anti_yy);
-assert_eq(f64_to(HComplex_re(ep_ayy_tr)), 4, "{sy,sy} trace=4");
+assert_eq(HComplex_re(ep_ayy_tr), f64_from(4), "{sy,sy} trace=4");
 
 # {σz, σz} = 2I
 var ep_sz = pauli_z();
 var ep_anti_zz = cmat_anticommutator(ep_sz, ep_sz);
 var ep_azz_tr = cmat_trace(ep_anti_zz);
-assert_eq(f64_to(HComplex_re(ep_azz_tr)), 4, "{sz,sz} trace=4");
+assert_eq(HComplex_re(ep_azz_tr), f64_from(4), "{sz,sz} trace=4");
 
 # {σx, σy} = 0 (different Paulis anticommute to zero)
 var ep_anti_xy = cmat_anticommutator(ep_sx, ep_sy);
 var ep_axy_tr = cmat_trace(ep_anti_xy);
-assert_eq(f64_to(HComplex_re(ep_axy_tr)), 0, "{sx,sy} trace=0");
+assert_eq(HComplex_re(ep_axy_tr), f64_from(0), "{sx,sy} trace=0");
 
 # ================================================================
 # Autodiff — Dual constant derivative = 0
@@ -528,18 +534,18 @@ assert_eq(f64_to(HComplex_re(ep_axy_tr)), 0, "{sx,sy} trace=0");
 test_group("edge: autodiff constant");
 
 var ea_c = dual_const(f64_from(42));
-assert_eq(f64_to(Dual_val(ea_c)), 42, "dual const val=42");
-assert_eq(f64_to(Dual_deriv(ea_c)), 0, "dual const deriv=0");
+assert_eq(Dual_val(ea_c), f64_from(42), "dual const val=42");
+assert_eq(Dual_deriv(ea_c), f64_from(0), "dual const deriv=0");
 
 # Operations on constants: c + c → val, deriv=0
 var ea_cc = dual_add(dual_const(f64_from(3)), dual_const(f64_from(4)));
-assert_eq(f64_to(Dual_val(ea_cc)), 7, "const+const val=7");
-assert_eq(f64_to(Dual_deriv(ea_cc)), 0, "const+const deriv=0");
+assert_eq(Dual_val(ea_cc), f64_from(7), "const+const val=7");
+assert_eq(Dual_deriv(ea_cc), f64_from(0), "const+const deriv=0");
 
 # Const * const
 var ea_cm = dual_mul(dual_const(f64_from(3)), dual_const(f64_from(4)));
-assert_eq(f64_to(Dual_val(ea_cm)), 12, "const*const val=12");
-assert_eq(f64_to(Dual_deriv(ea_cm)), 0, "const*const deriv=0");
+assert_eq(Dual_val(ea_cm), f64_from(12), "const*const val=12");
+assert_eq(Dual_deriv(ea_cm), f64_from(0), "const*const deriv=0");
 
 # ================================================================
 # Autodiff — Chain rule: sin(x^2) at x=0
@@ -550,8 +556,8 @@ test_group("edge: autodiff chain rule");
 var ea_x0 = dual_var(0);
 var ea_x0sq = dual_mul(ea_x0, ea_x0);
 var ea_sinx2 = dual_sin(ea_x0sq);
-assert_eq(f64_to(Dual_val(ea_sinx2)), 0, "sin(x^2) at 0 val=0");
-assert_eq(f64_to(Dual_deriv(ea_sinx2)), 0, "sin(x^2) at 0 deriv=0");
+assert_eq(Dual_val(ea_sinx2), f64_from(0), "sin(x^2) at 0 val=0");
+assert_eq(Dual_deriv(ea_sinx2), f64_from(0), "sin(x^2) at 0 deriv=0");
 
 # f(x) = sin(x^2) at x=1: val = sin(1), deriv = cos(1)*2*1
 var ea_x1 = dual_var(F64_ONE);
@@ -570,15 +576,15 @@ assert_eq(ea_sd, 1081, "2cos(1) * 1000 ~ 1081");
 test_group("edge: interval point/degenerate");
 
 var ei_pt = ivl_point(f64_from(7));
-assert_eq(f64_to(ivl_width(ei_pt)), 0, "point ivl width=0");
-assert_eq(f64_to(ivl_midpoint(ei_pt)), 7, "point ivl mid=7");
+assert_eq(ivl_width(ei_pt), f64_from(0), "point ivl width=0");
+assert_eq(ivl_midpoint(ei_pt), f64_from(7), "point ivl mid=7");
 assert_eq(ivl_contains(ei_pt, f64_from(7)), 1, "point ivl contains self");
 assert_eq(ivl_contains(ei_pt, f64_from(8)), 0, "point ivl not contain other");
 
 # Degenerate interval (lo = hi)
 var ei_degen = ivl_new(f64_from(5), f64_from(5));
-assert_eq(f64_to(ivl_width(ei_degen)), 0, "degenerate width=0");
-assert_eq(f64_to(ivl_midpoint(ei_degen)), 5, "degenerate mid=5");
+assert_eq(ivl_width(ei_degen), f64_from(0), "degenerate width=0");
+assert_eq(ivl_midpoint(ei_degen), f64_from(5), "degenerate mid=5");
 
 # ================================================================
 # Interval — Abs of interval containing zero
@@ -588,20 +594,20 @@ test_group("edge: interval abs with zero");
 # [-3, 2]: abs should be [0, 3] since it spans zero
 var ei_neg = ivl_new(f64_neg(f64_from(3)), F64_TWO);
 var ei_abs = ivl_abs(ei_neg);
-assert_eq(f64_to(Interval_lo(ei_abs)), 0, "abs[-3,2] lo=0");
-assert_eq(f64_to(Interval_hi(ei_abs)), 3, "abs[-3,2] hi=3");
+assert_eq(Interval_lo(ei_abs), f64_from(0), "abs[-3,2] lo=0");
+assert_eq(Interval_hi(ei_abs), f64_from(3), "abs[-3,2] hi=3");
 
 # Fully negative: [-5, -2]: abs = [2, 5]
 var ei_neg2 = ivl_new(f64_neg(f64_from(5)), f64_neg(F64_TWO));
 var ei_abs2 = ivl_abs(ei_neg2);
-assert_eq(f64_to(Interval_lo(ei_abs2)), 2, "abs[-5,-2] lo=2");
-assert_eq(f64_to(Interval_hi(ei_abs2)), 5, "abs[-5,-2] hi=5");
+assert_eq(Interval_lo(ei_abs2), f64_from(2), "abs[-5,-2] lo=2");
+assert_eq(Interval_hi(ei_abs2), f64_from(5), "abs[-5,-2] hi=5");
 
 # Fully positive: [2, 5]: abs = [2, 5]
 var ei_pos = ivl_new(F64_TWO, f64_from(5));
 var ei_abs3 = ivl_abs(ei_pos);
-assert_eq(f64_to(Interval_lo(ei_abs3)), 2, "abs[2,5] lo=2");
-assert_eq(f64_to(Interval_hi(ei_abs3)), 5, "abs[2,5] hi=5");
+assert_eq(Interval_lo(ei_abs3), f64_from(2), "abs[2,5] lo=2");
+assert_eq(Interval_hi(ei_abs3), f64_from(5), "abs[2,5] hi=5");
 
 # ================================================================
 # Symbolic — Differentiate constant → const(0)
@@ -612,7 +618,7 @@ var es_c = expr_const(f64_from(99));
 var es_dc = expr_diff(es_c, str_from("x"));
 assert_eq(expr_tag(es_dc), EXPR_CONST, "diff const → const");
 var es_empty = vec_new();
-assert_eq(f64_to(expr_eval(es_dc, es_empty)), 0, "diff const eval=0");
+assert_eq(expr_eval(es_dc, es_empty), f64_from(0), "diff const eval=0");
 
 # ================================================================
 # Symbolic — Simplify nested: 0 + (1 * x) → x
@@ -644,9 +650,9 @@ assert_eq(expr_tag(es_simp2), EXPR_VAR, "(0*x)+x → var");
 test_group("edge: mat4 transpose identity");
 
 var em_ti = m4_transpose(m4_identity());
-assert_eq(f64_to(m4_get(em_ti, 0, 0)), 1, "transpose I [0,0]=1");
-assert_eq(f64_to(m4_get(em_ti, 0, 1)), 0, "transpose I [0,1]=0");
-assert_eq(f64_to(m4_get(em_ti, 3, 3)), 1, "transpose I [3,3]=1");
+assert_eq(m4_get(em_ti, 0, 0), f64_from(1), "transpose I [0,0]=1");
+assert_eq(m4_get(em_ti, 0, 1), f64_from(0), "transpose I [0,1]=0");
+assert_eq(m4_get(em_ti, 3, 3), f64_from(1), "transpose I [3,3]=1");
 
 # ================================================================
 # Mat4 — I * I = I
@@ -654,10 +660,10 @@ assert_eq(f64_to(m4_get(em_ti, 3, 3)), 1, "transpose I [3,3]=1");
 test_group("edge: mat4 mul identity");
 
 var em_ii = m4_mul(m4_identity(), m4_identity());
-assert_eq(f64_to(m4_get(em_ii, 0, 0)), 1, "I*I [0,0]=1");
-assert_eq(f64_to(m4_get(em_ii, 1, 1)), 1, "I*I [1,1]=1");
-assert_eq(f64_to(m4_get(em_ii, 0, 1)), 0, "I*I [0,1]=0");
-assert_eq(f64_to(m4_get(em_ii, 3, 0)), 0, "I*I [3,0]=0");
+assert_eq(m4_get(em_ii, 0, 0), f64_from(1), "I*I [0,0]=1");
+assert_eq(m4_get(em_ii, 1, 1), f64_from(1), "I*I [1,1]=1");
+assert_eq(m4_get(em_ii, 0, 1), f64_from(0), "I*I [0,1]=0");
+assert_eq(m4_get(em_ii, 3, 0), f64_from(0), "I*I [3,0]=0");
 
 # ================================================================
 # Autodiff — neg and sub
@@ -666,13 +672,13 @@ test_group("edge: autodiff neg/sub");
 
 # neg(x) at x=5: val=-5, deriv=-1
 var ea_n = dual_neg(dual_var(f64_from(5)));
-assert_eq(f64_to(Dual_val(ea_n)), (0 - 5), "neg(x) val=-5");
-assert_eq(f64_to(Dual_deriv(ea_n)), (0 - 1), "neg(x) deriv=-1");
+assert_eq(Dual_val(ea_n), f64_neg(f64_from(5)), "neg(x) val=-5");
+assert_eq(Dual_deriv(ea_n), f64_neg(f64_from(1)), "neg(x) deriv=-1");
 
 # sub(x, 3) at x=5: val=2, deriv=1
 var ea_sub = dual_sub(dual_var(f64_from(5)), dual_const(f64_from(3)));
-assert_eq(f64_to(Dual_val(ea_sub)), 2, "x-3 val=2");
-assert_eq(f64_to(Dual_deriv(ea_sub)), 1, "x-3 deriv=1");
+assert_eq(Dual_val(ea_sub), f64_from(2), "x-3 val=2");
+assert_eq(Dual_deriv(ea_sub), f64_from(1), "x-3 deriv=1");
 
 # ================================================================
 # Easing — Midpoint values
@@ -787,13 +793,13 @@ assert(f64_approx_eq(erk_qb, 0, RK4_T15), "rk4 backward cubic t=1->0 gives 0 (1e
 test_group("edge: complex zero mul");
 
 var ec_z = cx_mul(cx_new(f64_from(5), f64_from(3)), cx_zero());
-assert_eq(f64_to(HComplex_re(ec_z)), 0, "cx mul zero re=0");
-assert_eq(f64_to(HComplex_im(ec_z)), 0, "cx mul zero im=0");
+assert_eq(HComplex_re(ec_z), f64_from(0), "cx mul zero re=0");
+assert_eq(HComplex_im(ec_z), f64_from(0), "cx mul zero im=0");
 
 # cx_add with zero = self
 var ec_az = cx_add(cx_new(f64_from(7), f64_from(2)), cx_zero());
-assert_eq(f64_to(HComplex_re(ec_az)), 7, "cx add zero re=7");
-assert_eq(f64_to(HComplex_im(ec_az)), 2, "cx add zero im=2");
+assert_eq(HComplex_re(ec_az), f64_from(7), "cx add zero re=7");
+assert_eq(HComplex_im(ec_az), f64_from(2), "cx add zero im=2");
 
 # ================================================================
 # Interval — Mul with negative intervals
@@ -804,8 +810,8 @@ test_group("edge: interval negative mul");
 var ei_na = ivl_new(f64_neg(F64_TWO), f64_neg(F64_ONE));
 var ei_nb = ivl_new(f64_from(3), f64_from(4));
 var ei_nm = ivl_mul(ei_na, ei_nb);
-assert_eq(f64_to(Interval_lo(ei_nm)), (0 - 8), "neg*pos ivl lo=-8");
-assert_eq(f64_to(Interval_hi(ei_nm)), (0 - 3), "neg*pos ivl hi=-3");
+assert_eq(Interval_lo(ei_nm), f64_neg(f64_from(8)), "neg*pos ivl lo=-8");
+assert_eq(Interval_hi(ei_nm), f64_neg(f64_from(3)), "neg*pos ivl hi=-3");
 
 # ================================================================
 # Complex — capped-constructor null propagation (CWE-476)
@@ -846,8 +852,8 @@ assert_eq(f64_gt(cx_abs(cx_inv(ec_small)), f64_from(1000000)), 1,
 assert_eq(f64_gt(cx_abs(cx_powf(ec_small, F64_ONE)), 0), 1,
   "cx_powf of 1e-9 is not flushed to zero");
 # An exact zero divisor must still be guarded.
-assert_eq(f64_to(cx_abs(cx_div(cx_one(), cx_zero()))), 0, "cx_div by exact zero -> zero");
-assert_eq(f64_to(cx_abs(cx_inv(cx_zero()))), 0, "cx_inv of exact zero -> zero");
+assert_eq(cx_abs(cx_div(cx_one(), cx_zero())), f64_from(0), "cx_div by exact zero -> zero");
+assert_eq(cx_abs(cx_inv(cx_zero())), f64_from(0), "cx_inv of exact zero -> zero");
 
 # ================================================================
 # Interval — ENCLOSURE SOUNDNESS
@@ -882,8 +888,8 @@ assert_eq(ivl_contains(ei_s5, f64_neg(F64_ONE)), 1, "ivl_sin[0,tau] contains -1"
 var ei_q = ivl_sqrt(ivl_new(f64_neg(f64_from(4)), f64_neg(F64_ONE)));
 assert_eq(ivl_contains(ei_q, f64_from(12345)), 0, "ivl_sqrt[-4,-1] is not a NaN catch-all");
 var ei_q2 = ivl_sqrt(ivl_new(f64_neg(f64_from(4)), f64_from(9)));
-assert_eq(f64_to(Interval_lo(ei_q2)), 0, "ivl_sqrt[-4,9] lo=0");
-assert_eq(f64_to(Interval_hi(ei_q2)), 3, "ivl_sqrt[-4,9] hi=3");
+assert_eq(Interval_lo(ei_q2), f64_from(0), "ivl_sqrt[-4,9] lo=0");
+assert_eq(Interval_hi(ei_q2), f64_from(3), "ivl_sqrt[-4,9] hi=3");
 
 # ivl_div tested for zero with a raw integer `== 0`, which matches only +0.0;
 # -0.0 (0x8000000000000000) slipped through and divided by zero. Note f64_neg(0)
@@ -898,7 +904,7 @@ var ei_dz = ivl_div(ivl_new(F64_ONE, F64_ONE), ivl_new(ei_nz, F64_ONE));
 # here: the unguarded path yields [-inf, 1] (the -0.0 bug), the 2.6.12..2.8.2
 # guard yielded the finite [-1e9, 1e9] (which EXCLUDES 1/1e-12 = 1e12 and is
 # therefore not an enclosure at all), and the correct hull is [1, +inf).
-assert_eq(f64_to(Interval_lo(ei_dz)), 1, "ivl_div by [-0.0,1] lo = 1 (exact hull)");
+assert_eq(Interval_lo(ei_dz), f64_from(1), "ivl_div by [-0.0,1] lo = 1 (exact hull)");
 assert_eq(Interval_hi(ei_dz), 0x7FF0000000000000, "ivl_div by [-0.0,1] hi = +Infinity");
 assert_eq(ivl_contains(ei_dz, f64_from(1000000000000)), 1,
   "ivl_div by [-0.0,1] encloses 1e12 (the 1e9 guard did not)");
@@ -996,13 +1002,13 @@ var xd_ninf = 0xFFF0000000000000;
 
 # [1,2] / [0,1] -> [1, +inf)
 var xd_a = ivl_div(ivl_new(F64_ONE, F64_TWO), ivl_new(0, F64_ONE));
-assert_eq(f64_to(Interval_lo(xd_a)), 1, "[1,2]/[0,1] lo = 1");
+assert_eq(Interval_lo(xd_a), f64_from(1), "[1,2]/[0,1] lo = 1");
 assert_eq(Interval_hi(xd_a), xd_pinf, "[1,2]/[0,1] hi = +inf");
 
 # [1,2] / [-1,0] -> (-inf, -1]
 var xd_b = ivl_div(ivl_new(F64_ONE, F64_TWO), ivl_new(f64_neg(F64_ONE), 0));
 assert_eq(Interval_lo(xd_b), xd_ninf, "[1,2]/[-1,0] lo = -inf");
-assert_eq(f64_to(Interval_hi(xd_b)), (0 - 1), "[1,2]/[-1,0] hi = -1");
+assert_eq(Interval_hi(xd_b), f64_neg(f64_from(1)), "[1,2]/[-1,0] hi = -1");
 
 # [1,2] / [-1,1] -> the true set is (-inf,-1] u [1,+inf); its hull is entire.
 var xd_c = ivl_div(ivl_new(F64_ONE, F64_TWO), ivl_new(f64_neg(F64_ONE), F64_ONE));
@@ -1012,14 +1018,14 @@ assert_eq(Interval_hi(xd_c), xd_pinf, "[1,2]/[-1,1] hi = +inf");
 # [-4,-2] / [0,2] -> (-inf, -1]
 var xd_d = ivl_div(ivl_new(f64_neg(f64_from(4)), f64_neg(F64_TWO)), ivl_new(0, F64_TWO));
 assert_eq(Interval_lo(xd_d), xd_ninf, "[-4,-2]/[0,2] lo = -inf");
-assert_eq(f64_to(Interval_hi(xd_d)), (0 - 1), "[-4,-2]/[0,2] hi = -1");
+assert_eq(Interval_hi(xd_d), f64_neg(f64_from(1)), "[-4,-2]/[0,2] hi = -1");
 
 # [0,0] / [-1,1] -> exactly [0,0]: 0/y is 0 for every admissible y. The old
 # guard returned [-1e9, 1e9] here, which is sound but 2e9 wide for an answer
 # that is a single point.
 var xd_e = ivl_div(ivl_point(0), ivl_new(f64_neg(F64_ONE), F64_ONE));
-assert_eq(f64_to(Interval_lo(xd_e)), 0, "[0,0]/[-1,1] lo = 0");
-assert_eq(f64_to(Interval_hi(xd_e)), 0, "[0,0]/[-1,1] hi = 0");
+assert_eq(Interval_lo(xd_e), f64_from(0), "[0,0]/[-1,1] lo = 0");
+assert_eq(Interval_hi(xd_e), f64_from(0), "[0,0]/[-1,1] hi = 0");
 
 # Soundness spot-check with a value the 1e9 box excluded: 1 / 1e-12 = 1e12.
 assert_eq(ivl_contains(xd_a, f64_from(1000000000000)), 1, "[1,2]/[0,1] encloses 1e12");
@@ -1037,8 +1043,8 @@ assert_eq(f64_to(f64_round(f64_mul(Interval_hi(xd_f), f64_from(100)))), 150,
 # so the products contributed by x = 0 are all 0. IEEE 754 gives NaN, and a NaN
 # endpoint makes ivl_contains report the interval as containing everything.
 var xd_z = ivl_mul(ivl_point(0), xd_a);
-assert_eq(f64_to(Interval_lo(xd_z)), 0, "[0,0] * [1,+inf) lo = 0, not NaN");
-assert_eq(f64_to(Interval_hi(xd_z)), 0, "[0,0] * [1,+inf) hi = 0, not NaN");
+assert_eq(Interval_lo(xd_z), f64_from(0), "[0,0] * [1,+inf) lo = 0, not NaN");
+assert_eq(Interval_hi(xd_z), f64_from(0), "[0,0] * [1,+inf) hi = 0, not NaN");
 assert_eq(ivl_contains(xd_z, f64_from(7)), 0, "[0,0] * [1,+inf) is not a NaN catch-all");
 
 # ================================================================

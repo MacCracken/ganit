@@ -35,23 +35,23 @@ test_group("vec2 construction");
 
 # zero
 var v2z = hvec2_zero();
-assert_eq(f64_to(HVec2_x(v2z)), 0, "v2 zero.x");
-assert_eq(f64_to(HVec2_y(v2z)), 0, "v2 zero.y");
+assert_eq(HVec2_x(v2z), f64_from(0), "v2 zero.x");
+assert_eq(HVec2_y(v2z), f64_from(0), "v2 zero.y");
 
 # one
 var v2o = hvec2_one();
-assert_eq(f64_to(HVec2_x(v2o)), 1, "v2 one.x");
-assert_eq(f64_to(HVec2_y(v2o)), 1, "v2 one.y");
+assert_eq(HVec2_x(v2o), f64_from(1), "v2 one.x");
+assert_eq(HVec2_y(v2o), f64_from(1), "v2 one.y");
 
 # new
 var v2a = hvec2_new(f64_from(3), f64_from(4));
-assert_eq(f64_to(HVec2_x(v2a)), 3, "v2 new.x");
-assert_eq(f64_to(HVec2_y(v2a)), 4, "v2 new.y");
+assert_eq(HVec2_x(v2a), f64_from(3), "v2 new.x");
+assert_eq(HVec2_y(v2a), f64_from(4), "v2 new.y");
 
 # splat
 var v2s = hvec2_splat(f64_from(7));
-assert_eq(f64_to(HVec2_x(v2s)), 7, "v2 splat.x");
-assert_eq(f64_to(HVec2_y(v2s)), 7, "v2 splat.y");
+assert_eq(HVec2_x(v2s), f64_from(7), "v2 splat.x");
+assert_eq(HVec2_y(v2s), f64_from(7), "v2 splat.y");
 
 # ================================================================
 # Vec2 — Arithmetic
@@ -62,28 +62,28 @@ var v2b = hvec2_new(f64_from(1), f64_from(2));
 
 # add
 var v2add = hvec2_add(v2a, v2b);
-assert_eq(f64_to(HVec2_x(v2add)), 4, "v2 add.x");
-assert_eq(f64_to(HVec2_y(v2add)), 6, "v2 add.y");
+assert_eq(HVec2_x(v2add), f64_from(4), "v2 add.x");
+assert_eq(HVec2_y(v2add), f64_from(6), "v2 add.y");
 
 # sub
 var v2sub = hvec2_sub(v2a, v2b);
-assert_eq(f64_to(HVec2_x(v2sub)), 2, "v2 sub.x");
-assert_eq(f64_to(HVec2_y(v2sub)), 2, "v2 sub.y");
+assert_eq(HVec2_x(v2sub), f64_from(2), "v2 sub.x");
+assert_eq(HVec2_y(v2sub), f64_from(2), "v2 sub.y");
 
 # mul (component-wise)
 var v2mul = hvec2_mul(v2a, v2b);
-assert_eq(f64_to(HVec2_x(v2mul)), 3, "v2 mul.x");
-assert_eq(f64_to(HVec2_y(v2mul)), 8, "v2 mul.y");
+assert_eq(HVec2_x(v2mul), f64_from(3), "v2 mul.x");
+assert_eq(HVec2_y(v2mul), f64_from(8), "v2 mul.y");
 
 # scale
 var v2sc = hvec2_scale(v2a, f64_from(2));
-assert_eq(f64_to(HVec2_x(v2sc)), 6, "v2 scale.x");
-assert_eq(f64_to(HVec2_y(v2sc)), 8, "v2 scale.y");
+assert_eq(HVec2_x(v2sc), f64_from(6), "v2 scale.x");
+assert_eq(HVec2_y(v2sc), f64_from(8), "v2 scale.y");
 
 # neg
 var v2neg = hvec2_neg(v2a);
-assert_eq(f64_to(HVec2_x(v2neg)), (0 - 3), "v2 neg.x");
-assert_eq(f64_to(HVec2_y(v2neg)), (0 - 4), "v2 neg.y");
+assert_eq(HVec2_x(v2neg), f64_neg(f64_from(3)), "v2 neg.x");
+assert_eq(HVec2_y(v2neg), f64_neg(f64_from(4)), "v2 neg.y");
 
 # ================================================================
 # Vec2 — Products and Norms
@@ -92,22 +92,22 @@ test_group("vec2 products/norms");
 
 # dot: (3,4).(1,2) = 3+8 = 11
 var v2dot = hvec2_dot(v2a, v2b);
-assert_eq(f64_to(v2dot), 11, "v2 dot");
+assert_eq(v2dot, f64_from(11), "v2 dot");
 
 # dot with self: (3,4).(3,4) = 9+16 = 25
-assert_eq(f64_to(hvec2_dot(v2a, v2a)), 25, "v2 dot self");
+assert_eq(hvec2_dot(v2a, v2a), f64_from(25), "v2 dot self");
 
 # length_sq: (3,4) = 25
-assert_eq(f64_to(hvec2_length_sq(v2a)), 25, "v2 length_sq");
+assert_eq(hvec2_length_sq(v2a), f64_from(25), "v2 length_sq");
 
 # length: (3,4) = 5 (3-4-5 triangle)
-assert_eq(f64_to(hvec2_length(v2a)), 5, "v2 length 3-4-5");
+assert_eq(hvec2_length(v2a), f64_from(5), "v2 length 3-4-5");
 
 # length of (0,0)
-assert_eq(f64_to(hvec2_length(hvec2_zero())), 0, "v2 length zero");
+assert_eq(hvec2_length(hvec2_zero()), f64_from(0), "v2 length zero");
 
 # length of (1,0)
-assert_eq(f64_to(hvec2_length(hvec2_new(F64_ONE, 0))), 1, "v2 length unit");
+assert_eq(hvec2_length(hvec2_new(F64_ONE, 0)), f64_from(1), "v2 length unit");
 
 # normalize: (3,4)/5 = (0.6, 0.8), length should be 1
 var v2norm = hvec2_normalize(v2a);
@@ -122,8 +122,8 @@ assert_eq(v2norm_y_10, 8, "v2 normalize.y=0.8");
 
 # normalize zero vector returns zero
 var v2norm_z = hvec2_normalize(hvec2_zero());
-assert_eq(f64_to(HVec2_x(v2norm_z)), 0, "v2 normalize zero.x");
-assert_eq(f64_to(HVec2_y(v2norm_z)), 0, "v2 normalize zero.y");
+assert_eq(HVec2_x(v2norm_z), f64_from(0), "v2 normalize zero.x");
+assert_eq(HVec2_y(v2norm_z), f64_from(0), "v2 normalize zero.y");
 
 # distance: dist((3,4),(1,2)) = length((2,2)) = sqrt(8) ~ 2.828
 var v2dist = hvec2_distance(v2a, v2b);
@@ -131,7 +131,7 @@ var v2dist_1000 = f64_to(f64_round(f64_mul(v2dist, f64_from(1000))));
 assert_eq(v2dist_1000, 2828, "v2 distance");
 
 # distance to self = 0
-assert_eq(f64_to(hvec2_distance(v2a, v2a)), 0, "v2 distance self=0");
+assert_eq(hvec2_distance(v2a, v2a), f64_from(0), "v2 distance self=0");
 
 # ================================================================
 # Vec2 — Interpolation
@@ -143,18 +143,18 @@ var v2lb = hvec2_new(f64_from(10), f64_from(20));
 
 # lerp t=0 returns a
 var v2l0 = hvec2_lerp(v2la, v2lb, 0);
-assert_eq(f64_to(HVec2_x(v2l0)), 0, "v2 lerp t=0 .x");
-assert_eq(f64_to(HVec2_y(v2l0)), 0, "v2 lerp t=0 .y");
+assert_eq(HVec2_x(v2l0), f64_from(0), "v2 lerp t=0 .x");
+assert_eq(HVec2_y(v2l0), f64_from(0), "v2 lerp t=0 .y");
 
 # lerp t=1 returns b
 var v2l1 = hvec2_lerp(v2la, v2lb, F64_ONE);
-assert_eq(f64_to(HVec2_x(v2l1)), 10, "v2 lerp t=1 .x");
-assert_eq(f64_to(HVec2_y(v2l1)), 20, "v2 lerp t=1 .y");
+assert_eq(HVec2_x(v2l1), f64_from(10), "v2 lerp t=1 .x");
+assert_eq(HVec2_y(v2l1), f64_from(20), "v2 lerp t=1 .y");
 
 # lerp t=0.5 returns midpoint
 var v2lh = hvec2_lerp(v2la, v2lb, F64_HALF);
-assert_eq(f64_to(HVec2_x(v2lh)), 5, "v2 lerp t=0.5 .x");
-assert_eq(f64_to(HVec2_y(v2lh)), 10, "v2 lerp t=0.5 .y");
+assert_eq(HVec2_x(v2lh), f64_from(5), "v2 lerp t=0.5 .x");
+assert_eq(HVec2_y(v2lh), f64_from(10), "v2 lerp t=0.5 .y");
 
 # ================================================================
 # Vec3 — Construction
@@ -162,33 +162,33 @@ assert_eq(f64_to(HVec2_y(v2lh)), 10, "v2 lerp t=0.5 .y");
 test_group("vec3 construction");
 
 var v3z = hvec3_zero();
-assert_eq(f64_to(HVec3_x(v3z)), 0, "v3 zero.x");
-assert_eq(f64_to(HVec3_y(v3z)), 0, "v3 zero.y");
-assert_eq(f64_to(HVec3_z(v3z)), 0, "v3 zero.z");
+assert_eq(HVec3_x(v3z), f64_from(0), "v3 zero.x");
+assert_eq(HVec3_y(v3z), f64_from(0), "v3 zero.y");
+assert_eq(HVec3_z(v3z), f64_from(0), "v3 zero.z");
 
 var v3o = hvec3_one();
-assert_eq(f64_to(HVec3_x(v3o)), 1, "v3 one.x");
-assert_eq(f64_to(HVec3_y(v3o)), 1, "v3 one.y");
-assert_eq(f64_to(HVec3_z(v3o)), 1, "v3 one.z");
+assert_eq(HVec3_x(v3o), f64_from(1), "v3 one.x");
+assert_eq(HVec3_y(v3o), f64_from(1), "v3 one.y");
+assert_eq(HVec3_z(v3o), f64_from(1), "v3 one.z");
 
 # unit vectors
-assert_eq(f64_to(HVec3_x(hvec3_unit_x())), 1, "v3 unit_x.x");
-assert_eq(f64_to(HVec3_y(hvec3_unit_x())), 0, "v3 unit_x.y");
-assert_eq(f64_to(HVec3_z(hvec3_unit_x())), 0, "v3 unit_x.z");
+assert_eq(HVec3_x(hvec3_unit_x()), f64_from(1), "v3 unit_x.x");
+assert_eq(HVec3_y(hvec3_unit_x()), f64_from(0), "v3 unit_x.y");
+assert_eq(HVec3_z(hvec3_unit_x()), f64_from(0), "v3 unit_x.z");
 
-assert_eq(f64_to(HVec3_x(hvec3_unit_y())), 0, "v3 unit_y.x");
-assert_eq(f64_to(HVec3_y(hvec3_unit_y())), 1, "v3 unit_y.y");
-assert_eq(f64_to(HVec3_z(hvec3_unit_y())), 0, "v3 unit_y.z");
+assert_eq(HVec3_x(hvec3_unit_y()), f64_from(0), "v3 unit_y.x");
+assert_eq(HVec3_y(hvec3_unit_y()), f64_from(1), "v3 unit_y.y");
+assert_eq(HVec3_z(hvec3_unit_y()), f64_from(0), "v3 unit_y.z");
 
-assert_eq(f64_to(HVec3_x(hvec3_unit_z())), 0, "v3 unit_z.x");
-assert_eq(f64_to(HVec3_y(hvec3_unit_z())), 0, "v3 unit_z.y");
-assert_eq(f64_to(HVec3_z(hvec3_unit_z())), 1, "v3 unit_z.z");
+assert_eq(HVec3_x(hvec3_unit_z()), f64_from(0), "v3 unit_z.x");
+assert_eq(HVec3_y(hvec3_unit_z()), f64_from(0), "v3 unit_z.y");
+assert_eq(HVec3_z(hvec3_unit_z()), f64_from(1), "v3 unit_z.z");
 
 # splat
 var v3sp = hvec3_splat(f64_from(5));
-assert_eq(f64_to(HVec3_x(v3sp)), 5, "v3 splat.x");
-assert_eq(f64_to(HVec3_y(v3sp)), 5, "v3 splat.y");
-assert_eq(f64_to(HVec3_z(v3sp)), 5, "v3 splat.z");
+assert_eq(HVec3_x(v3sp), f64_from(5), "v3 splat.x");
+assert_eq(HVec3_y(v3sp), f64_from(5), "v3 splat.y");
+assert_eq(HVec3_z(v3sp), f64_from(5), "v3 splat.z");
 
 # ================================================================
 # Vec3 — Arithmetic
@@ -200,33 +200,33 @@ var v3b = hvec3_new(f64_from(4), f64_from(5), f64_from(6));
 
 # add
 var v3add = hvec3_add(v3a, v3b);
-assert_eq(f64_to(HVec3_x(v3add)), 5, "v3 add.x");
-assert_eq(f64_to(HVec3_y(v3add)), 7, "v3 add.y");
-assert_eq(f64_to(HVec3_z(v3add)), 9, "v3 add.z");
+assert_eq(HVec3_x(v3add), f64_from(5), "v3 add.x");
+assert_eq(HVec3_y(v3add), f64_from(7), "v3 add.y");
+assert_eq(HVec3_z(v3add), f64_from(9), "v3 add.z");
 
 # sub
 var v3sub = hvec3_sub(v3a, v3b);
-assert_eq(f64_to(HVec3_x(v3sub)), (0 - 3), "v3 sub.x");
-assert_eq(f64_to(HVec3_y(v3sub)), (0 - 3), "v3 sub.y");
-assert_eq(f64_to(HVec3_z(v3sub)), (0 - 3), "v3 sub.z");
+assert_eq(HVec3_x(v3sub), f64_neg(f64_from(3)), "v3 sub.x");
+assert_eq(HVec3_y(v3sub), f64_neg(f64_from(3)), "v3 sub.y");
+assert_eq(HVec3_z(v3sub), f64_neg(f64_from(3)), "v3 sub.z");
 
 # mul (component-wise)
 var v3mul = hvec3_mul(v3a, v3b);
-assert_eq(f64_to(HVec3_x(v3mul)), 4, "v3 mul.x");
-assert_eq(f64_to(HVec3_y(v3mul)), 10, "v3 mul.y");
-assert_eq(f64_to(HVec3_z(v3mul)), 18, "v3 mul.z");
+assert_eq(HVec3_x(v3mul), f64_from(4), "v3 mul.x");
+assert_eq(HVec3_y(v3mul), f64_from(10), "v3 mul.y");
+assert_eq(HVec3_z(v3mul), f64_from(18), "v3 mul.z");
 
 # scale
 var v3sc = hvec3_scale(v3a, f64_from(3));
-assert_eq(f64_to(HVec3_x(v3sc)), 3, "v3 scale.x");
-assert_eq(f64_to(HVec3_y(v3sc)), 6, "v3 scale.y");
-assert_eq(f64_to(HVec3_z(v3sc)), 9, "v3 scale.z");
+assert_eq(HVec3_x(v3sc), f64_from(3), "v3 scale.x");
+assert_eq(HVec3_y(v3sc), f64_from(6), "v3 scale.y");
+assert_eq(HVec3_z(v3sc), f64_from(9), "v3 scale.z");
 
 # neg
 var v3neg = hvec3_neg(v3a);
-assert_eq(f64_to(HVec3_x(v3neg)), (0 - 1), "v3 neg.x");
-assert_eq(f64_to(HVec3_y(v3neg)), (0 - 2), "v3 neg.y");
-assert_eq(f64_to(HVec3_z(v3neg)), (0 - 3), "v3 neg.z");
+assert_eq(HVec3_x(v3neg), f64_neg(f64_from(1)), "v3 neg.x");
+assert_eq(HVec3_y(v3neg), f64_neg(f64_from(2)), "v3 neg.y");
+assert_eq(HVec3_z(v3neg), f64_neg(f64_from(3)), "v3 neg.z");
 
 # ================================================================
 # Vec3 — Dot, Cross, Length
@@ -234,38 +234,38 @@ assert_eq(f64_to(HVec3_z(v3neg)), (0 - 3), "v3 neg.z");
 test_group("vec3 products/norms");
 
 # dot: (1,2,3).(4,5,6) = 4+10+18 = 32
-assert_eq(f64_to(hvec3_dot(v3a, v3b)), 32, "v3 dot");
+assert_eq(hvec3_dot(v3a, v3b), f64_from(32), "v3 dot");
 
 # dot with self: (1,2,3).(1,2,3) = 1+4+9 = 14
-assert_eq(f64_to(hvec3_dot(v3a, v3a)), 14, "v3 dot self");
+assert_eq(hvec3_dot(v3a, v3a), f64_from(14), "v3 dot self");
 
 # dot orthogonal: unit_x . unit_y = 0
-assert_eq(f64_to(hvec3_dot(hvec3_unit_x(), hvec3_unit_y())), 0, "v3 dot orthogonal");
+assert_eq(hvec3_dot(hvec3_unit_x(), hvec3_unit_y()), f64_from(0), "v3 dot orthogonal");
 
 # length_sq
-assert_eq(f64_to(hvec3_length_sq(v3a)), 14, "v3 length_sq");
+assert_eq(hvec3_length_sq(v3a), f64_from(14), "v3 length_sq");
 
 # length of (3,4,0) = 5
 var v3_345 = hvec3_new(f64_from(3), f64_from(4), 0);
-assert_eq(f64_to(hvec3_length(v3_345)), 5, "v3 length 3-4-0");
+assert_eq(hvec3_length(v3_345), f64_from(5), "v3 length 3-4-0");
 
 # cross products: x cross y = z
 var cr_xy = hvec3_cross(hvec3_unit_x(), hvec3_unit_y());
-assert_eq(f64_to(HVec3_x(cr_xy)), 0, "v3 x cross y .x");
-assert_eq(f64_to(HVec3_y(cr_xy)), 0, "v3 x cross y .y");
-assert_eq(f64_to(HVec3_z(cr_xy)), 1, "v3 x cross y .z");
+assert_eq(HVec3_x(cr_xy), f64_from(0), "v3 x cross y .x");
+assert_eq(HVec3_y(cr_xy), f64_from(0), "v3 x cross y .y");
+assert_eq(HVec3_z(cr_xy), f64_from(1), "v3 x cross y .z");
 
 # y cross z = x
 var cr_yz = hvec3_cross(hvec3_unit_y(), hvec3_unit_z());
-assert_eq(f64_to(HVec3_x(cr_yz)), 1, "v3 y cross z .x");
-assert_eq(f64_to(HVec3_y(cr_yz)), 0, "v3 y cross z .y");
-assert_eq(f64_to(HVec3_z(cr_yz)), 0, "v3 y cross z .z");
+assert_eq(HVec3_x(cr_yz), f64_from(1), "v3 y cross z .x");
+assert_eq(HVec3_y(cr_yz), f64_from(0), "v3 y cross z .y");
+assert_eq(HVec3_z(cr_yz), f64_from(0), "v3 y cross z .z");
 
 # z cross x = y
 var cr_zx = hvec3_cross(hvec3_unit_z(), hvec3_unit_x());
-assert_eq(f64_to(HVec3_x(cr_zx)), 0, "v3 z cross x .x");
-assert_eq(f64_to(HVec3_y(cr_zx)), 1, "v3 z cross x .y");
-assert_eq(f64_to(HVec3_z(cr_zx)), 0, "v3 z cross x .z");
+assert_eq(HVec3_x(cr_zx), f64_from(0), "v3 z cross x .x");
+assert_eq(HVec3_y(cr_zx), f64_from(1), "v3 z cross x .y");
+assert_eq(HVec3_z(cr_zx), f64_from(0), "v3 z cross x .z");
 
 # cross anti-commutativity: a x b = -(b x a)
 var cr_ab = hvec3_cross(v3a, v3b);
@@ -276,9 +276,9 @@ assert_f64_eq(HVec3_z(cr_ab), f64_neg(HVec3_z(cr_ba)), "v3 cross anti-commute.z"
 
 # cross self = zero
 var cr_aa = hvec3_cross(v3a, v3a);
-assert_eq(f64_to(HVec3_x(cr_aa)), 0, "v3 cross self.x");
-assert_eq(f64_to(HVec3_y(cr_aa)), 0, "v3 cross self.y");
-assert_eq(f64_to(HVec3_z(cr_aa)), 0, "v3 cross self.z");
+assert_eq(HVec3_x(cr_aa), f64_from(0), "v3 cross self.x");
+assert_eq(HVec3_y(cr_aa), f64_from(0), "v3 cross self.y");
+assert_eq(HVec3_z(cr_aa), f64_from(0), "v3 cross self.z");
 
 # normalize
 var v3norm = hvec3_normalize(v3a);
@@ -286,7 +286,7 @@ assert_f64_eq(hvec3_length(v3norm), F64_ONE, "v3 normalize length=1");
 
 # normalize zero returns zero
 var v3norm_z = hvec3_normalize(hvec3_zero());
-assert_eq(f64_to(HVec3_x(v3norm_z)), 0, "v3 normalize zero.x");
+assert_eq(HVec3_x(v3norm_z), f64_from(0), "v3 normalize zero.x");
 
 # distance
 var v3dist = hvec3_distance(v3a, v3b);
@@ -295,7 +295,7 @@ var v3dist_1000 = f64_to(f64_round(f64_mul(v3dist, f64_from(1000))));
 assert_eq(v3dist_1000, 5196, "v3 distance");
 
 # distance to self = 0
-assert_eq(f64_to(hvec3_distance(v3a, v3a)), 0, "v3 distance self=0");
+assert_eq(hvec3_distance(v3a, v3a), f64_from(0), "v3 distance self=0");
 
 # ================================================================
 # Vec3 — Lerp
@@ -307,21 +307,21 @@ var v3lb = hvec3_new(f64_from(10), f64_from(20), f64_from(30));
 
 # lerp t=0
 var v3l0 = hvec3_lerp(v3la, v3lb, 0);
-assert_eq(f64_to(HVec3_x(v3l0)), 0, "v3 lerp t=0 .x");
-assert_eq(f64_to(HVec3_y(v3l0)), 0, "v3 lerp t=0 .y");
-assert_eq(f64_to(HVec3_z(v3l0)), 0, "v3 lerp t=0 .z");
+assert_eq(HVec3_x(v3l0), f64_from(0), "v3 lerp t=0 .x");
+assert_eq(HVec3_y(v3l0), f64_from(0), "v3 lerp t=0 .y");
+assert_eq(HVec3_z(v3l0), f64_from(0), "v3 lerp t=0 .z");
 
 # lerp t=1
 var v3l1 = hvec3_lerp(v3la, v3lb, F64_ONE);
-assert_eq(f64_to(HVec3_x(v3l1)), 10, "v3 lerp t=1 .x");
-assert_eq(f64_to(HVec3_y(v3l1)), 20, "v3 lerp t=1 .y");
-assert_eq(f64_to(HVec3_z(v3l1)), 30, "v3 lerp t=1 .z");
+assert_eq(HVec3_x(v3l1), f64_from(10), "v3 lerp t=1 .x");
+assert_eq(HVec3_y(v3l1), f64_from(20), "v3 lerp t=1 .y");
+assert_eq(HVec3_z(v3l1), f64_from(30), "v3 lerp t=1 .z");
 
 # lerp t=0.5
 var v3lh = hvec3_lerp(v3la, v3lb, F64_HALF);
-assert_eq(f64_to(HVec3_x(v3lh)), 5, "v3 lerp t=0.5 .x");
-assert_eq(f64_to(HVec3_y(v3lh)), 10, "v3 lerp t=0.5 .y");
-assert_eq(f64_to(HVec3_z(v3lh)), 15, "v3 lerp t=0.5 .z");
+assert_eq(HVec3_x(v3lh), f64_from(5), "v3 lerp t=0.5 .x");
+assert_eq(HVec3_y(v3lh), f64_from(10), "v3 lerp t=0.5 .y");
+assert_eq(HVec3_z(v3lh), f64_from(15), "v3 lerp t=0.5 .z");
 
 # ================================================================
 # Vec3 — Min, Max, Abs, Reflect
@@ -333,34 +333,34 @@ var v3d = hvec3_new(f64_from(2), f64_from(7), f64_neg(f64_from(4)));
 
 # min
 var v3min = hvec3_min(v3c, v3d);
-assert_eq(f64_to(HVec3_x(v3min)), 2, "v3 min.x");
-assert_eq(f64_to(HVec3_y(v3min)), (0 - 3), "v3 min.y");
-assert_eq(f64_to(HVec3_z(v3min)), (0 - 4), "v3 min.z");
+assert_eq(HVec3_x(v3min), f64_from(2), "v3 min.x");
+assert_eq(HVec3_y(v3min), f64_neg(f64_from(3)), "v3 min.y");
+assert_eq(HVec3_z(v3min), f64_neg(f64_from(4)), "v3 min.z");
 
 # max
 var v3max = hvec3_max(v3c, v3d);
-assert_eq(f64_to(HVec3_x(v3max)), 5, "v3 max.x");
-assert_eq(f64_to(HVec3_y(v3max)), 7, "v3 max.y");
-assert_eq(f64_to(HVec3_z(v3max)), 1, "v3 max.z");
+assert_eq(HVec3_x(v3max), f64_from(5), "v3 max.x");
+assert_eq(HVec3_y(v3max), f64_from(7), "v3 max.y");
+assert_eq(HVec3_z(v3max), f64_from(1), "v3 max.z");
 
 # abs
 var v3abs = hvec3_abs(hvec3_new(f64_neg(f64_from(3)), f64_from(4), f64_neg(f64_from(5))));
-assert_eq(f64_to(HVec3_x(v3abs)), 3, "v3 abs.x");
-assert_eq(f64_to(HVec3_y(v3abs)), 4, "v3 abs.y");
-assert_eq(f64_to(HVec3_z(v3abs)), 5, "v3 abs.z");
+assert_eq(HVec3_x(v3abs), f64_from(3), "v3 abs.x");
+assert_eq(HVec3_y(v3abs), f64_from(4), "v3 abs.y");
+assert_eq(HVec3_z(v3abs), f64_from(5), "v3 abs.z");
 
 # reflect: v=(1,-1,0) about n=(0,1,0) should give (1,1,0)
 var v3refl_v = hvec3_new(F64_ONE, f64_neg(F64_ONE), 0);
 var v3refl_n = hvec3_unit_y();
 var v3refl = hvec3_reflect(v3refl_v, v3refl_n);
-assert_eq(f64_to(HVec3_x(v3refl)), 1, "v3 reflect.x");
-assert_eq(f64_to(HVec3_y(v3refl)), 1, "v3 reflect.y");
-assert_eq(f64_to(HVec3_z(v3refl)), 0, "v3 reflect.z");
+assert_eq(HVec3_x(v3refl), f64_from(1), "v3 reflect.x");
+assert_eq(HVec3_y(v3refl), f64_from(1), "v3 reflect.y");
+assert_eq(HVec3_z(v3refl), f64_from(0), "v3 reflect.z");
 
 # reflect: perpendicular to normal unchanged, parallel component negated
 # v=(0,1,0) about n=(0,1,0) -> (0,-1,0)
 var v3refl2 = hvec3_reflect(hvec3_unit_y(), hvec3_unit_y());
-assert_eq(f64_to(HVec3_y(v3refl2)), (0 - 1), "v3 reflect parallel");
+assert_eq(HVec3_y(v3refl2), f64_neg(f64_from(1)), "v3 reflect parallel");
 
 # ================================================================
 # Vec4 — Construction
@@ -368,28 +368,28 @@ assert_eq(f64_to(HVec3_y(v3refl2)), (0 - 1), "v3 reflect parallel");
 test_group("vec4 construction");
 
 var v4z = hvec4_zero();
-assert_eq(f64_to(HVec4_x(v4z)), 0, "v4 zero.x");
-assert_eq(f64_to(HVec4_y(v4z)), 0, "v4 zero.y");
-assert_eq(f64_to(HVec4_z(v4z)), 0, "v4 zero.z");
-assert_eq(f64_to(HVec4_w(v4z)), 0, "v4 zero.w");
+assert_eq(HVec4_x(v4z), f64_from(0), "v4 zero.x");
+assert_eq(HVec4_y(v4z), f64_from(0), "v4 zero.y");
+assert_eq(HVec4_z(v4z), f64_from(0), "v4 zero.z");
+assert_eq(HVec4_w(v4z), f64_from(0), "v4 zero.w");
 
 var v4o = hvec4_one();
-assert_eq(f64_to(HVec4_x(v4o)), 1, "v4 one.x");
-assert_eq(f64_to(HVec4_y(v4o)), 1, "v4 one.y");
-assert_eq(f64_to(HVec4_z(v4o)), 1, "v4 one.z");
-assert_eq(f64_to(HVec4_w(v4o)), 1, "v4 one.w");
+assert_eq(HVec4_x(v4o), f64_from(1), "v4 one.x");
+assert_eq(HVec4_y(v4o), f64_from(1), "v4 one.y");
+assert_eq(HVec4_z(v4o), f64_from(1), "v4 one.z");
+assert_eq(HVec4_w(v4o), f64_from(1), "v4 one.w");
 
 # new
 var v4a = hvec4_new(f64_from(1), f64_from(2), f64_from(3), f64_from(4));
-assert_eq(f64_to(HVec4_x(v4a)), 1, "v4 new.x");
-assert_eq(f64_to(HVec4_y(v4a)), 2, "v4 new.y");
-assert_eq(f64_to(HVec4_z(v4a)), 3, "v4 new.z");
-assert_eq(f64_to(HVec4_w(v4a)), 4, "v4 new.w");
+assert_eq(HVec4_x(v4a), f64_from(1), "v4 new.x");
+assert_eq(HVec4_y(v4a), f64_from(2), "v4 new.y");
+assert_eq(HVec4_z(v4a), f64_from(3), "v4 new.z");
+assert_eq(HVec4_w(v4a), f64_from(4), "v4 new.w");
 
 # splat
 var v4sp = hvec4_splat(f64_from(9));
-assert_eq(f64_to(HVec4_x(v4sp)), 9, "v4 splat.x");
-assert_eq(f64_to(HVec4_w(v4sp)), 9, "v4 splat.w");
+assert_eq(HVec4_x(v4sp), f64_from(9), "v4 splat.x");
+assert_eq(HVec4_w(v4sp), f64_from(9), "v4 splat.w");
 
 # ================================================================
 # Vec4 — from_vec3 / xyz roundtrip
@@ -398,16 +398,16 @@ test_group("vec4 from_vec3/xyz");
 
 var v3src = hvec3_new(f64_from(7), f64_from(8), f64_from(9));
 var v4from = hvec4_from_vec3(v3src, F64_ONE);
-assert_eq(f64_to(HVec4_x(v4from)), 7, "v4 from_vec3.x");
-assert_eq(f64_to(HVec4_y(v4from)), 8, "v4 from_vec3.y");
-assert_eq(f64_to(HVec4_z(v4from)), 9, "v4 from_vec3.z");
-assert_eq(f64_to(HVec4_w(v4from)), 1, "v4 from_vec3.w");
+assert_eq(HVec4_x(v4from), f64_from(7), "v4 from_vec3.x");
+assert_eq(HVec4_y(v4from), f64_from(8), "v4 from_vec3.y");
+assert_eq(HVec4_z(v4from), f64_from(9), "v4 from_vec3.z");
+assert_eq(HVec4_w(v4from), f64_from(1), "v4 from_vec3.w");
 
 # roundtrip: xyz(from_vec3(v, w)) = v
 var v3back = hvec4_xyz(v4from);
-assert_eq(f64_to(HVec3_x(v3back)), 7, "v4 xyz roundtrip.x");
-assert_eq(f64_to(HVec3_y(v3back)), 8, "v4 xyz roundtrip.y");
-assert_eq(f64_to(HVec3_z(v3back)), 9, "v4 xyz roundtrip.z");
+assert_eq(HVec3_x(v3back), f64_from(7), "v4 xyz roundtrip.x");
+assert_eq(HVec3_y(v3back), f64_from(8), "v4 xyz roundtrip.y");
+assert_eq(HVec3_z(v3back), f64_from(9), "v4 xyz roundtrip.z");
 
 # ================================================================
 # Vec4 — Arithmetic
@@ -418,25 +418,25 @@ var v4b = hvec4_new(f64_from(5), f64_from(6), f64_from(7), f64_from(8));
 
 # add
 var v4add = hvec4_add(v4a, v4b);
-assert_eq(f64_to(HVec4_x(v4add)), 6, "v4 add.x");
-assert_eq(f64_to(HVec4_y(v4add)), 8, "v4 add.y");
-assert_eq(f64_to(HVec4_z(v4add)), 10, "v4 add.z");
-assert_eq(f64_to(HVec4_w(v4add)), 12, "v4 add.w");
+assert_eq(HVec4_x(v4add), f64_from(6), "v4 add.x");
+assert_eq(HVec4_y(v4add), f64_from(8), "v4 add.y");
+assert_eq(HVec4_z(v4add), f64_from(10), "v4 add.z");
+assert_eq(HVec4_w(v4add), f64_from(12), "v4 add.w");
 
 # sub
 var v4sub = hvec4_sub(v4a, v4b);
-assert_eq(f64_to(HVec4_x(v4sub)), (0 - 4), "v4 sub.x");
-assert_eq(f64_to(HVec4_y(v4sub)), (0 - 4), "v4 sub.y");
+assert_eq(HVec4_x(v4sub), f64_neg(f64_from(4)), "v4 sub.x");
+assert_eq(HVec4_y(v4sub), f64_neg(f64_from(4)), "v4 sub.y");
 
 # scale
 var v4sc = hvec4_scale(v4a, f64_from(2));
-assert_eq(f64_to(HVec4_x(v4sc)), 2, "v4 scale.x");
-assert_eq(f64_to(HVec4_w(v4sc)), 8, "v4 scale.w");
+assert_eq(HVec4_x(v4sc), f64_from(2), "v4 scale.x");
+assert_eq(HVec4_w(v4sc), f64_from(8), "v4 scale.w");
 
 # neg
 var v4neg = hvec4_neg(v4a);
-assert_eq(f64_to(HVec4_x(v4neg)), (0 - 1), "v4 neg.x");
-assert_eq(f64_to(HVec4_w(v4neg)), (0 - 4), "v4 neg.w");
+assert_eq(HVec4_x(v4neg), f64_neg(f64_from(1)), "v4 neg.x");
+assert_eq(HVec4_w(v4neg), f64_neg(f64_from(4)), "v4 neg.w");
 
 # ================================================================
 # Vec4 — Dot, Length, Normalize
@@ -444,16 +444,16 @@ assert_eq(f64_to(HVec4_w(v4neg)), (0 - 4), "v4 neg.w");
 test_group("vec4 dot/length/normalize");
 
 # dot: (1,2,3,4).(5,6,7,8) = 5+12+21+32 = 70
-assert_eq(f64_to(hvec4_dot(v4a, v4b)), 70, "v4 dot");
+assert_eq(hvec4_dot(v4a, v4b), f64_from(70), "v4 dot");
 
 # dot self: 1+4+9+16 = 30
-assert_eq(f64_to(hvec4_dot(v4a, v4a)), 30, "v4 dot self");
+assert_eq(hvec4_dot(v4a, v4a), f64_from(30), "v4 dot self");
 
 # length_sq
-assert_eq(f64_to(hvec4_length_sq(v4a)), 30, "v4 length_sq");
+assert_eq(hvec4_length_sq(v4a), f64_from(30), "v4 length_sq");
 
 # length of (1,0,0,0) = 1
-assert_eq(f64_to(hvec4_length(hvec4_new(F64_ONE, 0, 0, 0))), 1, "v4 length unit");
+assert_eq(hvec4_length(hvec4_new(F64_ONE, 0, 0, 0)), f64_from(1), "v4 length unit");
 # The line above cannot fail for any length() that is right on a unit basis
 # vector -- sqrt(1) == 1 == 1^2, and f64_to TRUNCATES, so anything in [1,2)
 # scores. The normalize round-trip below is also blind to a constant scale
@@ -473,7 +473,7 @@ assert_f64_eq(hvec4_length(v4norm), F64_ONE, "v4 normalize length=1");
 
 # normalize zero returns zero
 var v4norm_z = hvec4_normalize(hvec4_zero());
-assert_eq(f64_to(HVec4_x(v4norm_z)), 0, "v4 normalize zero.x");
+assert_eq(HVec4_x(v4norm_z), f64_from(0), "v4 normalize zero.x");
 
 # ================================================================
 # Quaternion — Identity
@@ -541,13 +541,13 @@ assert_eq(_QT_BAD, 0,
 test_group("quat identity");
 
 var qi = hquat_identity();
-assert_eq(f64_to(HQuat_x(qi)), 0, "qi.x=0");
-assert_eq(f64_to(HQuat_y(qi)), 0, "qi.y=0");
-assert_eq(f64_to(HQuat_z(qi)), 0, "qi.z=0");
-assert_eq(f64_to(HQuat_w(qi)), 1, "qi.w=1");
+assert_eq(HQuat_x(qi), f64_from(0), "qi.x=0");
+assert_eq(HQuat_y(qi), f64_from(0), "qi.y=0");
+assert_eq(HQuat_z(qi), f64_from(0), "qi.z=0");
+assert_eq(HQuat_w(qi), f64_from(1), "qi.w=1");
 
 # identity length = 1
-assert_eq(f64_to(hquat_length(qi)), 1, "qi length=1");
+assert_eq(hquat_length(qi), f64_from(1), "qi length=1");
 
 # identity * identity = identity
 var qii = hquat_mul(qi, qi);
@@ -665,7 +665,7 @@ var qlen_sq = hquat_length_sq(qa);
 assert_f64_eq(qdot_self, qlen_sq, "dot self = len_sq");
 
 # dot identity with identity = 1
-assert_eq(f64_to(hquat_dot(qi, qi)), 1, "qi dot qi = 1");
+assert_eq(hquat_dot(qi, qi), f64_from(1), "qi dot qi = 1");
 
 # ================================================================
 # Quaternion — Slerp
@@ -756,24 +756,24 @@ test_group("mat4 identity");
 var mi = m4_identity();
 
 # diagonal = 1
-assert_eq(f64_to(m4_get(mi, 0, 0)), 1, "I[0,0]=1");
-assert_eq(f64_to(m4_get(mi, 1, 1)), 1, "I[1,1]=1");
-assert_eq(f64_to(m4_get(mi, 2, 2)), 1, "I[2,2]=1");
-assert_eq(f64_to(m4_get(mi, 3, 3)), 1, "I[3,3]=1");
+assert_eq(m4_get(mi, 0, 0), f64_from(1), "I[0,0]=1");
+assert_eq(m4_get(mi, 1, 1), f64_from(1), "I[1,1]=1");
+assert_eq(m4_get(mi, 2, 2), f64_from(1), "I[2,2]=1");
+assert_eq(m4_get(mi, 3, 3), f64_from(1), "I[3,3]=1");
 
 # off-diagonal = 0
-assert_eq(f64_to(m4_get(mi, 0, 1)), 0, "I[0,1]=0");
-assert_eq(f64_to(m4_get(mi, 1, 0)), 0, "I[1,0]=0");
-assert_eq(f64_to(m4_get(mi, 2, 3)), 0, "I[2,3]=0");
-assert_eq(f64_to(m4_get(mi, 3, 2)), 0, "I[3,2]=0");
+assert_eq(m4_get(mi, 0, 1), f64_from(0), "I[0,1]=0");
+assert_eq(m4_get(mi, 1, 0), f64_from(0), "I[1,0]=0");
+assert_eq(m4_get(mi, 2, 3), f64_from(0), "I[2,3]=0");
+assert_eq(m4_get(mi, 3, 2), f64_from(0), "I[3,2]=0");
 
 # I * v = v
 var tv = hvec4_new(f64_from(1), f64_from(2), f64_from(3), f64_from(4));
 var mr = m4_mul_vec4(mi, tv);
-assert_eq(f64_to(HVec4_x(mr)), 1, "I*v .x");
-assert_eq(f64_to(HVec4_y(mr)), 2, "I*v .y");
-assert_eq(f64_to(HVec4_z(mr)), 3, "I*v .z");
-assert_eq(f64_to(HVec4_w(mr)), 4, "I*v .w");
+assert_eq(HVec4_x(mr), f64_from(1), "I*v .x");
+assert_eq(HVec4_y(mr), f64_from(2), "I*v .y");
+assert_eq(HVec4_z(mr), f64_from(3), "I*v .z");
+assert_eq(HVec4_w(mr), f64_from(4), "I*v .w");
 
 # ================================================================
 # Mat4 — Multiplication properties
@@ -782,10 +782,10 @@ test_group("mat4 multiplication");
 
 # I * I = I
 var mii = m4_mul(mi, mi);
-assert_eq(f64_to(m4_get(mii, 0, 0)), 1, "I*I[0,0]=1");
-assert_eq(f64_to(m4_get(mii, 0, 1)), 0, "I*I[0,1]=0");
-assert_eq(f64_to(m4_get(mii, 1, 1)), 1, "I*I[1,1]=1");
-assert_eq(f64_to(m4_get(mii, 3, 3)), 1, "I*I[3,3]=1");
+assert_eq(m4_get(mii, 0, 0), f64_from(1), "I*I[0,0]=1");
+assert_eq(m4_get(mii, 0, 1), f64_from(0), "I*I[0,1]=0");
+assert_eq(m4_get(mii, 1, 1), f64_from(1), "I*I[1,1]=1");
+assert_eq(m4_get(mii, 3, 3), f64_from(1), "I*I[3,3]=1");
 
 # Build a non-trivial matrix via SRT
 var m_srt = m4_from_srt(
@@ -812,14 +812,14 @@ test_group("mat4 get/set/copy");
 
 var m_gs = m4_new();
 m4_set(m_gs, 2, 1, f64_from(42));
-assert_eq(f64_to(m4_get(m_gs, 2, 1)), 42, "set/get [2,1]");
-assert_eq(f64_to(m4_get(m_gs, 0, 0)), 0, "new is zeroed [0,0]");
+assert_eq(m4_get(m_gs, 2, 1), f64_from(42), "set/get [2,1]");
+assert_eq(m4_get(m_gs, 0, 0), f64_from(0), "new is zeroed [0,0]");
 
 # copy is independent
 var m_cp = m4_copy(m_gs);
-assert_eq(f64_to(m4_get(m_cp, 2, 1)), 42, "copy preserves [2,1]");
+assert_eq(m4_get(m_cp, 2, 1), f64_from(42), "copy preserves [2,1]");
 m4_set(m_cp, 2, 1, f64_from(99));
-assert_eq(f64_to(m4_get(m_gs, 2, 1)), 42, "copy is independent");
+assert_eq(m4_get(m_gs, 2, 1), f64_from(42), "copy is independent");
 
 # ================================================================
 # Mat4 — from_cols / col extraction
@@ -831,18 +831,18 @@ var c1 = hvec4_new(0, F64_TWO, 0, 0);
 var c2 = hvec4_new(0, 0, f64_from(3), 0);
 var c3 = hvec4_new(0, 0, 0, f64_from(4));
 var m_fc = m4_from_cols(c0, c1, c2, c3);
-assert_eq(f64_to(m4_get(m_fc, 0, 0)), 1, "from_cols [0,0]");
-assert_eq(f64_to(m4_get(m_fc, 1, 1)), 2, "from_cols [1,1]");
-assert_eq(f64_to(m4_get(m_fc, 2, 2)), 3, "from_cols [2,2]");
-assert_eq(f64_to(m4_get(m_fc, 3, 3)), 4, "from_cols [3,3]");
+assert_eq(m4_get(m_fc, 0, 0), f64_from(1), "from_cols [0,0]");
+assert_eq(m4_get(m_fc, 1, 1), f64_from(2), "from_cols [1,1]");
+assert_eq(m4_get(m_fc, 2, 2), f64_from(3), "from_cols [2,2]");
+assert_eq(m4_get(m_fc, 3, 3), f64_from(4), "from_cols [3,3]");
 
 # col extraction
 var col0 = m4_col(m_fc, 0);
-assert_eq(f64_to(HVec4_x(col0)), 1, "col(0).x");
-assert_eq(f64_to(HVec4_y(col0)), 0, "col(0).y");
+assert_eq(HVec4_x(col0), f64_from(1), "col(0).x");
+assert_eq(HVec4_y(col0), f64_from(0), "col(0).y");
 
 var col3 = m4_col(m_fc, 3);
-assert_eq(f64_to(HVec4_w(col3)), 4, "col(3).w");
+assert_eq(HVec4_w(col3), f64_from(4), "col(3).w");
 
 # ================================================================
 # Mat4 — Transpose
@@ -859,20 +859,20 @@ m4_set(m_asym, 2, 2, f64_from(3));
 m4_set(m_asym, 3, 3, f64_from(4));
 
 var m_t = m4_transpose(m_asym);
-assert_eq(f64_to(m4_get(m_t, 1, 0)), 5, "transpose swaps [0,1]->[1,0]");
-assert_eq(f64_to(m4_get(m_t, 0, 1)), 7, "transpose swaps [1,0]->[0,1]");
-assert_eq(f64_to(m4_get(m_t, 0, 0)), 1, "transpose diag unchanged");
+assert_eq(m4_get(m_t, 1, 0), f64_from(5), "transpose swaps [0,1]->[1,0]");
+assert_eq(m4_get(m_t, 0, 1), f64_from(7), "transpose swaps [1,0]->[0,1]");
+assert_eq(m4_get(m_t, 0, 0), f64_from(1), "transpose diag unchanged");
 
 # transpose of transpose = original
 var m_tt = m4_transpose(m_t);
-assert_eq(f64_to(m4_get(m_tt, 0, 1)), 5, "transpose^2 = original [0,1]");
-assert_eq(f64_to(m4_get(m_tt, 1, 0)), 7, "transpose^2 = original [1,0]");
+assert_eq(m4_get(m_tt, 0, 1), f64_from(5), "transpose^2 = original [0,1]");
+assert_eq(m4_get(m_tt, 1, 0), f64_from(7), "transpose^2 = original [1,0]");
 
 # transpose of identity = identity
 var m_it = m4_transpose(mi);
-assert_eq(f64_to(m4_get(m_it, 0, 0)), 1, "transpose I [0,0]");
-assert_eq(f64_to(m4_get(m_it, 0, 1)), 0, "transpose I [0,1]");
-assert_eq(f64_to(m4_get(m_it, 1, 1)), 1, "transpose I [1,1]");
+assert_eq(m4_get(m_it, 0, 0), f64_from(1), "transpose I [0,0]");
+assert_eq(m4_get(m_it, 0, 1), f64_from(0), "transpose I [0,1]");
+assert_eq(m4_get(m_it, 1, 1), f64_from(1), "transpose I [1,1]");
 
 # ================================================================
 # Mat4 — Determinant
@@ -880,19 +880,19 @@ assert_eq(f64_to(m4_get(m_it, 1, 1)), 1, "transpose I [1,1]");
 test_group("mat4 determinant");
 
 # det(I) = 1
-assert_eq(f64_to(m4_determinant(mi)), 1, "det(I)=1");
+assert_eq(m4_determinant(mi), f64_from(1), "det(I)=1");
 
 # det of a scale matrix = product of scale factors
 # scale(2,3,4) -> det should be 24
 var m_scale = m4_from_srt(hvec3_new(F64_TWO, f64_from(3), f64_from(4)),
   hquat_identity(), hvec3_zero());
 var det_scale = m4_determinant(m_scale);
-assert_eq(f64_to(det_scale), 24, "det(scale 2,3,4)=24");
+assert_eq(det_scale, f64_from(24), "det(scale 2,3,4)=24");
 
 # det of pure translation = 1 (upper-left 3x3 is identity)
 var m_trans = m4_from_srt(hvec3_one(), hquat_identity(),
   hvec3_new(f64_from(5), f64_from(6), f64_from(7)));
-assert_eq(f64_to(m4_determinant(m_trans)), 1, "det(translation)=1");
+assert_eq(m4_determinant(m_trans), f64_from(1), "det(translation)=1");
 
 # det of rotation = 1 (orthogonal matrix)
 var m_rot = m4_from_srt(hvec3_one(), hquat_from_rotation_z(F64_PI_4), hvec3_zero());
@@ -907,9 +907,9 @@ test_group("mat4 inverse");
 
 # inverse of identity = identity
 var m_inv_i = m4_inverse(mi);
-assert_eq(f64_to(m4_get(m_inv_i, 0, 0)), 1, "inv(I)[0,0]=1");
-assert_eq(f64_to(m4_get(m_inv_i, 0, 1)), 0, "inv(I)[0,1]=0");
-assert_eq(f64_to(m4_get(m_inv_i, 3, 3)), 1, "inv(I)[3,3]=1");
+assert_eq(m4_get(m_inv_i, 0, 0), f64_from(1), "inv(I)[0,0]=1");
+assert_eq(m4_get(m_inv_i, 0, 1), f64_from(0), "inv(I)[0,1]=0");
+assert_eq(m4_get(m_inv_i, 3, 3), f64_from(1), "inv(I)[3,3]=1");
 
 # M * M^-1 ~ I for SRT matrix
 var m_test = m4_from_srt(hvec3_new(F64_TWO, f64_from(3), f64_from(4)),
@@ -944,25 +944,25 @@ test_group("mat4 SRT");
 var srt_t = m4_from_srt(hvec3_one(), hquat_identity(),
   hvec3_new(f64_from(2), f64_from(3), f64_from(4)));
 var srt_p = m4_transform_point(srt_t, hvec3_zero());
-assert_eq(f64_to(HVec3_x(srt_p)), 2, "srt translate.x");
-assert_eq(f64_to(HVec3_y(srt_p)), 3, "srt translate.y");
-assert_eq(f64_to(HVec3_z(srt_p)), 4, "srt translate.z");
+assert_eq(HVec3_x(srt_p), f64_from(2), "srt translate.x");
+assert_eq(HVec3_y(srt_p), f64_from(3), "srt translate.y");
+assert_eq(HVec3_z(srt_p), f64_from(4), "srt translate.z");
 
 # Pure scale: (1,1,1) * scale(2,3,4) = (2,3,4)
 var srt_s = m4_from_srt(hvec3_new(F64_TWO, f64_from(3), f64_from(4)),
   hquat_identity(), hvec3_zero());
 var srt_sp = m4_transform_point(srt_s, hvec3_one());
-assert_eq(f64_to(HVec3_x(srt_sp)), 2, "srt scale.x");
-assert_eq(f64_to(HVec3_y(srt_sp)), 3, "srt scale.y");
-assert_eq(f64_to(HVec3_z(srt_sp)), 4, "srt scale.z");
+assert_eq(HVec3_x(srt_sp), f64_from(2), "srt scale.x");
+assert_eq(HVec3_y(srt_sp), f64_from(3), "srt scale.y");
+assert_eq(HVec3_z(srt_sp), f64_from(4), "srt scale.z");
 
 # Identity SRT leaves points unchanged
 var srt_id = m4_from_srt(hvec3_one(), hquat_identity(), hvec3_zero());
 var v_test = hvec3_new(f64_from(7), f64_from(8), f64_from(9));
 var srt_id_p = m4_transform_point(srt_id, v_test);
-assert_eq(f64_to(HVec3_x(srt_id_p)), 7, "srt identity.x");
-assert_eq(f64_to(HVec3_y(srt_id_p)), 8, "srt identity.y");
-assert_eq(f64_to(HVec3_z(srt_id_p)), 9, "srt identity.z");
+assert_eq(HVec3_x(srt_id_p), f64_from(7), "srt identity.x");
+assert_eq(HVec3_y(srt_id_p), f64_from(8), "srt identity.y");
+assert_eq(HVec3_z(srt_id_p), f64_from(9), "srt identity.z");
 
 # ================================================================
 # Mat4 — transform_point vs transform_dir
@@ -974,14 +974,14 @@ var m_td = m4_from_srt(hvec3_one(), hquat_identity(),
 
 # transform_point includes translation
 var tp = m4_transform_point(m_td, hvec3_zero());
-assert_eq(f64_to(HVec3_x(tp)), 10, "transform_point includes translation .x");
-assert_eq(f64_to(HVec3_y(tp)), 20, "transform_point includes translation .y");
+assert_eq(HVec3_x(tp), f64_from(10), "transform_point includes translation .x");
+assert_eq(HVec3_y(tp), f64_from(20), "transform_point includes translation .y");
 
 # transform_dir ignores translation (w=0)
 var td = m4_transform_dir(m_td, hvec3_unit_x());
-assert_eq(f64_to(HVec3_x(td)), 1, "transform_dir no translation .x");
-assert_eq(f64_to(HVec3_y(td)), 0, "transform_dir no translation .y");
-assert_eq(f64_to(HVec3_z(td)), 0, "transform_dir no translation .z");
+assert_eq(HVec3_x(td), f64_from(1), "transform_dir no translation .x");
+assert_eq(HVec3_y(td), f64_from(0), "transform_dir no translation .y");
+assert_eq(HVec3_z(td), f64_from(0), "transform_dir no translation .z");
 
 # ================================================================
 # Mat4 — Perspective
@@ -992,10 +992,10 @@ test_group("mat4 perspective");
 var m_persp = m4_perspective_rh(F64_PI_2, F64_ONE, F64_ONE, f64_from(100));
 
 # [2,3] should be -1 (RH perspective projects z -> -1 in clip.w)
-assert_eq(f64_to(m4_get(m_persp, 2, 3)), (0 - 1), "persp [2,3]=-1");
+assert_eq(m4_get(m_persp, 2, 3), f64_neg(f64_from(1)), "persp [2,3]=-1");
 
 # [3,3] should be 0 (perspective, not ortho)
-assert_eq(f64_to(m4_get(m_persp, 3, 3)), 0, "persp [3,3]=0");
+assert_eq(m4_get(m_persp, 3, 3), f64_from(0), "persp [3,3]=0");
 
 # [0,0] = f/aspect; with fov=pi/2 and aspect=1, f=1/tan(pi/4)=1, so [0,0]~1
 var persp_00 = f64_to(f64_round(f64_mul(m4_get(m_persp, 0, 0), f64_from(1000))));
@@ -1003,7 +1003,7 @@ assert_eq(persp_00, 1000, "persp [0,0]~1 for fov=pi/2 aspect=1");
 
 # perspective_reverse_z: [2,3] should be -1
 var m_prz = m4_perspective_reverse_z(F64_PI_2, F64_ONE, F64_ONE);
-assert_eq(f64_to(m4_get(m_prz, 2, 3)), (0 - 1), "persp_rz [2,3]=-1");
+assert_eq(m4_get(m_prz, 2, 3), f64_neg(f64_from(1)), "persp_rz [2,3]=-1");
 
 # ================================================================
 # Mat4 — Ortho
@@ -1015,13 +1015,13 @@ var m_ortho = m4_ortho_rh(f64_neg(F64_ONE), F64_ONE,
   F64_ONE, f64_from(100));
 
 # ortho [3,3] should be 1 (not 0 like perspective)
-assert_eq(f64_to(m4_get(m_ortho, 3, 3)), 1, "ortho [3,3]=1");
+assert_eq(m4_get(m_ortho, 3, 3), f64_from(1), "ortho [3,3]=1");
 
 # ortho [0,0] = 2/(right-left) = 2/2 = 1
-assert_eq(f64_to(m4_get(m_ortho, 0, 0)), 1, "ortho [0,0]=1");
+assert_eq(m4_get(m_ortho, 0, 0), f64_from(1), "ortho [0,0]=1");
 
 # ortho [1,1] = 2/(top-bottom) = 2/2 = 1
-assert_eq(f64_to(m4_get(m_ortho, 1, 1)), 1, "ortho [1,1]=1");
+assert_eq(m4_get(m_ortho, 1, 1), f64_from(1), "ortho [1,1]=1");
 
 # ================================================================
 # Mat4 — look_at_rh
@@ -1044,7 +1044,7 @@ assert_f64_eq(HVec3_z(la_eye), 0, "look_at eye -> origin .z");
 # Transform origin -> should be at (0,0,-5) in view space (in front of camera)
 var la_origin = m4_transform_point(m_la, hvec3_zero());
 assert_f64_eq(HVec3_x(la_origin), 0, "look_at origin .x~0");
-assert_eq(f64_to(HVec3_z(la_origin)), (0 - 5), "look_at origin .z=-5");
+assert_eq(HVec3_z(la_origin), f64_neg(f64_from(5)), "look_at origin .z=-5");
 
 # look_at should be an orthogonal matrix (det ~ 1 ignoring translation)
 # The upper 3x3 determinant ~ 1 if it is a rotation
@@ -1057,50 +1057,50 @@ test_group("2.7.3: transforms, mat3, vec3 -- the last coverage block");
 # --- Transform2D: translate by (3,4), no rotation, unit scale.
 # t2d_new(pos, rotation, scale) -- three args, pos and scale are HVec2.
 var c73_t2 = t2d_new(hvec2_new(f64_from(3), f64_from(4)), 0, hvec2_new(F64_ONE, F64_ONE));
-assert_eq(f64_to(t2d_pos_x(c73_t2)), 3, "t2d_pos_x = 3");
-assert_eq(f64_to(t2d_pos_y(c73_t2)), 4, "t2d_pos_y = 4");
-assert_eq(f64_to(t2d_rotation(c73_t2)), 0, "t2d_rotation = 0");
+assert_eq(t2d_pos_x(c73_t2), f64_from(3), "t2d_pos_x = 3");
+assert_eq(t2d_pos_y(c73_t2), f64_from(4), "t2d_pos_y = 4");
+assert_eq(t2d_rotation(c73_t2), f64_from(0), "t2d_rotation = 0");
 assert_eq(t2d_scale_x(c73_t2), F64_ONE, "t2d_scale_x = 1");
 assert_eq(t2d_scale_y(c73_t2), F64_ONE, "t2d_scale_y = 1");
 var c73_t2i = t2d_identity();
-assert_eq(f64_to(t2d_pos_x(c73_t2i)), 0, "t2d_identity has no translation");
+assert_eq(t2d_pos_x(c73_t2i), f64_from(0), "t2d_identity has no translation");
 # Applying the identity moves nothing; applying c73_t2 shifts by (3,4).
 var c73_t2p = t2d_apply(c73_t2i, hvec2_new(F64_ONE, F64_TWO));
-assert_eq(f64_to(HVec2_x(c73_t2p)), 1, "t2d_identity fixes x");
+assert_eq(HVec2_x(c73_t2p), f64_from(1), "t2d_identity fixes x");
 var c73_t2q = t2d_apply(c73_t2, hvec2_zero());
-assert_eq(f64_to(HVec2_x(c73_t2q)), 3, "t2d_apply translates x by 3");
-assert_eq(f64_to(HVec2_y(c73_t2q)), 4, "t2d_apply translates y by 4");
+assert_eq(HVec2_x(c73_t2q), f64_from(3), "t2d_apply translates x by 3");
+assert_eq(HVec2_y(c73_t2q), f64_from(4), "t2d_apply translates y by 4");
 # Composing with the identity is a no-op on the translation.
-assert_eq(f64_to(t2d_pos_x(t2d_compose(c73_t2, c73_t2i))), 3, "t2d_compose with identity keeps translation");
+assert_eq(t2d_pos_x(t2d_compose(c73_t2, c73_t2i)), f64_from(3), "t2d_compose with identity keeps translation");
 
 # --- Transform3D accessors and matrices.
 var c73_t3 = t3d_new(hvec3_new(F64_ONE, F64_TWO, f64_from(3)), hquat_identity(), hvec3_one());
-assert_eq(f64_to(HVec3_z(t3d_pos(c73_t3))), 3, "t3d_pos z = 3");
+assert_eq(HVec3_z(t3d_pos(c73_t3)), f64_from(3), "t3d_pos z = 3");
 assert_neq(t3d_rot(c73_t3), 0, "t3d_rot returns the rotation");
-assert_eq(f64_to(HVec3_x(t3d_scale(c73_t3))), 1, "t3d_scale x = 1");
+assert_eq(HVec3_x(t3d_scale(c73_t3)), f64_from(1), "t3d_scale x = 1");
 assert_neq(t3d_to_matrix(c73_t3), 0, "t3d_to_matrix builds a Mat4");
 assert_neq(t3d_inverse_matrix(c73_t3), 0, "t3d_inverse_matrix builds a Mat4");
 # Lerp at the endpoints is exact.
 var c73_t3b = t3d_new(hvec3_new(f64_from(5), 0, 0), hquat_identity(), hvec3_one());
-assert_eq(f64_to(HVec3_x(t3d_pos(t3d_lerp(c73_t3, c73_t3b, 0)))), 1, "t3d_lerp t=0 is a");
-assert_eq(f64_to(HVec3_x(t3d_pos(t3d_lerp(c73_t3, c73_t3b, F64_ONE)))), 5, "t3d_lerp t=1 is b");
+assert_eq(HVec3_x(t3d_pos(t3d_lerp(c73_t3, c73_t3b, 0))), f64_from(1), "t3d_lerp t=0 is a");
+assert_eq(HVec3_x(t3d_pos(t3d_lerp(c73_t3, c73_t3b, F64_ONE))), f64_from(5), "t3d_lerp t=1 is b");
 # remap: [0,10] -> [0,100], so 5 maps to 50.
-assert_eq(f64_to(hisab_remap(f64_from(5), 0, f64_from(10), 0, f64_from(100))), 50,
+assert_eq(hisab_remap(f64_from(5), 0, f64_from(10), 0, f64_from(100)), f64_from(50),
   "hisab_remap midpoint = 50");
 # Euler (0,0,0) is the identity quaternion.
 # hquat_from_euler takes an explicit order argument.
-assert_eq(f64_to(HQuat_w(hquat_from_euler(0, 0, 0, 0))), 1, "hquat_from_euler(0,0,0) has w = 1");
+assert_eq(HQuat_w(hquat_from_euler(0, 0, 0, 0)), f64_from(1), "hquat_from_euler(0,0,0) has w = 1");
 assert_neq(m4_flip_handedness_z(m4_identity()), 0, "m4_flip_handedness_z returns a Mat4");
 
 # --- Mat3
 var c73_m3a = m3_identity();
-assert_eq(f64_to(m3_get(m3_copy(c73_m3a), 1, 1)), 1, "m3_copy preserves the diagonal");
-assert_eq(f64_to(m3_get(m3_add(c73_m3a, c73_m3a), 0, 0)), 2, "m3_add doubles the diagonal");
-assert_eq(f64_to(m3_get(m3_scale(c73_m3a, f64_from(3)), 2, 2)), 3, "m3_scale by 3");
+assert_eq(m3_get(m3_copy(c73_m3a), 1, 1), f64_from(1), "m3_copy preserves the diagonal");
+assert_eq(m3_get(m3_add(c73_m3a, c73_m3a), 0, 0), f64_from(2), "m3_add doubles the diagonal");
+assert_eq(m3_get(m3_scale(c73_m3a, f64_from(3)), 2, 2), f64_from(3), "m3_scale by 3");
 # I * v = v
 var c73_m3v = m3_mul_vec3(c73_m3a, hvec3_new(F64_ONE, F64_TWO, f64_from(3)));
-assert_eq(f64_to(HVec3_z(c73_m3v)), 3, "m3_mul_vec3 by identity keeps v");
-assert_eq(f64_to(HVec3_x(m3_col(c73_m3a, 0))), 1, "m3_col 0 of I is (1,0,0)");
+assert_eq(HVec3_z(c73_m3v), f64_from(3), "m3_mul_vec3 by identity keeps v");
+assert_eq(HVec3_x(m3_col(c73_m3a, 0)), f64_from(1), "m3_col 0 of I is (1,0,0)");
 assert_neq(m3_from_cols(hvec3_unit_x(), hvec3_unit_y(), hvec3_unit_z()), 0, "m3_from_cols builds");
 assert_neq(m3_normal_matrix(m4_identity()), 0, "m3_normal_matrix builds");
 # ||I||_F = sqrt(3)
@@ -1110,9 +1110,9 @@ assert(f64_lt(f64_abs(f64_sub(m3_frobenius(c73_m3a), f64_sqrt(f64_from(3)))), LO
 # --- Vec3 projection / rejection / angle
 var c73_v3a = hvec3_new(f64_from(3), f64_from(4), 0);
 var c73_v3x = hvec3_unit_x();
-assert_eq(f64_to(HVec3_x(hvec3_project(c73_v3a, c73_v3x))), 3, "hvec3_project onto x keeps 3");
-assert_eq(f64_to(HVec3_y(hvec3_project(c73_v3a, c73_v3x))), 0, "hvec3_project onto x drops y");
-assert_eq(f64_to(HVec3_y(hvec3_reject(c73_v3a, c73_v3x))), 4, "hvec3_reject from x keeps y");
+assert_eq(HVec3_x(hvec3_project(c73_v3a, c73_v3x)), f64_from(3), "hvec3_project onto x keeps 3");
+assert_eq(HVec3_y(hvec3_project(c73_v3a, c73_v3x)), f64_from(0), "hvec3_project onto x drops y");
+assert_eq(HVec3_y(hvec3_reject(c73_v3a, c73_v3x)), f64_from(4), "hvec3_reject from x keeps y");
 # Angle between orthogonal unit vectors is pi/2.
 assert(f64_lt(f64_abs(f64_sub(hvec3_angle(hvec3_unit_x(), hvec3_unit_y()), F64_PI_2)),
     LOOSE_TOL) == 1, "hvec3_angle(x, y) = pi/2");
@@ -1121,7 +1121,7 @@ assert(f64_lt(f64_abs(f64_sub(hvec3_angle(hvec3_unit_x(), hvec3_unit_y()), F64_P
 assert_eq(hisab_is_err(0), 0, "hisab_is_err(0) is false");
 assert_eq(hisab_is_err(0 - 5), 1, "hisab_is_err(negative) is true");
 assert(f64_lt(f64_abs(f64_tan(0)), LOOSE_TOL) == 1, "f64_tan(0) = 0");
-assert_eq(f64_to(HComplex_re(u1_to_complex(u1_identity()))), 1, "u1_identity is 1 + 0i");
+assert_eq(HComplex_re(u1_to_complex(u1_identity())), f64_from(1), "u1_identity is 1 + 0i");
 assert_neq(lorentz_from_matrix(m4_identity()), 0, "lorentz_from_matrix accepts a Mat4");
 assert_eq(lorentz_is_valid(lorentz_boost(hvec3_unit_x(), F64_HALF)), 1, "lorentz_boost is valid");
 assert_eq(lorentz_is_valid(lorentz_rotate(hvec3_unit_z(), F64_PI_2)), 1, "lorentz_rotate is valid");

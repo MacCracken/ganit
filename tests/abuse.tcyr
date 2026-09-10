@@ -80,6 +80,20 @@ var _AB_CANARY = 0x5A5A5A5A5A5A5A5A;
 
 var _AB_NAN  = 0x7FF8000000000000;
 var _AB_PINF = 0x7FF0000000000000;
+# ⭐ 2.13.0 — a NAMED tolerance. This suite had none: its only approximate
+# compare spelled the bound as a raw hex literal at the call site
+# (`0x3E45798EE2308C3A`), which is exactly how a tolerance drifts unnoticed
+# between sites. Same value as `LOOSE_TOL_H`/`LOOSE_TOL_M` in the sibling suites.
+var _AB_TOL = 0x3E45798EE2308C3A;   # ~1e-8
+
+# ⚠ Reach for this ONLY where the value is genuinely approximate. Before 2.13.0
+# this suite compared floats through the TRUNCATING `f64_to`, which accepted an
+# absolute error of up to 1.0 — two assertions here were asserting a value that
+# was never true and passing anyway. Exact values get `assert_eq` on the bits.
+fn _ab_f64_eq(a, b, msg) {
+    assert(f64_approx_eq(a, b, _AB_TOL), msg);
+    return 0;
+}
 var _AB_NINF = 0xFFF0000000000000;
 
 # 7.0. Held as a bit pattern rather than as f64_from(7) so the "did the routine
@@ -381,11 +395,11 @@ while (ab_cgr < 2) {
 }
 assert_eq(_ab_clob(ab_cg_can, 8), 0,
   "cmat_set: filling every in-bounds slot of a 2x3 leaves the next block clean");
-assert_eq(f64_to(HComplex_re(cmat_get(ab_cg, 0, 0))), 1, "cmat_get: (0,0) round-trips");
-assert_eq(f64_to(HComplex_re(cmat_get(ab_cg, 1, 2))), 6,
+assert_eq(HComplex_re(cmat_get(ab_cg, 0, 0)), f64_from(1), "cmat_get: (0,0) round-trips");
+assert_eq(HComplex_re(cmat_get(ab_cg, 1, 2)), f64_from(6),
   "cmat_get: the LAST element (1,2) round-trips -- stride is exact at the corner");
-assert_eq(f64_to(HComplex_im(cmat_get(ab_cg, 1, 2))), 2, "cmat_get: last element imag part");
-assert_eq(f64_to(HComplex_re(cmat_get(ab_cg, 1, 0))), 4, "cmat_get: (1,0) crosses one full row");
+assert_eq(HComplex_im(cmat_get(ab_cg, 1, 2)), f64_from(2), "cmat_get: last element imag part");
+assert_eq(HComplex_re(cmat_get(ab_cg, 1, 0)), f64_from(4), "cmat_get: (1,0) crosses one full row");
 assert_eq(_ab_clob(ab_cg_can, 8), 0, "cmat_get: reading every slot touches nothing");
 
 # ================================================================
@@ -590,13 +604,13 @@ assert_eq(calc_partial_derivative(&_ab_fvec, ab_x2, (0 - 2), 0, F64_HALF), 0,
 # gamma_spatial documents "invalid -> zero matrix", not "invalid -> null".
 assert_neq(gamma_spatial((0 - 1)), 0, "gamma_spatial: idx = -1 -> zero matrix, not null");
 assert_neq(gamma_spatial(7), 0, "gamma_spatial: idx = 7 -> zero matrix, not null");
-assert_eq(f64_to(HComplex_re(cmat_get(gamma_spatial((0 - 1)), 0, 0))), 0,
+assert_eq(HComplex_re(cmat_get(gamma_spatial((0 - 1)), 0, 0)), f64_from(0),
   "gamma_spatial: idx = -1 entry (0,0) is 0");
 assert_neq(gell_mann((0 - 1)), 0, "gell_mann: idx = -1 -> allocated matrix, not null");
 assert_neq(gell_mann(8), 0, "gell_mann: idx = 8 (one past lambda_8) -> allocated, not null");
 assert_neq(gell_mann(99), 0, "gell_mann: idx = 99 -> allocated, not null");
-assert_eq(f64_to(su3_structure_constant((0 - 1), 2, 3)), 0, "su3_structure_constant: a = -1 -> 0");
-assert_eq(f64_to(su3_structure_constant(99, 2, 3)), 0, "su3_structure_constant: a = 99 -> 0");
+assert_eq(su3_structure_constant((0 - 1), 2, 3), f64_from(0), "su3_structure_constant: a = -1 -> 0");
+assert_eq(su3_structure_constant(99, 2, 3), f64_from(0), "su3_structure_constant: a = 99 -> 0");
 
 # The tensor symbols are pure switch tables: out-of-range indices must return a
 # well-formed f64 COMPONENT (they are consumed by f64_mul), never a raw i64.
@@ -850,7 +864,7 @@ ganita_mat_set(ab_ep2, 1, 0, F64_ONE);   ganita_mat_set(ab_ep2, 1, 1, f64_from(3
 var ab_ep2_vec = alloc(2 * 8);
 assert_eq(eigen_power(ab_ep2, 2, 1000, ab_ep_val, ab_ep2_vec), HSB_ERR_NONE,
   "eigen_power: [[2,1],[1,3]] converges after the guards");
-assert(f64_approx_eq(load64(ab_ep_val), 0x400CF1BBCDCBFA54, 0x3E45798EE2308C3A) == 1,
+assert(f64_approx_eq(load64(ab_ep_val), 0x400CF1BBCDCBFA54, _AB_TOL) == 1,
   "eigen_power: [[2,1],[1,3]] dominant lambda == 3.618033988749895");
 
 var ab_ly = alloc(8);
@@ -1369,7 +1383,7 @@ var ab_ray = geo_ray_new(hvec3_new(f64_neg(f64_from(5)), 0, 0), hvec3_unit_x());
 
 # A zero-radius sphere is a POINT: the ray through the origin still meets it.
 var ab_zsphere = geo_sphere_new(hvec3_zero(), 0);
-assert_eq(f64_to(geo_ray_sphere(ab_ray, ab_zsphere)), 5,
+assert_eq(geo_ray_sphere(ab_ray, ab_zsphere), f64_from(5),
   "geo_ray_sphere: zero radius is a point hit at t = 5");
 var ab_nsphere = geo_sphere_new(hvec3_zero(), f64_neg(F64_ONE));
 assert_eq(_ab_is_finite(geo_ray_sphere(ab_ray, ab_nsphere)), 1,
@@ -1377,11 +1391,11 @@ assert_eq(_ab_is_finite(geo_ray_sphere(ab_ray, ab_nsphere)), 1,
 
 # A zero-extent AABB is a point; an inverted one (min > max) is empty.
 var ab_zbox = geo_aabb_new(hvec3_zero(), hvec3_zero());
-assert_eq(f64_to(geo_ray_aabb(ab_ray, ab_zbox)), 5, "geo_ray_aabb: zero-extent box hit at t = 5");
+assert_eq(geo_ray_aabb(ab_ray, ab_zbox), f64_from(5), "geo_ray_aabb: zero-extent box hit at t = 5");
 var ab_invbox = geo_aabb_new(hvec3_one(), hvec3_zero());
 assert_eq(_ab_is_finite(geo_ray_aabb(ab_ray, ab_invbox)), 1,
   "geo_ray_aabb: inverted box returns a finite value");
-assert_eq(f64_to(HVec3_x(geo_aabb_size(ab_zbox))), 0, "geo_aabb_size: zero-extent box has size 0");
+assert_eq(HVec3_x(geo_aabb_size(ab_zbox)), f64_from(0), "geo_aabb_size: zero-extent box has size 0");
 assert_eq(geo_aabb_aabb(ab_zbox, ab_zbox), 1, "geo_aabb_aabb: a point overlaps itself");
 
 # Degenerate and collinear triangles: zero area, zero normal, and the
@@ -1389,14 +1403,14 @@ assert_eq(geo_aabb_aabb(ab_zbox, ab_zbox), 1, "geo_aabb_aabb: a point overlaps i
 var ab_dtri = geo_triangle_new(hvec3_zero(), hvec3_zero(), hvec3_zero());
 var ab_ctri = geo_triangle_new(hvec3_zero(), hvec3_unit_x(),
   hvec3_scale(hvec3_unit_x(), F64_TWO));
-assert_eq(f64_to(geo_triangle_area(ab_dtri)), 0, "geo_triangle_area: coincident vertices -> 0");
-assert_eq(f64_to(geo_triangle_area(ab_ctri)), 0, "geo_triangle_area: collinear vertices -> 0");
-assert_eq(f64_to(HVec3_x(geo_triangle_unit_normal(ab_dtri))), 0,
+assert_eq(geo_triangle_area(ab_dtri), f64_from(0), "geo_triangle_area: coincident vertices -> 0");
+assert_eq(geo_triangle_area(ab_ctri), f64_from(0), "geo_triangle_area: collinear vertices -> 0");
+assert_eq(HVec3_x(geo_triangle_unit_normal(ab_dtri)), f64_from(0),
   "geo_triangle_unit_normal: degenerate -> zero vector, not NaN");
 assert_eq(_ab_is_nan(HVec3_x(geo_triangle_unit_normal(ab_ctri))), 0,
   "geo_triangle_unit_normal: collinear -> not NaN");
-assert_eq(f64_to(geo_ray_triangle(ab_ray, ab_dtri)), 0, "geo_ray_triangle: degenerate -> miss");
-assert_eq(f64_to(geo_ray_triangle(ab_ray, ab_ctri)), 0, "geo_ray_triangle: collinear -> miss");
+assert_eq(geo_ray_triangle(ab_ray, ab_dtri), f64_from(0), "geo_ray_triangle: degenerate -> miss");
+assert_eq(geo_ray_triangle(ab_ray, ab_ctri), f64_from(0), "geo_ray_triangle: collinear -> miss");
 assert_eq(_ab_is_nan(HVec3_x(geo_barycentric_coords(ab_dtri, hvec3_zero()))), 0,
   "geo_barycentric_coords: degenerate -> centroid weights, not NaN");
 assert_eq(_ab_is_nan(HVec3_x(geo_closest_point_on_triangle(ab_dtri, hvec3_one()))), 0,
@@ -1404,7 +1418,7 @@ assert_eq(_ab_is_nan(HVec3_x(geo_closest_point_on_triangle(ab_dtri, hvec3_one())
 
 # Zero-length segments, zero-radius capsules, zero-direction rays.
 var ab_zseg = geo_segment_new(hvec3_one(), hvec3_one());
-assert_eq(f64_to(geo_segment_length(ab_zseg)), 0, "geo_segment_length: coincident endpoints -> 0");
+assert_eq(geo_segment_length(ab_zseg), f64_from(0), "geo_segment_length: coincident endpoints -> 0");
 assert_eq(_ab_is_nan(HVec3_x(geo_segment_direction(ab_zseg))), 0,
   "geo_segment_direction: zero length -> not NaN");
 assert_eq(_ab_is_nan(geo_segment_distance_to_point(ab_zseg, hvec3_zero())), 0,
@@ -1418,7 +1432,7 @@ var ab_zray = geo_ray_new(hvec3_zero(), hvec3_zero());
 assert_eq(_ab_is_nan(geo_ray_sphere(ab_zray, ab_zsphere)), 0,
   "geo_ray_sphere: zero-direction ray -> not NaN");
 var ab_zplane = geo_plane_from_point_normal(hvec3_zero(), hvec3_zero());
-assert_eq(f64_to(geo_plane_signed_distance(ab_zplane, hvec3_one())), 0,
+assert_eq(geo_plane_signed_distance(ab_zplane, hvec3_one()), f64_from(0),
   "geo_plane_signed_distance: zero normal -> 0");
 assert_eq(_ab_is_nan(HVec3_x(geo_closest_point_on_plane(ab_zplane, hvec3_one()))), 0,
   "geo_closest_point_on_plane: zero normal -> finite");
@@ -1441,11 +1455,11 @@ assert_eq(_ab_is_nan(HVec3_x(geo_aabb_center(ab_infbox))), 1,
   "geo_aabb_center: (-inf + inf) * 0.5 is NaN, and is reported as such");
 assert_eq(_ab_is_nan(HVec3_x(hvec3_normalize(hvec3_splat(_AB_NAN)))), 1,
   "hvec3_normalize: NaN in, NaN out (no silent zeroing)");
-assert_eq(f64_to(HVec3_x(hvec3_normalize(hvec3_zero()))), 0,
+assert_eq(HVec3_x(hvec3_normalize(hvec3_zero())), f64_from(0),
   "hvec3_normalize: zero vector -> zero, not NaN");
-assert_eq(f64_to(HVec2_x(hvec2_normalize(hvec2_zero()))), 0, "hvec2_normalize: zero -> zero");
-assert_eq(f64_to(HVec4_x(hvec4_normalize(hvec4_zero()))), 0, "hvec4_normalize: zero -> zero");
-assert_eq(f64_to(HQuat_w(hquat_normalize(hquat_new(0, 0, 0, 0)))), 1,
+assert_eq(HVec2_x(hvec2_normalize(hvec2_zero())), f64_from(0), "hvec2_normalize: zero -> zero");
+assert_eq(HVec4_x(hvec4_normalize(hvec4_zero())), f64_from(0), "hvec4_normalize: zero -> zero");
+assert_eq(HQuat_w(hquat_normalize(hquat_new(0, 0, 0, 0))), f64_from(1),
   "hquat_normalize: zero quaternion -> identity, not NaN");
 
 test_group("abuse/geometry: singular matrices and degenerate transforms");
@@ -1454,23 +1468,23 @@ test_group("abuse/geometry: singular matrices and degenerate transforms");
 # must still return an allocated matrix rather than fault.
 assert_eq(m3_get(m3_inverse(m3_new()), 0, 0), F64_ONE, "m3_inverse: singular -> identity[0][0]");
 assert_eq(m3_get(m3_inverse(m3_new()), 1, 1), F64_ONE, "m3_inverse: singular -> identity[1][1]");
-assert_eq(f64_to(m3_determinant(m3_new())), 0, "m3_determinant: zero matrix -> 0");
+assert_eq(m3_determinant(m3_new()), f64_from(0), "m3_determinant: zero matrix -> 0");
 assert_neq(m4_inverse(m4_new()), 0, "m4_inverse: singular still returns an allocated matrix");
-assert_eq(f64_to(m4_determinant(m4_new())), 0, "m4_determinant: zero matrix -> 0");
+assert_eq(m4_determinant(m4_new()), f64_from(0), "m4_determinant: zero matrix -> 0");
 assert_neq(m4_perspective_rh(0, 0, 0, 0), 0, "m4_perspective_rh: all-zero args allocate");
 assert_neq(m4_ortho_rh(0, 0, 0, 0, 0, 0), 0, "m4_ortho_rh: all-zero args allocate");
 assert_neq(m4_look_at_rh(hvec3_zero(), hvec3_zero(), hvec3_zero()), 0,
   "m4_look_at_rh: eye == target == up allocates");
 assert_neq(hquat_inverse(hquat_new(0, 0, 0, 0)), 0, "hquat_inverse: zero quaternion allocates");
-assert_eq(f64_to(matrix_condition_number(ganita_mat_new(3, 3))), (0 - 1),
+assert_eq(matrix_condition_number(ganita_mat_new(3, 3)), f64_neg(f64_from(1)),
   "matrix_condition_number: singular -> -1 sentinel");
 
 # A zero-scale transform is the rank-collapse case every renderer hits.
 var ab_t3 = t3d_new(hvec3_zero(), hquat_identity(), hvec3_zero());
 assert_neq(t3d_inverse_matrix(ab_t3), 0, "t3d_inverse_matrix: zero scale returns a matrix");
-assert_eq(f64_to(HVec3_x(t3d_apply(ab_t3, hvec3_one()))), 0, "t3d_apply: zero scale collapses to 0");
+assert_eq(HVec3_x(t3d_apply(ab_t3, hvec3_one())), f64_from(0), "t3d_apply: zero scale collapses to 0");
 var ab_t2 = t2d_new(hvec2_zero(), 0, hvec2_zero());
-assert_eq(f64_to(HVec2_x(t2d_apply(ab_t2, hvec2_one()))), 0, "t2d_apply: zero scale collapses to 0");
+assert_eq(HVec2_x(t2d_apply(ab_t2, hvec2_one())), f64_from(0), "t2d_apply: zero scale collapses to 0");
 
 # A zero-area viewport is the window-minimised case.
 var ab_ro = alloc(8);
@@ -2031,11 +2045,11 @@ assert_eq(_ab_clob(ab_toi_can, 16), 0, "time_of_impact: out canary clean");
 
 # SDF primitives with degenerate parameters are pure arithmetic, but a NaN here
 # poisons every downstream ray-march, so pin the finite cases.
-assert_eq(f64_to(sdf_sphere(hvec3_zero(), hvec3_zero(), 0)), 0, "sdf_sphere: zero radius at centre");
-assert_eq(f64_to(sdf_box(hvec3_zero(), hvec3_zero(), hvec3_zero())), 0, "sdf_box: zero half-extents");
-assert_eq(f64_to(sdf_union(0, F64_ONE)), 0, "sdf_union: min of 0 and 1");
-assert_eq(f64_to(sdf_intersection(0, F64_ONE)), 1, "sdf_intersection: max of 0 and 1");
-assert_eq(f64_to(sdf_subtraction(0, F64_ONE)), 0, "sdf_subtraction: max(-d1, d2) at 0, 1");
+assert_eq(sdf_sphere(hvec3_zero(), hvec3_zero(), 0), f64_from(0), "sdf_sphere: zero radius at centre");
+assert_eq(sdf_box(hvec3_zero(), hvec3_zero(), hvec3_zero()), f64_from(0), "sdf_box: zero half-extents");
+assert_eq(sdf_union(0, F64_ONE), f64_from(0), "sdf_union: min of 0 and 1");
+assert_eq(sdf_intersection(0, F64_ONE), f64_from(1), "sdf_intersection: max of 0 and 1");
+assert_eq(sdf_subtraction(0, F64_ONE), f64_from(0), "sdf_subtraction: max(-d1, d2) at 0, 1");
 
 # A zero-LENGTH capsule has no axis to project onto, and sdf_smooth_union's
 # blend factor divides by k. Both are 0/0: they answer NaN rather than faulting
@@ -2185,45 +2199,53 @@ test_group("abuse: colour pipeline with out-of-gamut, zero-alpha and non-finite 
 
 assert_eq(srgb_to_linear(0), 0, "srgb_to_linear: 0 -> 0");
 assert_eq(linear_to_srgb(0), 0, "linear_to_srgb: 0 -> 0");
-assert_eq(f64_to(srgb_to_linear(f64_neg(F64_ONE))), 0,
-  "srgb_to_linear: -1 stays in the linear segment, no negative pow");
+# ⛔ 2.13.0 — THIS ASSERTION WAS NEVER TRUE. It claimed the result is 0; the
+# result is **-0.07739938080495357**, and `f64_to` truncated it to 0 so the test
+# passed for the whole life of the file. The CLAIM it was making is correct —
+# -1 does stay in the linear segment rather than reaching a negative `pow` — and
+# that claim is exactly `-1 / 12.92`. Now asserted as the value the branch
+# actually computes, so the branch is pinned instead of merely not-crashing.
+# [measured: scratch harness, not reproducible in-tree, 2026-09-09; cycc 6.6.2]
+assert_eq(srgb_to_linear(f64_neg(F64_ONE)),
+  f64_div(f64_neg(f64_from(100)), f64_from(1292)),
+  "srgb_to_linear: -1 -> -1/12.92, the linear segment, no negative pow");
 assert_eq(_ab_is_finite(linear_to_srgb(f64_neg(F64_ONE))), 1,
   "linear_to_srgb: -1 gives a finite (out-of-range) value, not NaN");
 assert_eq(f64_to(f64_round(f64_mul(linear_to_srgb(f64_neg(F64_ONE)), f64_from(100)))), (0 - 1292),
   "linear_to_srgb: -1 -> -12.92 (the linear-segment slope), deterministically");
 assert_eq(_ab_is_nan(srgb_to_linear(_AB_NAN)), 1, "srgb_to_linear: NaN propagates");
-assert_eq(f64_to(HVec3_x(srgb_to_linear_vec3(hvec3_zero()))), 0, "srgb_to_linear_vec3: 0 -> 0");
-assert_eq(f64_to(HVec3_x(linear_to_srgb_vec3(hvec3_zero()))), 0, "linear_to_srgb_vec3: 0 -> 0");
-assert_eq(f64_to(HVec3_x(lerp_srgb_vec3(hvec3_zero(), hvec3_one(), 0))), 0,
+assert_eq(HVec3_x(srgb_to_linear_vec3(hvec3_zero())), f64_from(0), "srgb_to_linear_vec3: 0 -> 0");
+assert_eq(HVec3_x(linear_to_srgb_vec3(hvec3_zero())), f64_from(0), "linear_to_srgb_vec3: 0 -> 0");
+assert_eq(HVec3_x(lerp_srgb_vec3(hvec3_zero(), hvec3_one(), 0)), f64_from(0),
   "lerp_srgb_vec3: t = 0 returns the first endpoint");
 
 # Zero alpha is the degenerate case of the premultiplied representation: the
 # un-premultiply divides by it.
-assert_eq(f64_to(HVec4_x(premultiply_alpha(F64_ONE, F64_ONE, F64_ONE, 0))), 0,
+assert_eq(HVec4_x(premultiply_alpha(F64_ONE, F64_ONE, F64_ONE, 0)), f64_from(0),
   "premultiply_alpha: alpha 0 zeroes the colour");
-assert_eq(f64_to(HVec4_x(unpremultiply_alpha(F64_ONE, F64_ONE, F64_ONE, 0))), 0,
+assert_eq(HVec4_x(unpremultiply_alpha(F64_ONE, F64_ONE, F64_ONE, 0)), f64_from(0),
   "unpremultiply_alpha: alpha 0 -> 0, not a division by zero");
-assert_eq(f64_to(HVec4_w(unpremultiply_alpha(F64_ONE, F64_ONE, F64_ONE, 0))), 0,
+assert_eq(HVec4_w(unpremultiply_alpha(F64_ONE, F64_ONE, F64_ONE, 0)), f64_from(0),
   "unpremultiply_alpha: alpha 0 -> alpha 0");
-assert_eq(f64_to(HVec4_w(composite_src_over(0, 0, 0, 0, 0, 0, 0, 0))), 0,
+assert_eq(HVec4_w(composite_src_over(0, 0, 0, 0, 0, 0, 0, 0)), f64_from(0),
   "composite_src_over: two fully transparent operands -> transparent");
-assert_eq(f64_to(HVec4_w(composite_dst_over(0, 0, 0, 0, 0, 0, 0, 0))), 0,
+assert_eq(HVec4_w(composite_dst_over(0, 0, 0, 0, 0, 0, 0, 0)), f64_from(0),
   "composite_dst_over: two fully transparent operands -> transparent");
-assert_eq(f64_to(HVec4_w(composite_src_in(0, 0, 0, 0, 0, 0, 0, 0))), 0,
+assert_eq(HVec4_w(composite_src_in(0, 0, 0, 0, 0, 0, 0, 0)), f64_from(0),
   "composite_src_in: two fully transparent operands -> transparent");
-assert_eq(f64_to(HVec4_w(composite_dst_in(0, 0, 0, 0, 0, 0, 0, 0))), 0,
+assert_eq(HVec4_w(composite_dst_in(0, 0, 0, 0, 0, 0, 0, 0)), f64_from(0),
   "composite_dst_in: two fully transparent operands -> transparent");
-assert_eq(f64_to(HVec4_w(composite_src_out(0, 0, 0, 0, 0, 0, 0, 0))), 0,
+assert_eq(HVec4_w(composite_src_out(0, 0, 0, 0, 0, 0, 0, 0)), f64_from(0),
   "composite_src_out: two fully transparent operands -> transparent");
-assert_eq(f64_to(HVec4_w(composite_dst_out(0, 0, 0, 0, 0, 0, 0, 0))), 0,
+assert_eq(HVec4_w(composite_dst_out(0, 0, 0, 0, 0, 0, 0, 0)), f64_from(0),
   "composite_dst_out: two fully transparent operands -> transparent");
-assert_eq(f64_to(HVec4_w(composite_xor(F64_ONE, 0, 0, F64_ONE, 0, 0, F64_ONE, F64_ONE))), 0,
+assert_eq(HVec4_w(composite_xor(F64_ONE, 0, 0, F64_ONE, 0, 0, F64_ONE, F64_ONE)), f64_from(0),
   "composite_xor: two fully opaque operands cancel to alpha 0");
-assert_eq(f64_to(HVec4_w(composite_plus(F64_ONE, 0, 0, F64_ONE, 0, 0, F64_ONE, F64_ONE))), 1,
+assert_eq(HVec4_w(composite_plus(F64_ONE, 0, 0, F64_ONE, 0, 0, F64_ONE, F64_ONE)), f64_from(1),
   "composite_plus: alpha saturates at 1 rather than summing to 2");
 
-assert_eq(f64_to(HVec3_x(tonemap_reinhard(0, 0, 0))), 0, "tonemap_reinhard: black stays black");
-assert_eq(f64_to(HVec3_x(tonemap_aces(0, 0, 0))), 0, "tonemap_aces: black stays black");
+assert_eq(HVec3_x(tonemap_reinhard(0, 0, 0)), f64_from(0), "tonemap_reinhard: black stays black");
+assert_eq(HVec3_x(tonemap_aces(0, 0, 0)), f64_from(0), "tonemap_aces: black stays black");
 assert_eq(_ab_is_nan(HVec3_x(tonemap_reinhard(_AB_NAN, _AB_NAN, _AB_NAN))), 1,
   "tonemap_reinhard: NaN propagates rather than clamping to a plausible colour");
 
@@ -2245,7 +2267,7 @@ assert_eq(f64_to(f64_round(f64_mul(ev100_to_exposure(0), f64_from(100)))), 83,
 # near == far collapses the depth range; the reciprocal is 0/0.
 assert_eq(_ab_is_nan(linearize_depth(F64_HALF, 0, 0)), 1,
   "linearize_depth: near == far == 0 -> NaN, not a fabricated depth");
-assert_eq(f64_to(linearize_depth_reverse_z(0, F64_ONE)), 0,
+assert_eq(linearize_depth_reverse_z(0, F64_ONE), f64_from(0),
   "linearize_depth_reverse_z: ndc 0 -> 0");
 
 var ab_shc = alloc(9 * 8);
@@ -2256,8 +2278,31 @@ while (ab_shi < 9) {
     ab_shi = ab_shi + 1;
 }
 assert_neq(sh_eval_l2(hvec3_zero()), 0, "sh_eval_l2: a zero direction still allocates 9 bands");
-assert_eq(f64_to(sh_evaluate_l2(ab_shc, hvec3_zero())), 0,
-  "sh_evaluate_l2: a zero direction sums to the band-0 term only");
+# ⛔ 2.13.0 — THIS ASSERTION WAS NEVER TRUE, AND ITS MESSAGE WAS WRONG TOO. It
+# claimed 0; the value is **-0.033296773478641906**, which `f64_to` truncated to
+# 0 for the life of the file. Measured what actually happens, rather than
+# re-asserting the message: with a zero direction `sh_eval_l2` leaves **two**
+# bands nonzero, not one --
+#     band 0 (Y00)  =  0.2820947917738781   = 1/(2*sqrt(pi)), a constant
+#     band 6 (Y20)  = -0.31539156525252     = 0.315392*(3z^2 - 1) at z = 0
+# and every other band is exactly 0. Their sum is the -0.0333 above. So "sums to
+# the band-0 term only" was false: Y20 carries a constant term that survives a
+# zero direction. The maths is correct; the claim about it was not.
+# ⭐ Asserted as the PROPERTY (exactly two nonzero bands, and the sum of those two)
+# rather than as a magic constant, so it fails if a third band ever leaks in or if
+# either normalisation drifts.
+# [measured: scratch harness, not reproducible in-tree, 2026-09-09; cycc 6.6.2]
+var ab_shz = sh_eval_l2(hvec3_zero());
+var ab_shnz = 0;
+var ab_shk = 0;
+while (ab_shk < 9) {
+    if (load64(ab_shz + ab_shk * 8) != 0) { ab_shnz = ab_shnz + 1; }
+    ab_shk = ab_shk + 1;
+}
+assert_eq(ab_shnz, 2, "sh_eval_l2: a zero direction leaves exactly TWO nonzero bands (Y00 and Y20)");
+assert(f64_approx_eq(sh_evaluate_l2(ab_shc, hvec3_zero()),
+    f64_add(load64(ab_shz + 0 * 8), load64(ab_shz + 6 * 8)), _AB_TOL) == 1,
+  "sh_evaluate_l2: a zero direction sums Y00 + Y20, not Y00 alone");
 assert_eq(_ab_is_nan(sh_evaluate_l2(ab_shc, hvec3_splat(_AB_NAN))), 1,
   "sh_evaluate_l2: NaN direction propagates");
 assert_eq(_ab_clob(ab_shc_can, 16), 0,
@@ -2266,7 +2311,7 @@ assert_eq(_ab_clob(ab_shc_can, 16), 0,
 test_group("abuse: f64 utility singular points and error-code classification");
 
 assert_eq(f64_fmod(f64_from(7), 0), 0, "f64_fmod: y = 0 -> 0, not a division by zero");
-assert_eq(f64_to(f64_fmod(f64_neg(f64_from(7)), f64_from(3))), (0 - 1),
+assert_eq(f64_fmod(f64_neg(f64_from(7)), f64_from(3)), f64_neg(f64_from(1)),
   "f64_fmod: fmod(-7, 3) = -1 -- sign of the DIVIDEND (trunc), not floor");
 
 # copysign is defined on the SIGN BIT, so it has to work for -0.0 (which compares
@@ -2356,9 +2401,9 @@ assert_eq(num_newton(&_ab_f_x2, &_ab_dg_dy, F64_ONE, EPSILON_F64, (0 - 9), ab_ro
 test_group("abuse: interval endpoints out of order, NaN and unbounded");
 
 var ab_rev = ivl_new(F64_TWO, F64_ONE);
-assert_eq(f64_to(Interval_lo(ab_rev)), 1, "ivl_new: (2, 1) normalises lo to 1");
-assert_eq(f64_to(Interval_hi(ab_rev)), 2, "ivl_new: (2, 1) normalises hi to 2");
-assert_eq(f64_to(ivl_width(ivl_point(f64_from(7)))), 0, "ivl_width: a point has width 0");
+assert_eq(Interval_lo(ab_rev), f64_from(1), "ivl_new: (2, 1) normalises lo to 1");
+assert_eq(Interval_hi(ab_rev), f64_from(2), "ivl_new: (2, 1) normalises hi to 2");
+assert_eq(ivl_width(ivl_point(f64_from(7))), f64_from(0), "ivl_width: a point has width 0");
 assert_eq(_ab_is_nan(ivl_width(ivl_new(_AB_NAN, _AB_NAN))), 1,
   "ivl_width: a NaN interval reports a NaN width rather than a fake number");
 
@@ -2368,8 +2413,8 @@ var ab_negsqrt = ivl_sqrt(ivl_new(f64_neg(f64_from(4)), f64_neg(F64_ONE)));
 assert_eq(Interval_lo(ab_negsqrt), 0, "ivl_sqrt: wholly negative -> lo = 0, not NaN");
 assert_eq(Interval_hi(ab_negsqrt), 0, "ivl_sqrt: wholly negative -> hi = 0, not NaN");
 var ab_strad = ivl_sqrt(ivl_new(f64_neg(f64_from(4)), f64_from(4)));
-assert_eq(f64_to(Interval_lo(ab_strad)), 0, "ivl_sqrt: straddling zero clamps lo to 0");
-assert_eq(f64_to(Interval_hi(ab_strad)), 2, "ivl_sqrt: straddling zero keeps hi = 2");
+assert_eq(Interval_lo(ab_strad), f64_from(0), "ivl_sqrt: straddling zero clamps lo to 0");
+assert_eq(Interval_hi(ab_strad), f64_from(2), "ivl_sqrt: straddling zero keeps hi = 2");
 
 # Division by the point 0 is the empty set; the hull of the empty set is entire.
 var ab_div0 = ivl_div(ivl_point(F64_ONE), ivl_point(0));
@@ -2379,7 +2424,7 @@ assert_eq(ivl_contains(ivl_new(_AB_NINF, _AB_PINF), f64_from(1000000)), 1,
   "ivl_contains: the entire interval contains a large finite value");
 assert_eq(ivl_overlaps(ivl_point(0), ivl_point(F64_ONE)), 0,
   "ivl_overlaps: disjoint points do not overlap");
-assert_eq(f64_to(Interval_lo(ivl_mul(ivl_point(0), ivl_new(F64_ONE, _AB_PINF)))), 0,
+assert_eq(Interval_lo(ivl_mul(ivl_point(0), ivl_new(F64_ONE, _AB_PINF))), f64_from(0),
   "ivl_mul: [0,0] * [1,+inf) -> [0,0], not NaN");
 
 # ================================================================
@@ -2387,14 +2432,14 @@ assert_eq(f64_to(Interval_lo(ivl_mul(ivl_point(0), ivl_new(F64_ONE, _AB_PINF))))
 # ================================================================
 test_group("abuse: complex and dual-number singular points");
 
-assert_eq(f64_to(HComplex_re(cx_div(cx_one(), cx_zero()))), 0, "cx_div: by zero -> 0, not NaN");
-assert_eq(f64_to(HComplex_im(cx_div(cx_one(), cx_zero()))), 0, "cx_div: by zero -> im 0");
-assert_eq(f64_to(HComplex_re(cx_inv(cx_zero()))), 0, "cx_inv: of zero -> 0");
-assert_eq(f64_to(cx_arg(cx_zero())), 0, "cx_arg: of zero -> 0");
-assert_eq(f64_to(HComplex_re(cx_sqrt(cx_zero()))), 0, "cx_sqrt: of zero -> 0");
-assert_eq(f64_to(HComplex_re(cx_powf(cx_zero(), 0))), 0, "cx_powf: 0^0 -> re 0 (documented)");
+assert_eq(HComplex_re(cx_div(cx_one(), cx_zero())), f64_from(0), "cx_div: by zero -> 0, not NaN");
+assert_eq(HComplex_im(cx_div(cx_one(), cx_zero())), f64_from(0), "cx_div: by zero -> im 0");
+assert_eq(HComplex_re(cx_inv(cx_zero())), f64_from(0), "cx_inv: of zero -> 0");
+assert_eq(cx_arg(cx_zero()), f64_from(0), "cx_arg: of zero -> 0");
+assert_eq(HComplex_re(cx_sqrt(cx_zero())), f64_from(0), "cx_sqrt: of zero -> 0");
+assert_eq(HComplex_re(cx_powf(cx_zero(), 0)), f64_from(0), "cx_powf: 0^0 -> re 0 (documented)");
 assert_eq(cx_is_zero(cx_zero(), EPSILON_F64), 1, "cx_is_zero: exact zero");
-assert_eq(f64_to(HComplex_re(cx_exp(cx_zero()))), 1, "cx_exp: exp(0) = 1");
+assert_eq(HComplex_re(cx_exp(cx_zero())), f64_from(1), "cx_exp: exp(0) = 1");
 
 # exp(-inf + 0i) is the product of a 0 magnitude with cos/sin of the angle.
 #
@@ -2422,11 +2467,11 @@ assert_eq(HComplex_im(cx_exp(cx_new(_AB_NINF, 0))), 0,
 assert_eq(HComplex_re(cx_exp(cx_new(_AB_PINF, 0))), _AB_PINF,
   "cx_exp: exp(+inf) -> +inf -- discriminates the IEEE limit from a blanket zero guard");
 
-assert_eq(f64_to(Dual_deriv(dual_div(dual_var(F64_ONE), dual_const(0)))), 0,
+assert_eq(Dual_deriv(dual_div(dual_var(F64_ONE), dual_const(0))), f64_from(0),
   "dual_div: by a zero constant -> derivative 0, not NaN");
-assert_eq(f64_to(Dual_deriv(dual_sqrt(dual_var(0)))), 0, "dual_sqrt: at 0 -> derivative 0");
-assert_eq(f64_to(Dual_deriv(dual_ln(dual_var(0)))), 0, "dual_ln: at 0 -> derivative 0");
-assert_eq(f64_to(Dual_deriv(dual_abs(dual_var(0)))), 1,
+assert_eq(Dual_deriv(dual_sqrt(dual_var(0))), f64_from(0), "dual_sqrt: at 0 -> derivative 0");
+assert_eq(Dual_deriv(dual_ln(dual_var(0))), f64_from(0), "dual_ln: at 0 -> derivative 0");
+assert_eq(Dual_deriv(dual_abs(dual_var(0))), f64_from(1),
   "dual_abs: at the kink picks the right-hand derivative, deterministically");
 # 0^0 IS NOW 1, THE CONVENTIONAL VALUE -- changed in 2.11.0, and this assertion
 # is the record of why the change is an improvement rather than a regression.
@@ -2446,14 +2491,14 @@ assert_eq(f64_to(Dual_deriv(dual_abs(dual_var(0)))), 1,
 # it did, NOT a description of today's stdlib. The repeated-multiplication path
 # still earns its place, on precision rather than domain -- see the group
 # "2.11.2 stdlib: the f64_pow domain moved under us" in tests/modules.tcyr.
-assert_eq(f64_to(Dual_val(dual_pow(dual_var(0), 0))), 1, "dual_pow: 0^0 -> 1, the conventional value");
+assert_eq(Dual_val(dual_pow(dual_var(0), 0)), f64_from(1), "dual_pow: 0^0 -> 1, the conventional value");
 # ⚠ "(f64_pow cannot take a negative base)" was true of ganita 1.0.4 and is FALSE
 # of 1.1.4 (cyrius 6.5.33), which fixed it upstream. The assertion is unchanged and
 # still discriminating: the stdlib path now returns -7.99999999999999982, which
 # f64_to TRUNCATES to -7, so this still fails if _ad_pow's exact integer path goes.
-assert_eq(f64_to(Dual_val(dual_pow(dual_var(f64_neg(F64_TWO)), f64_from(3)))), 0 - 8,
+assert_eq(Dual_val(dual_pow(dual_var(f64_neg(F64_TWO)), f64_from(3))), f64_neg(f64_from(8)),
   "dual_pow: (-2)^3 -> -8 exactly");
-assert_eq(f64_to(Dual_deriv(dual_pow(dual_var(f64_neg(F64_TWO)), f64_from(3)))), 12,
+assert_eq(Dual_deriv(dual_pow(dual_var(f64_neg(F64_TWO)), f64_from(3))), f64_from(12),
   "dual_pow: d/dx x^3 at -2 -> 12, not NaN");
 # ⚠ THIS PAIR NO LONGER DISCRIMINATES, AND THAT IS RECORDED RATHER THAN QUIETLY
 # LEFT. The message above used to end "(truncation-discriminating: the stdlib path
@@ -2478,17 +2523,17 @@ assert_eq(f64_to(f64_round(Dual_val(dual_pow(dual_var(F64_TWO), f64_from(3))))),
 test_group("abuse: Lie-group identity and zero-generator edge cases");
 
 assert_neq(su2_from_axis_angle(hvec3_zero(), 0), 0, "su2_from_axis_angle: zero axis allocates");
-assert_eq(f64_to(HQuat_w(su2_to_quat(su2_from_axis_angle(hvec3_zero(), 0)))), 1,
+assert_eq(HQuat_w(su2_to_quat(su2_from_axis_angle(hvec3_zero(), 0))), f64_from(1),
   "su2_from_axis_angle: zero axis, zero angle -> identity");
 assert_neq(su2_log(su2_identity()), 0, "su2_log: identity returns a generator, not null");
-assert_eq(f64_to(HVec3_x(su2_log(su2_identity()))), 0, "su2_log: identity -> zero generator");
+assert_eq(HVec3_x(su2_log(su2_identity())), f64_from(0), "su2_log: identity -> zero generator");
 assert_neq(so3_exp(hvec3_zero()), 0, "so3_exp: zero generator allocates");
-assert_eq(f64_to(m3_get(so3_exp(hvec3_zero()), 0, 0)), 1, "so3_exp: zero generator -> identity");
-assert_eq(f64_to(HVec3_x(so3_log(m3_identity()))), 0, "so3_log: identity -> zero generator");
+assert_eq(m3_get(so3_exp(hvec3_zero()), 0, 0), f64_from(1), "so3_exp: zero generator -> identity");
+assert_eq(HVec3_x(so3_log(m3_identity())), f64_from(0), "so3_log: identity -> zero generator");
 assert_neq(lorentz_boost(hvec3_zero(), F64_ONE), 0, "lorentz_boost: zero direction allocates");
 assert_eq(lorentz_is_valid(m4_new()), 0, "lorentz_is_valid: the zero matrix is not a Lorentz matrix");
-assert_eq(f64_to(minkowski_interval(hvec4_zero())), 0, "minkowski_interval: zero 4-vector -> 0");
-assert_eq(f64_to(HVec3_x(se3_twist_omega(se3_log(se3_identity())))), 0,
+assert_eq(minkowski_interval(hvec4_zero()), f64_from(0), "minkowski_interval: zero 4-vector -> 0");
+assert_eq(HVec3_x(se3_twist_omega(se3_log(se3_identity()))), f64_from(0),
   "se3_log: identity -> zero twist");
 assert_neq(se3_exp(se3_twist_new(hvec3_zero(), hvec3_zero())), 0,
   "se3_exp: zero twist allocates the identity");
@@ -2571,9 +2616,9 @@ assert_neq(expr_diff(expr_ln(ab_zero_expr), str_from("x")), 0, "expr_diff: d/dx 
 assert_neq(expr_diff(expr_pow(ab_xv, ab_zero_expr), str_from("x")), 0,
   "expr_diff: d/dx x^0 returns a tree");
 assert_neq(expr_diff(ab_xv, str_from("y")), 0, "expr_diff: differentiating by an absent variable");
-assert_eq(f64_to(expr_eval(expr_const(f64_from(3)), vec_new())), 3,
+assert_eq(expr_eval(expr_const(f64_from(3)), vec_new()), f64_from(3),
   "expr_eval: a constant needs no bindings");
-assert_eq(f64_to(expr_eval(ab_xv, vec_new())), 0,
+assert_eq(expr_eval(ab_xv, vec_new()), f64_from(0),
   "expr_eval: an unbound variable evaluates to 0, not a wild read");
 
 # A 200-deep left spine: deep enough to catch an unbounded recursion, shallow
@@ -2584,7 +2629,7 @@ while (ab_di < 200) {
     ab_deep = expr_add(ab_deep, expr_const(F64_ONE));
     ab_di = ab_di + 1;
 }
-assert_eq(f64_to(expr_eval(ab_deep, vec_new())), 201, "expr_eval: 200-deep spine evaluates");
+assert_eq(expr_eval(ab_deep, vec_new()), f64_from(201), "expr_eval: 200-deep spine evaluates");
 assert_neq(expr_simplify(ab_deep), 0, "expr_simplify: 200-deep spine terminates");
 assert_neq(expr_diff(ab_deep, str_from("x")), 0, "expr_diff: 200-deep spine terminates");
 assert_neq(sym_integrate(ab_zero_expr, str_from("x")), 0, "sym_integrate: the zero integrand");

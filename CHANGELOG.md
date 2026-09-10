@@ -2,6 +2,90 @@
 
 ## [Unreleased]
 
+## [2.13.0] - 2026-09-09 — the suite release: the suite could not see an error of 0.9
+
+The audit's self-declared **highest-value item**, and the number that justifies it was measured, not
+argued: on the 2.12.0 tree, `hvec2_add` could return `a + b + 0.9` — a core public function, wrong by
+nearly a whole unit — and **all 3572 assertions still passed. Zero failures across all five suites.**
+
+`assert_eq(f64_to(v), 3)` accepts every `v` in **[3, 4)**, because `f64_to` truncates. **842 of 3105
+assertion sites (27.1%)** compared floats that way. They now number **16 (0.5%)**, and every survivor
+is a deliberate rounding, scaling or truncation test.
+
+| suite | before | after |
+|---|---:|---:|
+| `foundation.tcyr` | **89.0%** | **0.0%** |
+| `edge_cases.tcyr` | 49.5% | 0.9% |
+| `hisab.tcyr` | 32.9% | 0.5% |
+| `modules.tcyr` | 19.3% | 0.6% |
+| `abuse.tcyr` | 11.1% | 0.4% |
+| **total** | **842 (27.1%)** | **16 (0.5%)** |
+
+### Changed — 827 assertions converted, and the conversion verified itself
+
+`assert_eq(f64_to(X), N)` became `assert_eq(X, f64_from(N))` — a bit-exact compare. ⭐ **The migration
+is self-verifying: any site whose value was not already exact FAILS on conversion**, which is what
+turns a mechanical rewrite into a search. 809 converted in the first pass and **all but four passed
+immediately** — every one of those values had been bit-exact all along, and the truncation was pure
+slack.
+
+A second pass took the 18 sites that spelled a tolerance as *scaled* truncation —
+`f64_to(f64_mul(x, f64_from(1000))) == 90`, i.e. a ±0.001 window — onto named tolerance helpers.
+
+### Fixed — four assertions that were wrong, and had been passing anyway
+
+Each failure the conversion produced was a different kind of defect:
+
+- ⛔ **`srgb_to_linear(-1)` was asserted to be `0`. It is `-0.07739938080495357`.** The claim the
+  assertion was *making* — that −1 stays in the linear segment rather than reaching a negative `pow`
+  — is correct, and that value is exactly **−1/12.92**. It had asserted the wrong number for the life
+  of the file, and truncation absorbed it. Now pinned to the value the branch computes.
+- ⛔ **`sh_evaluate_l2` with a zero direction was asserted to be `0`. It is `-0.033296773478641906`
+  — and its message was wrong too.** It said "sums to the band-0 term only"; measured, a zero
+  direction leaves **two** bands nonzero: `Y00 = 0.2820947917738781` (= 1/(2√π)) and
+  `Y20 = -0.31539156525252` (= 0.315392·(3z²−1) at z = 0). The maths is right; the claim about it was
+  not. Now asserted as the **property** — exactly two nonzero bands, and their sum — so it fails if a
+  third band ever leaks in.
+- ⛔ **The PGS solver was checked against `0.090` and `0.636` while the line above it and its own
+  messages both say the answer is `1/11` and `7/11`** — 0.090909… and 0.636363…. The assertion sat a
+  tenth of a percent from the value it claimed to test, and a ±0.001 truncation window absorbed the
+  gap. Now compared against the exact rationals.
+- ⚠ **An antiparallel cross product returns NEGATIVE zero**, `0x8000000000000000`. `f64_to` mapped
+  ±0 to the same integer and hid the distinction. −0.0 is the correct IEEE result and compares equal
+  to +0 under `f64_eq`, so this one is a notation fix rather than a defect — asserted through
+  `f64_eq`, which is what *"is zero"* means for a signed zero.
+- ⭐ **One truncation was deliberate** — a `ColContact` assertion whose own message said so. Kept, and
+  strengthened: the stored value is now pinned bit-exactly at 0.5 **and** its truncation to 0 is
+  asserted. Before, only the second half was checked, so the first was free to drift.
+
+### Added — a named tolerance helper in all five suites
+
+Three had none. ⚠ `abuse.tcyr` had no named tolerance **constant** at all: its only approximate
+compare spelled the bound as a raw hex literal at the call site, which is precisely how a tolerance
+drifts unnoticed between sites. It now has `_AB_TOL` + `_ab_f64_eq`; `hisab` and `modules` gained
+`assert_f64_eq` over their existing `LOOSE_TOL_*`. Each carries the measurement above, so the next
+person to reach for a tolerance sees why the file distinguishes *exact* from *approximate*.
+
+### Measured — what the suite can now see
+
+Every core operation perturbed by the same amount, before and after. ⚠ **Two of these numbers were
+nearly reported wrong**: the first harness's mutation silently failed to apply and the run came back
+`0 failing`, which reads exactly like *"the suite is blind"*. The harness now refuses to report a
+number unless it can `grep` a marker proving the mutant is installed.
+
+| mutation | before | after |
+|---|---:|---:|
+| `hvec2_add` **+0.9** | **0** | 4 |
+| `hvec2_add` +1e-6 | **0** | 4 |
+| `m4_get` +1e-6 | 29 | **84** |
+| `hvec3_cross.x` +1e-6 | 76 | **88** |
+| `hvec3_dot` +1e-6 | — | 34 |
+| `hquat_dot` +1e-6 | — | 15 |
+
+⚠ **One ulp is still invisible on `hvec2_add`** (4 assertions exercise it, none tighter than an exact
+compare of a value an ulp of error moves off). That is a *coverage* limit, not a truncation one, and
+it is stated rather than left for someone to discover.
+
 ## [2.12.0] - 2026-09-09 — the safety release: eight entry points that ended, or corrupted, the caller
 
 The first release off the rewritten release train. **Eight public entry points could be made to end

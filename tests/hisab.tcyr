@@ -37,6 +37,24 @@ var ULP_TOL_H = 0x3CD203AF9EE75616;
 var TOL_1EM14 = 0x3D06849B86A12B9B;  # 1e-14
 var TOL_1EM12 = 0x3D719799812DEA11;  # 1e-12 (== EPSILON_F64)  # 1e-15
 
+# ================================================================
+# Tolerance helper — added 2.13.0
+# ================================================================
+# ⭐ WHY THIS EXISTS. Before 2.13.0 this suite compared floats through
+# `f64_to(x)`, which TRUNCATES: `assert_eq(f64_to(v), 3)` accepts every v in
+# [3, 4), i.e. an absolute error of up to 1.0. Measured on the pre-conversion
+# tree: `hvec2_add` could return `a + b + 0.9` and **all 3572 assertions still
+# passed**. 2.13.0 converted the exact cases to bit-exact compares; this helper
+# is for the cases that are genuinely approximate, so "approximate" is a named
+# decision at the call site instead of a side effect of truncation.
+# ⚠ Use `assert_eq(a, b, msg)` when the value IS exact — most are. Reach for
+# this only when a transcendental or an iteration makes exactness untrue.
+# [measured: scratch harness, not reproducible in-tree, 2026-09-09]
+fn assert_f64_eq(a, b, msg) {
+    assert(f64_approx_eq(a, b, LOOSE_TOL_H), msg);
+    return 0;
+}
+
 # Counts how many times solve_gmres actually invokes the caller's callback, so
 # the documented "maximum total matrix-vector products" budget can be asserted
 # rather than assumed. 3x3 SPD tridiagonal.
@@ -58,17 +76,17 @@ alloc_init();
 test_group("hvec2");
 
 var a2 = hvec2_new(f64_from(3), f64_from(4));
-assert_eq(f64_to(HVec2_x(a2)), 3, "new.x");
-assert_eq(f64_to(HVec2_y(a2)), 4, "new.y");
+assert_eq(HVec2_x(a2), f64_from(3), "new.x");
+assert_eq(HVec2_y(a2), f64_from(4), "new.y");
 
 var b2 = hvec2_new(f64_from(1), f64_from(2));
 var c2 = hvec2_add(a2, b2);
-assert_eq(f64_to(HVec2_x(c2)), 4, "add.x");
-assert_eq(f64_to(HVec2_y(c2)), 6, "add.y");
+assert_eq(HVec2_x(c2), f64_from(4), "add.x");
+assert_eq(HVec2_y(c2), f64_from(6), "add.y");
 
 var dot2 = hvec2_dot(a2, b2);
-assert_eq(f64_to(dot2), 11, "dot");
-assert_eq(f64_to(hvec2_length(a2)), 5, "length");
+assert_eq(dot2, f64_from(11), "dot");
+assert_eq(hvec2_length(a2), f64_from(5), "length");
 
 # ================================================================
 # Vec3
@@ -78,13 +96,13 @@ test_group("hvec3");
 var a3 = hvec3_new(f64_from(1), f64_from(2), f64_from(3));
 var b3 = hvec3_new(f64_from(4), f64_from(5), f64_from(6));
 var c3 = hvec3_add(a3, b3);
-assert_eq(f64_to(HVec3_x(c3)), 5, "add.x");
-assert_eq(f64_to(HVec3_y(c3)), 7, "add.y");
-assert_eq(f64_to(HVec3_z(c3)), 9, "add.z");
-assert_eq(f64_to(hvec3_dot(a3, b3)), 32, "dot");
+assert_eq(HVec3_x(c3), f64_from(5), "add.x");
+assert_eq(HVec3_y(c3), f64_from(7), "add.y");
+assert_eq(HVec3_z(c3), f64_from(9), "add.z");
+assert_eq(hvec3_dot(a3, b3), f64_from(32), "dot");
 
 var cr = hvec3_cross(hvec3_unit_x(), hvec3_unit_y());
-assert_eq(f64_to(HVec3_z(cr)), 1, "cross.z");
+assert_eq(HVec3_z(cr), f64_from(1), "cross.z");
 
 # ================================================================
 # Vec4
@@ -93,8 +111,8 @@ test_group("hvec4");
 
 var a4 = hvec4_new(f64_from(1), f64_from(2), f64_from(3), f64_from(4));
 var b4 = hvec4_new(f64_from(5), f64_from(6), f64_from(7), f64_from(8));
-assert_eq(f64_to(hvec4_dot(a4, b4)), 70, "dot");
-assert_eq(f64_to(HVec3_z(hvec4_xyz(a4))), 3, "xyz.z");
+assert_eq(hvec4_dot(a4, b4), f64_from(70), "dot");
+assert_eq(HVec3_z(hvec4_xyz(a4)), f64_from(3), "xyz.z");
 
 # ================================================================
 # Quaternion
@@ -102,7 +120,7 @@ assert_eq(f64_to(HVec3_z(hvec4_xyz(a4))), 3, "xyz.z");
 test_group("hquat");
 
 var qi = hquat_identity();
-assert_eq(f64_to(HQuat_w(qi)), 1, "identity.w");
+assert_eq(HQuat_w(qi), f64_from(1), "identity.w");
 
 # q * identity = q
 var qr = hquat_from_rotation_z(F64_PI_2);
@@ -133,19 +151,19 @@ test_group("mat4");
 var mi = m4_identity();
 var tv = hvec4_new(f64_from(1), f64_from(2), f64_from(3), f64_from(1));
 var mr = m4_mul_vec4(mi, tv);
-assert_eq(f64_to(HVec4_x(mr)), 1, "I*v.x");
-assert_eq(f64_to(HVec4_y(mr)), 2, "I*v.y");
+assert_eq(HVec4_x(mr), f64_from(1), "I*v.x");
+assert_eq(HVec4_y(mr), f64_from(2), "I*v.y");
 
 var mii = m4_mul(mi, mi);
-assert_eq(f64_to(m4_get(mii, 0, 0)), 1, "I*I[0,0]");
-assert_eq(f64_to(m4_get(mii, 0, 1)), 0, "I*I[0,1]");
+assert_eq(m4_get(mii, 0, 0), f64_from(1), "I*I[0,0]");
+assert_eq(m4_get(mii, 0, 1), f64_from(0), "I*I[0,1]");
 
 # SRT translate
 var srt = m4_from_srt(hvec3_one(), hquat_identity(), hvec3_new(f64_from(2), f64_from(3), f64_from(4)));
 var tp = m4_transform_point(srt, hvec3_zero());
-assert_eq(f64_to(HVec3_x(tp)), 2, "srt.x");
-assert_eq(f64_to(HVec3_y(tp)), 3, "srt.y");
-assert_eq(f64_to(HVec3_z(tp)), 4, "srt.z");
+assert_eq(HVec3_x(tp), f64_from(2), "srt.x");
+assert_eq(HVec3_y(tp), f64_from(3), "srt.y");
+assert_eq(HVec3_z(tp), f64_from(4), "srt.z");
 
 # Inverse: M * M^-1 ≈ I
 var inv = m4_inverse(srt);
@@ -200,16 +218,16 @@ test_group("transform3d");
 
 var t = t3d_new(hvec3_new(f64_from(1), f64_from(2), f64_from(3)), hquat_identity(), hvec3_one());
 var applied = t3d_apply(t, hvec3_zero());
-assert_eq(f64_to(HVec3_x(applied)), 1, "t3d apply.x");
-assert_eq(f64_to(HVec3_y(applied)), 2, "t3d apply.y");
+assert_eq(HVec3_x(applied), f64_from(1), "t3d apply.x");
+assert_eq(HVec3_y(applied), f64_from(2), "t3d apply.y");
 
 # Compose: translate (1,0,0) then translate (0,2,0) = (1,2,0)
 var ta = t3d_new(hvec3_new(F64_ONE, 0, 0), hquat_identity(), hvec3_one());
 var tb = t3d_new(hvec3_new(0, F64_TWO, 0), hquat_identity(), hvec3_one());
 var tc = t3d_compose(ta, tb);
 var tcp = t3d_apply(tc, hvec3_zero());
-assert_eq(f64_to(HVec3_x(tcp)), 1, "compose.x");
-assert_eq(f64_to(HVec3_y(tcp)), 2, "compose.y");
+assert_eq(HVec3_x(tcp), f64_from(1), "compose.x");
+assert_eq(HVec3_y(tcp), f64_from(2), "compose.y");
 
 # ================================================================
 # Color
@@ -264,8 +282,8 @@ assert_eq(trx, 5, "reinhard(1)=0.5");
 
 # Src-over with opaque src → src
 var so = composite_src_over(F64_ONE, 0, 0, F64_ONE, 0, F64_ONE, 0, F64_ONE);
-assert_eq(f64_to(HVec4_x(so)), 1, "src_over.r");
-assert_eq(f64_to(HVec4_y(so)), 0, "src_over.g");
+assert_eq(HVec4_x(so), f64_from(1), "src_over.r");
+assert_eq(HVec4_y(so), f64_from(0), "src_over.g");
 
 # ================================================================
 # Interpolation
@@ -273,10 +291,10 @@ assert_eq(f64_to(HVec4_y(so)), 0, "src_over.g");
 test_group("interpolation");
 
 var l = hisab_lerp(f64_from(0), f64_from(10), F64_HALF);
-assert_eq(f64_to(l), 5, "lerp 0.5");
+assert_eq(l, f64_from(5), "lerp 0.5");
 
 var il = hisab_inverse_lerp(f64_from(0), f64_from(10), f64_from(5));
-assert_eq(f64_to(f64_mul(il, f64_from(10))), 5, "inv_lerp");
+assert_f64_eq(il, f64_div(f64_from(5), f64_from(10)), "inv_lerp");
 
 # ================================================================
 # Geo — primitives and intersections
@@ -287,12 +305,12 @@ var ray = geo_ray_new(hvec3_zero(), hvec3_unit_z());
 var sphere = geo_sphere_new(hvec3_new(0, 0, f64_from(5)), f64_from(1));
 var t_hit = geo_ray_sphere(ray, sphere);
 # Hit at t=4 (sphere center at z=5, radius=1, so near hit at z=4)
-assert_eq(f64_to(t_hit), 4, "ray-sphere t");
+assert_eq(t_hit, f64_from(4), "ray-sphere t");
 
 var aabb = geo_aabb_new(hvec3_new(f64_neg(F64_ONE), f64_neg(F64_ONE), f64_neg(F64_ONE)),
   hvec3_new(F64_ONE, F64_ONE, F64_ONE));
 var t_aabb = geo_ray_aabb(geo_ray_new(hvec3_new(0, 0, f64_neg(f64_from(5))), hvec3_unit_z()), aabb);
-assert_eq(f64_to(t_aabb), 4, "ray-aabb t");
+assert_eq(t_aabb, f64_from(4), "ray-aabb t");
 
 # AABB-AABB overlap
 var aabb2 = geo_aabb_new(hvec3_zero(), hvec3_new(F64_TWO, F64_TWO, F64_TWO));
@@ -305,7 +323,7 @@ assert_eq(geo_sphere_sphere(s1, s2), 1, "sphere overlap");
 
 # Closest point on AABB
 var cp = geo_closest_point_on_aabb(aabb, hvec3_new(f64_from(5), 0, 0));
-assert_eq(f64_to(HVec3_x(cp)), 1, "closest aabb.x");
+assert_eq(HVec3_x(cp), f64_from(1), "closest aabb.x");
 
 # ================================================================
 # Advanced geo
@@ -316,20 +334,20 @@ test_group("geo advanced");
 var sdf_p = hvec3_new(f64_from(3), 0, 0);
 var sdf_c = hvec3_zero();
 var sdf_d = sdf_sphere(sdf_p, sdf_c, F64_ONE);
-assert_eq(f64_to(sdf_d), 2, "sdf sphere");
+assert_eq(sdf_d, f64_from(2), "sdf sphere");
 
 # SDF union: min of two distances
 var d1 = f64_from(3);
 var d2 = f64_from(5);
-assert_eq(f64_to(sdf_union(d1, d2)), 3, "sdf union");
-assert_eq(f64_to(sdf_intersection(d1, d2)), 5, "sdf intersection");
+assert_eq(sdf_union(d1, d2), f64_from(3), "sdf union");
+assert_eq(sdf_intersection(d1, d2), f64_from(5), "sdf intersection");
 
 # Swept AABB: box at (-1,-1,-1)-(1,1,1), vel=(2,0,0), dt=1 → max.x = 3
 var saabb = geo_aabb_new(hvec3_new(f64_neg(F64_ONE), f64_neg(F64_ONE), f64_neg(F64_ONE)),
   hvec3_new(F64_ONE, F64_ONE, F64_ONE));
 var svel = hvec3_new(F64_TWO, 0, 0);
 var swept = swept_aabb(saabb, svel, F64_ONE);
-assert_eq(f64_to(HVec3_x(GeoAabb_max(swept))), 3, "swept max.x");
+assert_eq(HVec3_x(GeoAabb_max(swept)), f64_from(3), "swept max.x");
 
 # CGA: conformal point embedding.
 #   P = x e1 + y e2 + z e3 + a ep + b em,   a = (p^2-1)/2,  b = (p^2+1)/2
@@ -379,94 +397,94 @@ cga_mv_set(cga_e12, 6, F64_ONE);
 
 # e1 |_ e12 = e2 (grade 2-1=1); the e1 component is dropped.
 var cga_lc = cga_left_contraction(cga_e1, cga_e12);
-assert_eq(f64_to(cga_mv_get(cga_lc, 2)), 1, "cga left_contract(e1,e12) = e2");
-assert_eq(f64_to(cga_mv_get(cga_lc, 1)), 0, "cga left_contract(e1,e12) has no e1 part");
+assert_eq(cga_mv_get(cga_lc, 2), f64_from(1), "cga left_contract(e1,e12) = e2");
+assert_eq(cga_mv_get(cga_lc, 1), f64_from(0), "cga left_contract(e1,e12) has no e1 part");
 
 # e1 |_ e1 = 1 (vector self-contraction -> scalar, e1^2 = +1).
-assert_eq(f64_to(cga_mv_get(cga_left_contraction(cga_e1, cga_e1), 0)), 1, "cga left_contract(e1,e1) = 1");
+assert_eq(cga_mv_get(cga_left_contraction(cga_e1, cga_e1), 0), f64_from(1), "cga left_contract(e1,e1) = 1");
 
 # Orthogonal: e1 |_ e23 = 0 (e1 not contained in e23).
 var cga_e23 = cga_mv_zero();
 cga_mv_set(cga_e23, 10, F64_ONE);
 var cga_orth = cga_left_contraction(cga_e1, cga_e23);
-assert_eq(f64_to(f64_mul(cga_norm(cga_orth), f64_from(1000))), 0, "cga left_contract(e1,e23) = 0");
+assert_f64_eq(cga_norm(cga_orth), f64_from(0), "cga left_contract(e1,e23) = 0");
 
 # Vector norm^2 via contraction: (2e1+3e2) |_ self = 4+9 = 13 (scalar).
 var cga_v = cga_mv_zero();
 cga_mv_set(cga_v, 1, F64_TWO);
 cga_mv_set(cga_v, 2, f64_from(3));
-assert_eq(f64_to(cga_mv_get(cga_left_contraction(cga_v, cga_v), 0)), 13, "cga (2e1+3e2)|_self = 13");
+assert_eq(cga_mv_get(cga_left_contraction(cga_v, cga_v), 0), f64_from(13), "cga (2e1+3e2)|_self = 13");
 
 # Right contraction: e12 _| e1 = -e2 (grade 2-1=1; opposite handedness -> sign).
 var cga_rc = cga_right_contraction(cga_e12, cga_e1);
-assert_eq(f64_to(cga_mv_get(cga_rc, 2)), (0 - 1), "cga right_contract(e12,e1) = -e2");
-assert_eq(f64_to(cga_mv_get(cga_rc, 6)), 0, "cga right_contract(e12,e1) drops grade-2 part");
+assert_eq(cga_mv_get(cga_rc, 2), f64_neg(f64_from(1)), "cga right_contract(e12,e1) = -e2");
+assert_eq(cga_mv_get(cga_rc, 6), f64_from(0), "cga right_contract(e12,e1) drops grade-2 part");
 
 # Scalar contraction acts as scaling: 2 |_ (5*e12) = 10*e12.
 var cga_s = cga_mv_zero();
 cga_mv_set(cga_s, 0, F64_TWO);
 var cga_5e12 = cga_mv_zero();
 cga_mv_set(cga_5e12, 6, f64_from(5));
-assert_eq(f64_to(cga_mv_get(cga_left_contraction(cga_s, cga_5e12), 6)), 10, "cga 2|_(5e12) = 10e12");
+assert_eq(cga_mv_get(cga_left_contraction(cga_s, cga_5e12), 6), f64_from(10), "cga 2|_(5e12) = 10e12");
 
 # CGA dual + pseudoscalar (2.5.1). I = grade-5 blade [31]; in this metric (em^2=-1)
 # I^2 = -1 so I_inv = -I. dual(x) = x * I_inv flips grade k -> 5-k; involution
 # dual(dual(x)) = -x. Blade indices: scalar=0, e1=1, e23pm=30, pseudoscalar=31.
 var cga_ii = cga_geometric_product(cga_pseudoscalar(), cga_pseudoscalar_inv());
-assert_eq(f64_to(cga_scalar_part(cga_ii)), 1, "cga I * I_inv = 1");
+assert_eq(cga_scalar_part(cga_ii), f64_from(1), "cga I * I_inv = 1");
 
 # dual(scalar 1) = I_inv = -I (grade 0 -> 5).
 var cga_one = cga_mv_zero();
 cga_mv_set(cga_one, 0, F64_ONE);
-assert_eq(f64_to(cga_mv_get(cga_dual(cga_one), 31)), (0 - 1), "cga dual(1) = -I (grade 0->5)");
+assert_eq(cga_mv_get(cga_dual(cga_one), 31), f64_neg(f64_from(1)), "cga dual(1) = -I (grade 0->5)");
 
 # dual(I) = 1 (grade 5 -> 0).
-assert_eq(f64_to(cga_mv_get(cga_dual(cga_pseudoscalar()), 0)), 1, "cga dual(I) = 1 (grade 5->0)");
+assert_eq(cga_mv_get(cga_dual(cga_pseudoscalar()), 0), f64_from(1), "cga dual(I) = 1 (grade 5->0)");
 
 # dual(e1) = -e23pm (grade 1 -> 4); no e1 part remains.
 var cga_de1 = cga_dual(cga_e1);
-assert_eq(f64_to(cga_mv_get(cga_de1, 30)), (0 - 1), "cga dual(e1) = -e23pm (grade 1->4)");
-assert_eq(f64_to(cga_mv_get(cga_de1, 1)), 0, "cga dual(e1) leaves no e1 part");
+assert_eq(cga_mv_get(cga_de1, 30), f64_neg(f64_from(1)), "cga dual(e1) = -e23pm (grade 1->4)");
+assert_eq(cga_mv_get(cga_de1, 1), f64_from(0), "cga dual(e1) leaves no e1 part");
 
 # Involution: dual(dual(e1)) = -e1 in this metric.
-assert_eq(f64_to(cga_mv_get(cga_dual(cga_de1), 1)), (0 - 1), "cga dual(dual(e1)) = -e1");
+assert_eq(cga_mv_get(cga_dual(cga_de1), 1), f64_neg(f64_from(1)), "cga dual(dual(e1)) = -e1");
 
 # CGA blade projection / rejection (2.5.2). project(X,B) = (X |_ B) |_ B^-1
 # (preserves grade(X)); reject(X,B) = X - project. Blade-inverse guards null blades.
 # project(e1, e12) = e1 (e1 lies in the e1-e2 plane); no e2 leaks in.
 var cga_pr = cga_project(cga_e1, cga_e12);
-assert_eq(f64_to(cga_mv_get(cga_pr, 1)), 1, "cga project(e1,e12) = e1");
-assert_eq(f64_to(cga_mv_get(cga_pr, 2)), 0, "cga project(e1,e12) has no e2 part");
+assert_eq(cga_mv_get(cga_pr, 1), f64_from(1), "cga project(e1,e12) = e1");
+assert_eq(cga_mv_get(cga_pr, 2), f64_from(0), "cga project(e1,e12) has no e2 part");
 
 # Projection onto self is identity.
-assert_eq(f64_to(cga_mv_get(cga_project(cga_e12, cga_e12), 6)), 1, "cga project(e12,e12) = e12");
+assert_eq(cga_mv_get(cga_project(cga_e12, cga_e12), 6), f64_from(1), "cga project(e12,e12) = e12");
 
 # Orthogonal: e3 has no e1-e2-plane component -> project = 0, reject = e3.
 var cga_e3 = cga_mv_zero();
 cga_mv_set(cga_e3, 3, F64_ONE);
 var cga_pr3 = cga_project(cga_e3, cga_e12);
-assert_eq(f64_to(f64_mul(cga_norm(cga_pr3), f64_from(1000))), 0, "cga project(e3,e12) = 0");
-assert_eq(f64_to(cga_mv_get(cga_reject(cga_e3, cga_e12), 3)), 1, "cga reject(e3,e12) = e3");
+assert_f64_eq(cga_norm(cga_pr3), f64_from(0), "cga project(e3,e12) = 0");
+assert_eq(cga_mv_get(cga_reject(cga_e3, cga_e12), 3), f64_from(1), "cga reject(e3,e12) = e3");
 
 # In-plane vector rejects to zero.
 var cga_rj1 = cga_reject(cga_e1, cga_e12);
-assert_eq(f64_to(f64_mul(cga_norm(cga_rj1), f64_from(1000))), 0, "cga reject(e1,e12) = 0");
+assert_f64_eq(cga_norm(cga_rj1), f64_from(0), "cga reject(e1,e12) = 0");
 
 # Idempotence: projecting twice == projecting once.
 var cga_pp = cga_project(cga_project(cga_e1, cga_e12), cga_e12);
-assert_eq(f64_to(cga_mv_get(cga_pp, 1)), 1, "cga project idempotent");
+assert_eq(cga_mv_get(cga_pp, 1), f64_from(1), "cga project idempotent");
 
 # project + reject = X. X = e1 + e3 splits into in-plane e1 and orthogonal e3.
 var cga_x = cga_mv_zero();
 cga_mv_set(cga_x, 1, F64_ONE);
 cga_mv_set(cga_x, 3, F64_ONE);
 var cga_sum = cga_mv_add(cga_project(cga_x, cga_e12), cga_reject(cga_x, cga_e12));
-assert_eq(f64_to(cga_mv_get(cga_sum, 1)), 1, "cga project+reject = X (e1 part)");
-assert_eq(f64_to(cga_mv_get(cga_sum, 3)), 1, "cga project+reject = X (e3 part)");
+assert_eq(cga_mv_get(cga_sum, 1), f64_from(1), "cga project+reject = X (e1 part)");
+assert_eq(cga_mv_get(cga_sum, 3), f64_from(1), "cga project+reject = X (e3 part)");
 
 # Null-blade guard: projecting onto a degenerate (zero) blade returns 0, no trap.
 var cga_pnull = cga_project(cga_e1, cga_mv_zero());
-assert_eq(f64_to(f64_mul(cga_norm(cga_pnull), f64_from(1000))), 0, "cga project onto null blade = 0");
+assert_f64_eq(cga_norm(cga_pnull), f64_from(0), "cga project onto null blade = 0");
 
 # ================================================================
 # Calc — integration, easing
@@ -493,11 +511,11 @@ assert_eq(load64(int_out), 0x4010000000000000, "simpson cubic: int(x^3,0,2) is 4
 # Derivative of x^2 at x=3 should be 6
 var dv = calc_derivative(&_test_x2, f64_from(3), f64_from(1));
 # Use a large h=1 for simplicity — central diff gives (16-4)/2 = 6
-assert_eq(f64_to(dv), 6, "deriv x^2 at 3");
+assert_eq(dv, f64_from(6), "deriv x^2 at 3");
 
 # Easing
-assert_eq(f64_to(ease_in(0)), 0, "ease_in(0)");
-assert_eq(f64_to(ease_in(F64_ONE)), 1, "ease_in(1)");
+assert_eq(ease_in(0), f64_from(0), "ease_in(0)");
+assert_eq(ease_in(F64_ONE), f64_from(1), "ease_in(1)");
 
 # Gauss-Legendre on x^2 from 0 to 1
 var gl = calc_integral_gauss5(&_test_x2, 0, F64_ONE);
@@ -540,7 +558,7 @@ store64(kdata, f64_from(1));
 store64(kdata + 8, f64_from(2));
 store64(kdata + 16, f64_from(3));
 var ks = num_kahan_sum(kdata, 3);
-assert_eq(f64_to(ks), 6, "kahan sum");
+assert_eq(ks, f64_from(6), "kahan sum");
 
 # Newton-Raphson: find sqrt(2) by solving x^2 - 2 = 0
 fn _nr_f(x) { return f64_sub(f64_mul(x, x), F64_TWO); }
@@ -1457,8 +1475,8 @@ _lp_check_eig(lpe_A3, 3, lpe_v3, lpe_V3, "eigen_qr 3x3: A*v == lambda*v");
 # Inertia sphere: I = (2/5)*m*r^2 on diagonal
 var isph = inertia_sphere(f64_from(10), F64_ONE);
 # I = (2/5)*10*1 = 4
-assert_eq(f64_to(ganita_mat_get(isph, 0, 0)), 4, "inertia sphere diag");
-assert_eq(f64_to(ganita_mat_get(isph, 0, 1)), 0, "inertia sphere off-diag");
+assert_eq(ganita_mat_get(isph, 0, 0), f64_from(4), "inertia sphere diag");
+assert_eq(ganita_mat_get(isph, 0, 1), f64_from(0), "inertia sphere off-diag");
 
 # Eigen power: dominant eigenvalue of [[2,0],[0,1]] = 2
 var epm = ganita_mat_new(2, 2);
@@ -1557,8 +1575,16 @@ var pgs_lo = alloc(16); store64(pgs_lo, f64_neg(big)); store64(pgs_lo + 8, f64_n
 var pgs_hi = alloc(16); store64(pgs_hi, big); store64(pgs_hi + 8, big);
 solve_pgs(pgs_A, pgs_b, pgs_x, 2, pgs_lo, pgs_hi, 100);
 # Exact solution of [[4,1],[1,3]]x=[1,2]: x = [1/11, 7/11] ≈ [0.0909, 0.6364].
-assert_eq(f64_to(f64_mul(load64(pgs_x), f64_from(1000))), 90, "pgs x0 ≈ 0.0909 (1/11)");
-assert_eq(f64_to(f64_mul(load64(pgs_x + 8), f64_from(1000))), 636, "pgs x1 ≈ 0.6364 (7/11)");
+# ⭐ 2.13.0 — ASSERT THE EXACT SOLUTION THE COMMENT ABOVE ALREADY NAMES. These
+# read `f64_to(f64_mul(x, f64_from(1000))) == 90` and `== 636`, i.e. they checked
+# x0 against **0.090** and x1 against **0.636** with a ±0.001 truncation window —
+# while the line above and their own messages both say the answer is 1/11 and
+# 7/11, which are 0.090909… and 0.636363…. The assertion was a tenth of a percent
+# away from the value it claimed to be testing, and the truncation absorbed it.
+# Now compared against the exact rationals, so the solver is pinned to the answer
+# rather than to a rounded transcription of it.
+assert_f64_eq(load64(pgs_x), f64_div(F64_ONE, f64_from(11)), "pgs x0 = 1/11");
+assert_f64_eq(load64(pgs_x + 8), f64_div(f64_from(7), f64_from(11)), "pgs x1 = 7/11");
 
 # Bounds-active LCP: diag(1,1)·x = [5,5] clamped to hi=[2,2] → x = [2,2].
 var pgs2_A = ganita_mat_new(2, 2);
@@ -1577,8 +1603,8 @@ var pgs2_hi = alloc(16);
 store64(pgs2_hi, F64_TWO);
 store64(pgs2_hi + 8, F64_TWO);
 solve_pgs(pgs2_A, pgs2_b, pgs2_x, 2, pgs2_lo, pgs2_hi, 100);
-assert_eq(f64_to(load64(pgs2_x)), 2, "pgs bounded x0 clamped to hi=2");
-assert_eq(f64_to(load64(pgs2_x + 8)), 2, "pgs bounded x1 clamped to hi=2");
+assert_eq(load64(pgs2_x), f64_from(2), "pgs bounded x0 clamped to hi=2");
+assert_eq(load64(pgs2_x + 8), f64_from(2), "pgs bounded x1 clamped to hi=2");
 
 # mat_new_guarded (2.5.3) — CWE-190 overflow guard for the real-matrix constructor.
 # Stdlib mat_new gained its own guard upstream in ganita 1.0.4 (cyrius 6.5.6 pin,
@@ -1597,16 +1623,16 @@ assert_neq(mat_new_guarded(3, 3), 0, "mat_new_guarded: valid dims allocate");
 test_group("complex");
 
 var ca = cx_new(f64_from(3), f64_from(4));
-assert_eq(f64_to(cx_abs(ca)), 5, "abs(3+4i)");
+assert_eq(cx_abs(ca), f64_from(5), "abs(3+4i)");
 
 var cb = cx_new(f64_from(1), f64_from(2));
 var cc = cx_mul(ca, cb);
 # (3+4i)(1+2i) = 3+6i+4i+8i² = 3+10i-8 = -5+10i
-assert_eq(f64_to(HComplex_re(cc)), (0 - 5), "mul.re");
-assert_eq(f64_to(HComplex_im(cc)), 10, "mul.im");
+assert_eq(HComplex_re(cc), f64_neg(f64_from(5)), "mul.re");
+assert_eq(HComplex_im(cc), f64_from(10), "mul.im");
 
 var cconj = cx_conj(ca);
-assert_eq(f64_to(HComplex_im(cconj)), (0 - 4), "conj.im");
+assert_eq(HComplex_im(cconj), f64_neg(f64_from(4)), "conj.im");
 
 # e^(iπ) + 1 ≈ 0
 var eipi = cx_exp(cx_new(0, F64_PI));
@@ -1629,14 +1655,14 @@ assert(f64_lt(f64_abs(f64_sub(HComplex_im(_e_ih), F64_ONE)), ULP_TOL_H) == 1,
 var sx = pauli_x();
 var sx2 = cmat_mul(sx, sx);
 var tr_sx2 = cmat_trace(sx2);
-assert_eq(f64_to(HComplex_re(tr_sx2)), 2, "pauli_x^2 trace");
+assert_eq(HComplex_re(tr_sx2), f64_from(2), "pauli_x^2 trace");
 
 # Commutator [σx, σy] = 2iσz
 var sy = pauli_y();
 var comm = cmat_commutator(sx, sy);
 # [σx,σy](0,0) should be 2i
 var c00 = cmat_get(comm, 0, 0);
-assert_eq(f64_to(HComplex_im(c00)), 2, "[sx,sy]_00.im");
+assert_eq(HComplex_im(c00), f64_from(2), "[sx,sy]_00.im");
 
 # ================================================================
 # Lie groups
@@ -1664,23 +1690,23 @@ assert_eq(load64(u_id), 0, "u1 inv phase is exactly +0.0");
 # SU(2): identity to quat → w=1
 var su2_id = su2_identity();
 var su2_q = su2_to_quat(su2_id);
-assert_eq(f64_to(HQuat_w(su2_q)), 1, "su2 id.w");
+assert_eq(HQuat_w(su2_q), f64_from(1), "su2 id.w");
 
 # Lorentz: identity transforms (t,0,0,0) → (t,0,0,0)
 var lor_id = lorentz_identity();
 var tv4 = alloc(32);
 store64(tv4, F64_ONE); store64(tv4 + 8, 0); store64(tv4 + 16, 0); store64(tv4 + 24, 0);
 var tv4_out = lorentz_transform_4vec(lor_id, tv4);
-assert_eq(f64_to(load64(tv4_out)), 1, "lorentz id t");
+assert_eq(load64(tv4_out), f64_from(1), "lorentz id t");
 
 # Minkowski interval for timelike vector (1,0,0,0) = +1
 var mink = minkowski_interval(tv4);
-assert_eq(f64_to(mink), 1, "minkowski timelike");
+assert_eq(mink, f64_from(1), "minkowski timelike");
 
 # Gell-Mann: λ₁ trace = 0 (traceless generators)
 var gm1 = gell_mann(0);
 var gm1_tr = cmat_trace(gm1);
-assert_eq(f64_to(HComplex_re(gm1_tr)), 0, "gm1 traceless");
+assert_eq(HComplex_re(gm1_tr), f64_from(0), "gm1 traceless");
 
 # ================================================================
 # Differential geometry
@@ -1780,8 +1806,8 @@ var flat_deriv = alloc(64);
 var _di = 0;
 while (_di < 8) { store64(flat_deriv + _di * 8, 0); _di = _di + 1; }
 var flat_chris = christoffel_symbols(flat_metric_inv, flat_deriv, 2);
-assert_eq(f64_to(christoffel_get(flat_chris, 2, 0, 0, 0)), 0, "flat Gamma=0");
-assert_eq(f64_to(christoffel_get(flat_chris, 2, 1, 0, 1)), 0, "flat Gamma=0 b");
+assert_eq(christoffel_get(flat_chris, 2, 0, 0, 0), f64_from(0), "flat Gamma=0");
+assert_eq(christoffel_get(flat_chris, 2, 1, 0, 1), f64_from(0), "flat Gamma=0 b");
 
 # Wedge: α∧β where α=(1,0), β=(0,1) in 2D → 1-component 2-form = 1
 var alpha = alloc(16);
@@ -1789,7 +1815,7 @@ store64(alpha, F64_ONE); store64(alpha + 8, 0);
 var beta = alloc(16);
 store64(beta, 0); store64(beta + 8, F64_ONE);
 var w11 = wedge_1_1(alpha, beta, 2);
-assert_eq(f64_to(load64(w11)), 1, "wedge e1^e2");
+assert_eq(load64(w11), f64_from(1), "wedge e1^e2");
 
 # Sectional curvature (2.6.0). K(u,v) from the (1,3) Riemann + metric; positive
 # for a sphere (verified vs hisab's Riemann convention). Constant-curvature
@@ -1808,26 +1834,26 @@ var sc_e0 = alloc(16); store64(sc_e0, F64_ONE); store64(sc_e0 + 8, 0);
 var sc_e1 = alloc(16); store64(sc_e1, 0); store64(sc_e1 + 8, F64_ONE);
 
 # Unit-curvature space form → K = 1 for any plane (axis-aligned and skew).
-assert_eq(f64_to(sectional_curvature(sc_rie, sc_id, sc_e0, sc_e1, 2)), 1, "sectional: unit space form = 1");
+assert_eq(sectional_curvature(sc_rie, sc_id, sc_e0, sc_e1, 2), f64_from(1), "sectional: unit space form = 1");
 var sc_us = alloc(16); store64(sc_us, F64_ONE); store64(sc_us + 8, F64_ONE);
 var sc_vs = alloc(16); store64(sc_vs, F64_ONE); store64(sc_vs + 8, f64_neg(F64_ONE));
-assert_eq(f64_to(sectional_curvature(sc_rie, sc_id, sc_us, sc_vs, 2)), 1, "sectional: plane-independent (skew) = 1");
+assert_eq(sectional_curvature(sc_rie, sc_id, sc_us, sc_vs, 2), f64_from(1), "sectional: plane-independent (skew) = 1");
 
 # Radius-2 sphere: same (1,3) Riemann, metric = diag(r²) = diag(4,4) → K = 1/r² = 1/4.
 var sc_g4 = alloc(32);
 store64(sc_g4, f64_from(4)); store64(sc_g4 + 8, 0); store64(sc_g4 + 16, 0); store64(sc_g4 + 24, f64_from(4));
 var sc_k4 = sectional_curvature(sc_rie, sc_g4, sc_e0, sc_e1, 2);
-assert_eq(f64_to(f64_mul(sc_k4, f64_from(100))), 25, "sectional: radius-2 sphere = 1/4");
+assert_f64_eq(sc_k4, f64_div(f64_from(25), f64_from(100)), "sectional: radius-2 sphere = 1/4");
 
 # Flat space (zero Riemann) → K = 0.
 var sc_flat = alloc(128);
 var _scf = 0;
 while (_scf < 16) { store64(sc_flat + _scf * 8, 0); _scf = _scf + 1; }
-assert_eq(f64_to(sectional_curvature(sc_flat, sc_id, sc_e0, sc_e1, 2)), 0, "sectional: flat = 0");
+assert_eq(sectional_curvature(sc_flat, sc_id, sc_e0, sc_e1, 2), f64_from(0), "sectional: flat = 0");
 
 # Degenerate plane (u ∥ v) → 0 (denominator guard, no div-by-zero).
 var sc_par = alloc(16); store64(sc_par, F64_TWO); store64(sc_par + 8, 0);
-assert_eq(f64_to(sectional_curvature(sc_rie, sc_id, sc_e0, sc_par, 2)), 0, "sectional: degenerate plane = 0");
+assert_eq(sectional_curvature(sc_rie, sc_id, sc_e0, sc_par, 2), f64_from(0), "sectional: degenerate plane = 0");
 
 # Weyl conformal-curvature tensor (2.6.1). Trace-free part of Riemann; vanishes
 # for n ≤ 3 and for conformally-flat metrics (constant-curvature space forms),
@@ -1839,7 +1865,7 @@ var wl3_g = _dg_id(3);
 var wl3_ric = ricci_tensor(wl3_r, 3);
 var wl3_sc = ricci_scalar(wl3_ric, wl3_g, 3);
 var wl3_c = weyl_tensor(wl3_r, wl3_ric, wl3_sc, wl3_g, 3);
-assert_eq(f64_to(f64_mul(_dg_maxabs(wl3_c, 3), f64_from(1000000))), 0, "weyl: 3D space form = 0");
+assert_f64_eq(_dg_maxabs(wl3_c, 3), f64_from(0), "weyl: 3D space form = 0");
 
 # 4D space form (conformally flat) → Weyl ≡ 0 with Riemann ≠ 0 — the key oracle.
 var wl4_r = _dg_spaceform(4);
@@ -1848,7 +1874,7 @@ var wl4_ric = ricci_tensor(wl4_r, 4);
 var wl4_sc = ricci_scalar(wl4_ric, wl4_g, 4);
 assert_neq(f64_to(f64_mul(_dg_maxabs(wl4_r, 4), f64_from(1000))), 0, "weyl: 4D space form has nonzero Riemann");
 var wl4_c = weyl_tensor(wl4_r, wl4_ric, wl4_sc, wl4_g, 4);
-assert_eq(f64_to(f64_mul(_dg_maxabs(wl4_c, 4), f64_from(1000000))), 0, "weyl: 4D space form = 0 (conformally flat)");
+assert_f64_eq(_dg_maxabs(wl4_c, 4), f64_from(0), "weyl: 4D space form = 0 (conformally flat)");
 
 # Non-space-form 4D (only the e0-e1 plane curved): Weyl ≠ 0 and trace-free.
 var wl_nr = alloc(2048);
@@ -1863,7 +1889,7 @@ var wl_nric = ricci_tensor(wl_nr, 4);
 var wl_nsc = ricci_scalar(wl_nric, wl_ng, 4);
 var wl_nc = weyl_tensor(wl_nr, wl_nric, wl_nsc, wl_ng, 4);
 assert_neq(f64_to(f64_mul(_dg_maxabs(wl_nc, 4), f64_from(1000))), 0, "weyl: non-space-form is nonzero");
-assert_eq(f64_to(f64_mul(_dg_weyl_trace(wl_nc, 4), f64_from(1000000))), 0, "weyl: trace-free (g^pm C = 0)");
+assert_f64_eq(_dg_weyl_trace(wl_nc, 4), f64_from(0), "weyl: trace-free (g^pm C = 0)");
 
 # Parallel transport (2.6.2). dV^a/dt = −Γ^a_{μν} V^μ ẋ^ν along a curve (RK4).
 # Flat space (Γ=0): transport leaves the vector unchanged.
@@ -1873,8 +1899,8 @@ while (_pti < 8) { store64(pt_ch0 + _pti * 8, 0); _pti = _pti + 1; }
 var pt_v = alloc(16); store64(pt_v, F64_ONE); store64(pt_v + 8, F64_TWO);
 var pt_cv = alloc(16); store64(pt_cv, F64_ONE); store64(pt_cv + 8, F64_ONE);
 var pt_flat = parallel_transport(pt_v, pt_cv, pt_ch0, 2, F64_HALF, 10);
-assert_eq(f64_to(load64(pt_flat)), 1, "transport: flat leaves V^0 = 1");
-assert_eq(f64_to(load64(pt_flat + 8)), 2, "transport: flat leaves V^1 = 2");
+assert_eq(load64(pt_flat), f64_from(1), "transport: flat leaves V^0 = 1");
+assert_eq(load64(pt_flat + 8), f64_from(2), "transport: flat leaves V^1 = 2");
 
 # Unit-sphere latitude circle at θ=π/4: Γ^θ_φφ=−1/2, Γ^φ_θφ=Γ^φ_φθ=1, metric
 # diag(1, sin²θ)=diag(1,1/2). Transport V=(1,0) along φ. Metric-compatible →
@@ -1900,49 +1926,49 @@ assert(f64_lt(f64_abs(f64_sub(load64(pt_st), F64_ONE)), pt_tol) == 0, "transport
 # the unit-sphere space form sc_rie + tangents from the sectional block.
 # Separation ⊥ tangent → J'' = −J (geodesics converge); ∥ tangent → 0.
 var gd_perp = geodesic_deviation(sc_rie, sc_e0, sc_e1, 2);
-assert_eq(f64_to(load64(gd_perp + 8)), (0 - 1), "deviation: J perp u gives J'' = -J (sphere)");
-assert_eq(f64_to(load64(gd_perp)), 0, "deviation: J perp u has no parallel part");
+assert_eq(load64(gd_perp + 8), f64_neg(f64_from(1)), "deviation: J perp u gives J'' = -J (sphere)");
+assert_eq(load64(gd_perp), f64_from(0), "deviation: J perp u has no parallel part");
 
 # Separation parallel to the tangent (sc_par = (2,0) ∥ e0) → no tidal force.
 var gd_par = geodesic_deviation(sc_rie, sc_e0, sc_par, 2);
-assert_eq(f64_to(load64(gd_par)), 0, "deviation: J parallel u gives 0 (A^0)");
-assert_eq(f64_to(load64(gd_par + 8)), 0, "deviation: J parallel u gives 0 (A^1)");
+assert_eq(load64(gd_par), f64_from(0), "deviation: J parallel u gives 0 (A^0)");
+assert_eq(load64(gd_par + 8), f64_from(0), "deviation: J parallel u gives 0 (A^1)");
 
 # Flat space → no tidal acceleration.
 var gd_flat = geodesic_deviation(sc_flat, sc_e0, sc_e1, 2);
-assert_eq(f64_to(load64(gd_flat + 8)), 0, "deviation: flat -> 0");
+assert_eq(load64(gd_flat + 8), f64_from(0), "deviation: flat -> 0");
 
 # Linear in J: doubling the separation doubles the tidal acceleration.
 var gd_2j = alloc(16);
 store64(gd_2j, 0);
 store64(gd_2j + 8, F64_TWO);
-assert_eq(f64_to(load64(geodesic_deviation(sc_rie, sc_e0, gd_2j, 2) + 8)), (0 - 2), "deviation: linear in J");
+assert_eq(load64(geodesic_deviation(sc_rie, sc_e0, gd_2j, 2) + 8), f64_neg(f64_from(2)), "deviation: linear in J");
 
 # Higher-order differential forms (2.6.4). Chain wedge_1_1 → wedge_2_1 → wedge_3_1
 # to build the basis k-forms in 4D (reduced strictly-increasing basis).
 # e0∧e1∧e2∧e3 = the unit 4-form.
 var wf_2 = wedge_1_1(_dg_e4(0), _dg_e4(1), 4);
 var wf_3 = wedge_2_1(wf_2, _dg_e4(2));
-assert_eq(f64_to(load64(wf_3)), 1, "forms: e0^e1^e2 = (012) basis 3-form");
+assert_eq(load64(wf_3), f64_from(1), "forms: e0^e1^e2 = (012) basis 3-form");
 var wf_4 = wedge_3_1(wf_3, _dg_e4(3));
-assert_eq(f64_to(load64(wf_4)), 1, "forms: e0^e1^e2^e3 = unit 4-form");
+assert_eq(load64(wf_4), f64_from(1), "forms: e0^e1^e2^e3 = unit 4-form");
 
 # Antisymmetry of the 1∧1 wedge and the nilpotence α∧α = 0.
-assert_eq(f64_to(load64(wedge_1_1(_dg_e4(1), _dg_e4(0), 4))), (0 - 1), "forms: e1^e0 = -(e0^e1)");
-assert_eq(f64_to(load64(wedge_1_1(_dg_e4(0), _dg_e4(0), 4))), 0, "forms: e0^e0 = 0");
+assert_eq(load64(wedge_1_1(_dg_e4(1), _dg_e4(0), 4)), f64_neg(f64_from(1)), "forms: e1^e0 = -(e0^e1)");
+assert_eq(load64(wedge_1_1(_dg_e4(0), _dg_e4(0), 4)), f64_from(0), "forms: e0^e0 = 0");
 
 # Permutation sign: swapping two factors flips the form — e0∧e2∧e1 = −(e0∧e1∧e2).
 var wf_021 = wedge_2_1(wedge_1_1(_dg_e4(0), _dg_e4(2), 4), _dg_e4(1));
-assert_eq(f64_to(load64(wf_021)), (0 - 1), "forms: e0^e2^e1 = -(012)");
+assert_eq(load64(wf_021), f64_neg(f64_from(1)), "forms: e0^e2^e1 = -(012)");
 
 # Repeated factor → 0 (e0∧e1∧e0 has no independent 3-form component).
 var wf_rep = wedge_2_1(wedge_1_1(_dg_e4(0), _dg_e4(1), 4), _dg_e4(0));
-assert_eq(f64_to(load64(wf_rep)), 0, "forms: e0^e1^e0 = 0 (012 part)");
-assert_eq(f64_to(load64(wf_rep + 24)), 0, "forms: e0^e1^e0 = 0 (123 part)");
+assert_eq(load64(wf_rep), f64_from(0), "forms: e0^e1^e0 = 0 (012 part)");
+assert_eq(load64(wf_rep + 24), f64_from(0), "forms: e0^e1^e0 = 0 (123 part)");
 
 # 4-form sign: e1∧e2∧e3∧e0 is an odd permutation of (0123) → −1.
 var wf_1230 = wedge_3_1(wedge_2_1(wedge_1_1(_dg_e4(1), _dg_e4(2), 4), _dg_e4(3)), _dg_e4(0));
-assert_eq(f64_to(load64(wf_1230)), (0 - 1), "forms: e1^e2^e3^e0 = -(0123)");
+assert_eq(load64(wf_1230), f64_neg(f64_from(1)), "forms: e1^e2^e3^e0 = -(0123)");
 
 # ================================================================
 # Symbolic
@@ -1957,14 +1983,14 @@ var sexpr = expr_add(symx2, s3);
 var bindings = vec_new();
 vec_push(bindings, expr_bind(str_from("x"), f64_from(2)));
 var sval = expr_eval(sexpr, bindings);
-assert_eq(f64_to(sval), 7, "eval x^2+3 at 2");
+assert_eq(sval, f64_from(7), "eval x^2+3 at 2");
 
 # Differentiate x^2 w.r.t x → should simplify to 2*x
 var sd = expr_diff(sexpr, str_from("x"));
 var sd_simple = expr_simplify(sd);
 # Evaluate derivative at x=2 → should be 4
 var dval = expr_eval(sd_simple, bindings);
-assert_eq(f64_to(dval), 4, "diff x^2+3 at 2");
+assert_eq(dval, f64_from(4), "diff x^2+3 at 2");
 
 # Simplify: 0 + x = x, 1 * x = x
 var s_zero_plus = expr_add(expr_const(0), symx);
@@ -1983,19 +2009,19 @@ test_group("autodiff");
 # f(x) = x^2, f'(x) = 2x at x=3: f(3)=9, f'(3)=6
 var dx = dual_var(f64_from(3));
 var dx2 = dual_mul(dx, dx);
-assert_eq(f64_to(Dual_val(dx2)), 9, "x^2 val");
-assert_eq(f64_to(Dual_deriv(dx2)), 6, "x^2 deriv");
+assert_eq(Dual_val(dx2), f64_from(9), "x^2 val");
+assert_eq(Dual_deriv(dx2), f64_from(6), "x^2 deriv");
 
 # f(x) = sin(x), f'(x) = cos(x) at x=0: f(0)=0, f'(0)=1
 var d0 = dual_var(0);
 var ds = dual_sin(d0);
-assert_eq(f64_to(Dual_val(ds)), 0, "sin(0)");
-assert_eq(f64_to(Dual_deriv(ds)), 1, "cos(0)");
+assert_eq(Dual_val(ds), f64_from(0), "sin(0)");
+assert_eq(Dual_deriv(ds), f64_from(1), "cos(0)");
 
 # f(x) = exp(x) at x=0: f(0)=1, f'(0)=1
 var de = dual_exp(dual_var(0));
-assert_eq(f64_to(Dual_val(de)), 1, "exp(0)");
-assert_eq(f64_to(Dual_deriv(de)), 1, "exp'(0)");
+assert_eq(Dual_val(de), f64_from(1), "exp(0)");
+assert_eq(Dual_deriv(de), f64_from(1), "exp'(0)");
 
 # ================================================================
 # Interval
@@ -2005,12 +2031,12 @@ test_group("interval");
 var ia = ivl_new(f64_from(1), f64_from(3));
 var ib = ivl_new(f64_from(2), f64_from(4));
 var ic = ivl_add(ia, ib);
-assert_eq(f64_to(Interval_lo(ic)), 3, "add.lo");
-assert_eq(f64_to(Interval_hi(ic)), 7, "add.hi");
+assert_eq(Interval_lo(ic), f64_from(3), "add.lo");
+assert_eq(Interval_hi(ic), f64_from(7), "add.hi");
 
 assert_eq(ivl_contains(ia, f64_from(2)), 1, "contains 2");
 assert_eq(ivl_contains(ia, f64_from(4)), 0, "not contains 4");
-assert_eq(f64_to(ivl_width(ia)), 2, "width");
+assert_eq(ivl_width(ia), f64_from(2), "width");
 
 # ================================================================
 # Tensor
@@ -2022,20 +2048,20 @@ var shape = alloc(16);
 store64(shape, 2); store64(shape + 8, 3);
 var tn = tensor_new(2, shape);
 tensor_set2(tn, 0, 1, f64_from(42));
-assert_eq(f64_to(tensor_get2(tn, 0, 1)), 42, "set/get");
-assert_eq(f64_to(tensor_get2(tn, 0, 0)), 0, "zero init");
+assert_eq(tensor_get2(tn, 0, 1), f64_from(42), "set/get");
+assert_eq(tensor_get2(tn, 0, 0), f64_from(0), "zero init");
 
 # Kronecker delta
-assert_eq(f64_to(kronecker_delta(1, 1)), 1, "delta ii");
-assert_eq(f64_to(kronecker_delta(0, 1)), 0, "delta ij");
+assert_eq(kronecker_delta(1, 1), f64_from(1), "delta ii");
+assert_eq(kronecker_delta(0, 1), f64_from(0), "delta ij");
 
 # Minkowski metric
-assert_eq(f64_to(minkowski(0, 0)), 1, "eta 00");
-assert_eq(f64_to(minkowski(1, 1)), (0 - 1), "eta 11");
+assert_eq(minkowski(0, 0), f64_from(1), "eta 00");
+assert_eq(minkowski(1, 1), f64_neg(f64_from(1)), "eta 11");
 
 # Levi-Civita 3D
-assert_eq(f64_to(levi_civita_3(0, 1, 2)), 1, "eps 012");
-assert_eq(f64_to(levi_civita_3(1, 0, 2)), (0 - 1), "eps 102");
+assert_eq(levi_civita_3(0, 1, 2), f64_from(1), "eps 012");
+assert_eq(levi_civita_3(1, 0, 2), f64_neg(f64_from(1)), "eps 102");
 assert_eq(levi_civita_3(0, 0, 1), 0, "eps repeated");
 
 # ================================================================

@@ -8,7 +8,7 @@ cyrius test tests/hisab.tcyr        # 416 smoke/integration tests
 cyrius test tests/foundation.tcyr   # 351 exhaustive foundation type tests
 cyrius test tests/modules.tcyr      # 1775 per-module tests
 cyrius test tests/edge_cases.tcyr   # 233 edge case + boundary tests
-cyrius test tests/abuse.tcyr        # 775 hostile-input tests
+cyrius test tests/abuse.tcyr        # 776 hostile-input tests
 
 # Benchmarks (72 operations)
 cyrius bench tests/hisab.bcyr
@@ -26,11 +26,11 @@ cyrius build tests/hisab.fcyr build/hisab_fuzz && build/hisab_fuzz
 | Suite | Assertions | Covers |
 |-------|-----------|--------|
 | `foundation.tcyr` | 351 | Vec2/3/4, Quat, Mat4 — construction, arithmetic, products, norms, interpolation, rotation, inverse, determinant, SRT, projections |
-| `modules.tcyr` | 1797 | Per-module — geo, calc, num, complex, Lie, diffgeo, symbolic, autodiff (forward-mode duals AND the 2.11.0 reverse-mode tape), interval, tensor, einsum, mat3, noise, color, arena, spatial (BVH, kd-tree, spatial hash), differentiable geometry (`geo_diff` — ray/surface jets for all six primitives; plane/sphere/triangle in 2.10.0, aabb/obb/capsule in 2.10.1, the OBB rotation partial in 2.10.2) and collision (convex hull, triangulation, Delaunay, half-edge, GJK/EPA, MPR, time-of-impact, island detection, sequential-impulse) |
+| `modules.tcyr` | 1798 | Per-module — geo, calc, num, complex, Lie, diffgeo, symbolic, autodiff (forward-mode duals AND the 2.11.0 reverse-mode tape), interval, tensor, einsum, mat3, noise, color, arena, spatial (BVH, kd-tree, spatial hash), differentiable geometry (`geo_diff` — ray/surface jets for all six primitives; plane/sphere/triangle in 2.10.0, aabb/obb/capsule in 2.10.1, the OBB rotation partial in 2.10.2) and collision (convex hull, triangulation, Delaunay, half-edge, GJK/EPA, MPR, time-of-impact, island detection, sequential-impulse) |
 | `hisab.tcyr` | 416 | Cross-module integration — ODE, optimization, sparse, PGS/LCP, ray-sphere, Newton, Euler identity, CGA (contraction/dual/projection), mat_new_guarded, diffgeo (sectional/Weyl/transport/Jacobi/forms), decomposition (SVD, QR, eigen), Krylov (GMRES) |
 | `edge_cases.tcyr` | 233 | Degenerate inputs (zero-length normalize, singular inverse, parallel ray, division by zero, undefined variables) plus pinned invariants (bit-math/overflow/determinism, allocation-overflow guards — including the **upstream stdlib `mat_new`** CWE-190 contract, added 2.6.11) |
-| `abuse.tcyr` | 775 | Hostile input, added 2.9.0 — negative indices and counts, zero/one/overflow-prone dimensions, non-conformable operands, the designed-0 return of every capped constructor, degenerate geometry (zero extents/radii, coincident points, NaN/±Inf coordinates), bounded-work guarantees, and **canary checks** (a guard block allocated immediately after each out-buffer, asserted untouched — the only way a write-past-the-end shows up as a failure rather than as luck). Surfaced 11 real defects on public entry points, held in a known-defect register rather than deleted |
-| **Total** | **3572** | |
+| `abuse.tcyr` | 776 | Hostile input, added 2.9.0 — negative indices and counts, zero/one/overflow-prone dimensions, non-conformable operands, the designed-0 return of every capped constructor, degenerate geometry (zero extents/radii, coincident points, NaN/±Inf coordinates), bounded-work guarantees, and **canary checks** (a guard block allocated immediately after each out-buffer, asserted untouched — the only way a write-past-the-end shows up as a failure rather than as luck). Surfaced 11 real defects on public entry points, held in a known-defect register rather than deleted |
+| **Total** | **3574** | |
 
 ## Benchmarks (72 operations)
 
@@ -73,6 +73,26 @@ the same binary put the median avg spread at 3.5% (worst 6.9%, none over 20%), a
 | m4_inverse | 128 | M * M^-1 ≈ I when det > 0 |
 
 ## Testing Patterns
+
+### ⭐ Compare floats bit-exactly unless you can say why not (2.13.0)
+
+`f64_to` **truncates**. `assert_eq(f64_to(v), 3)` accepts every `v` in **[3, 4)** — an absolute error
+of up to 1.0. That was 27.1% of this suite until 2.13.0, and the cost was concrete: `hvec2_add` could
+return `a + b + 0.9` and **all 3572 assertions passed**.
+
+| use | when |
+|---|---|
+| `assert_eq(x, f64_from(3), …)` | **the default.** The value is exact — most are, and 809 of 813 converted sites proved it by passing unchanged |
+| `assert_f64_eq(x, y, …)` / `_ab_f64_eq` | a transcendental or an iteration makes exactness untrue. Every suite now has one |
+| `assert_eq(f64_to(f64_round(x)), n, …)` | you are deliberately testing the rounding |
+
+⭐ **A conversion to bit-exact is self-verifying**: any site whose value was not already exact fails
+the moment you convert it. That is what turned this migration into a search — the four sites that
+failed were four different real defects, all of which had been passing for the life of the file.
+
+⚠ **And prove the mutant is installed before believing a mutation count.** Two numbers here were
+nearly published wrong when a harness's `replace` silently no-op'd and the run returned `0 failing`
+— which reads exactly like *"the suite is blind"*. The harness now greps for a marker first.
 
 ### ⚠ An assertion written against a defect stops testing anything once the defect is fixed
 

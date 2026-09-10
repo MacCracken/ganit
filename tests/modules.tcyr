@@ -49,6 +49,24 @@ var LOOSE_TOL_M = 0x3E45798EE2308C3A;
 var ULP_TOL_M = 0x3CD203AF9EE75616;
 var TOL_1EM14 = 0x3D06849B86A12B9B;  # 1e-14
 var TOL_1EM12 = 0x3D719799812DEA11;  # 1e-12 (== EPSILON_F64)  # 1e-15
+
+# ================================================================
+# Tolerance helper — added 2.13.0
+# ================================================================
+# ⭐ WHY THIS EXISTS. Before 2.13.0 this suite compared floats through
+# `f64_to(x)`, which TRUNCATES: `assert_eq(f64_to(v), 3)` accepts every v in
+# [3, 4), i.e. an absolute error of up to 1.0. Measured on the pre-conversion
+# tree: `hvec2_add` could return `a + b + 0.9` and **all 3572 assertions still
+# passed**. 2.13.0 converted the exact cases to bit-exact compares; this helper
+# is for the cases that are genuinely approximate, so "approximate" is a named
+# decision at the call site instead of a side effect of truncation.
+# ⚠ Use `assert_eq(a, b, msg)` when the value IS exact — most are. Reach for
+# this only when a transcendental or an iteration makes exactness untrue.
+# [measured: scratch harness, not reproducible in-tree, 2026-09-09]
+fn assert_f64_eq(a, b, msg) {
+    assert(f64_approx_eq(a, b, LOOSE_TOL_M), msg);
+    return 0;
+}
 # ~1e-13 -- for the Minkowski interval of (5,3,0,0), whose magnitude is 16 and
 # whose measured boost drift is 7.105e-15 (4 ulp of 16).
 var IVL_TOL_M = 0x3D3C25C268497682;  # 1e-13
@@ -2443,7 +2461,7 @@ assert_neq(geo_jet_sphere_dcenter(jt_s), 0, "...and the matching accessor still 
 var jt_miss = geo_jet_sphere(geo_ray_new(hvec3_new(f64_from(9), f64_from(9), f64_from(9)),
     hvec3_new(F64_ONE, 0, 0)), geo_sphere_new(hvec3_new(0, 0, 0), F64_ONE));
 assert_eq(geo_jet_hit(jt_miss), 0, "a miss reports no hit");
-assert_eq(f64_to(HVec3_x(GeoJet_dt_do(jt_miss))), 0,
+assert_eq(HVec3_x(GeoJet_dt_do(jt_miss)), f64_from(0),
   "a miss still returns a readable dt/do, not a null pointer");
 
 # Euler's relation on the RAW direction gradient. On the analytic jet this is
@@ -2693,22 +2711,22 @@ test_group("geo: ray_at");
 var g_ray = geo_ray_new(hvec3_new(F64_ONE, F64_TWO, f64_from(3)),
   hvec3_unit_x());
 var g_pt = geo_ray_at(g_ray, f64_from(5));
-assert_eq(f64_to(HVec3_x(g_pt)), 6, "ray_at x");
-assert_eq(f64_to(HVec3_y(g_pt)), 2, "ray_at y");
-assert_eq(f64_to(HVec3_z(g_pt)), 3, "ray_at z");
+assert_eq(HVec3_x(g_pt), f64_from(6), "ray_at x");
+assert_eq(HVec3_y(g_pt), f64_from(2), "ray_at y");
+assert_eq(HVec3_z(g_pt), f64_from(3), "ray_at z");
 
 # ----------------------------------------------------------------
 test_group("geo: plane signed distance");
 
 var g_plane = geo_plane_from_point_normal(hvec3_zero(), hvec3_unit_y());
 var g_psd_pos = geo_plane_signed_distance(g_plane, hvec3_new(0, f64_from(3), 0));
-assert_eq(f64_to(g_psd_pos), 3, "plane sd positive");
+assert_eq(g_psd_pos, f64_from(3), "plane sd positive");
 
 var g_psd_neg = geo_plane_signed_distance(g_plane, hvec3_new(0, f64_neg(f64_from(2)), 0));
-assert_eq(f64_to(g_psd_neg), (0 - 2), "plane sd negative");
+assert_eq(g_psd_neg, f64_neg(f64_from(2)), "plane sd negative");
 
 var g_psd_zero = geo_plane_signed_distance(g_plane, hvec3_zero());
-assert_eq(f64_to(g_psd_zero), 0, "plane sd on-plane");
+assert_eq(g_psd_zero, f64_from(0), "plane sd on-plane");
 
 # ----------------------------------------------------------------
 test_group("geo: aabb center and size");
@@ -2716,18 +2734,18 @@ test_group("geo: aabb center and size");
 var g_aabb_cs = geo_aabb_new(hvec3_new(f64_from(2), f64_from(4), f64_from(6)),
   hvec3_new(f64_from(4), f64_from(8), f64_from(10)));
 var g_center = geo_aabb_center(g_aabb_cs);
-assert_eq(f64_to(HVec3_x(g_center)), 3, "aabb center.x");
-assert_eq(f64_to(HVec3_y(g_center)), 6, "aabb center.y");
+assert_eq(HVec3_x(g_center), f64_from(3), "aabb center.x");
+assert_eq(HVec3_y(g_center), f64_from(6), "aabb center.y");
 var g_size = geo_aabb_size(g_aabb_cs);
-assert_eq(f64_to(HVec3_x(g_size)), 2, "aabb size.x");
-assert_eq(f64_to(HVec3_z(g_size)), 4, "aabb size.z");
+assert_eq(HVec3_x(g_size), f64_from(2), "aabb size.x");
+assert_eq(HVec3_z(g_size), f64_from(4), "aabb size.z");
 
 # ----------------------------------------------------------------
 test_group("geo: ray-plane");
 
 var g_rp_ray = geo_ray_new(hvec3_new(0, f64_from(5), 0), hvec3_new(0, f64_neg(F64_ONE), 0));
 var g_rp_t = geo_ray_plane(g_rp_ray, g_plane);
-assert_eq(f64_to(g_rp_t), 5, "ray-plane hit");
+assert_eq(g_rp_t, f64_from(5), "ray-plane hit");
 
 # Parallel ray (miss)
 var g_rp_par = geo_ray_new(hvec3_new(0, f64_from(5), 0), hvec3_unit_x());
@@ -2789,7 +2807,7 @@ test_group("geo: ray-sphere");
 var g_rs_ray = geo_ray_new(hvec3_zero(), hvec3_unit_z());
 var g_rs_sph = geo_sphere_new(hvec3_new(0, 0, f64_from(5)), F64_ONE);
 var g_rs_t = geo_ray_sphere(g_rs_ray, g_rs_sph);
-assert_eq(f64_to(g_rs_t), 4, "ray-sphere hit t=4");
+assert_eq(g_rs_t, f64_from(4), "ray-sphere hit t=4");
 
 # Miss (perpendicular)
 var g_rs_miss = geo_ray_new(hvec3_new(0, f64_from(10), 0), hvec3_unit_z());
@@ -2799,7 +2817,7 @@ assert_eq(geo_ray_sphere(g_rs_miss, g_rs_sph), 0, "ray-sphere miss");
 var g_rs_inside = geo_ray_new(hvec3_new(0, 0, f64_from(5)), hvec3_unit_z());
 var g_rs_t2 = geo_ray_sphere(g_rs_inside, g_rs_sph);
 assert(g_rs_t2 != 0, "ray-sphere inside hit");
-assert_eq(f64_to(g_rs_t2), 1, "ray-sphere inside t=1");
+assert_eq(g_rs_t2, f64_from(1), "ray-sphere inside t=1");
 
 # Tangent: origin at distance exactly radius from center along perpendicular approach
 # Ray from (1,0,0) going +z toward sphere at (0,0,5) r=1 should miss
@@ -2819,7 +2837,7 @@ var g_tri = geo_triangle_new(
   );
 var g_rt_ray = geo_ray_new(hvec3_zero(), hvec3_unit_z());
 var g_rt_t = geo_ray_triangle(g_rt_ray, g_tri);
-assert_eq(f64_to(g_rt_t), 5, "ray-tri hit t=5");
+assert_eq(g_rt_t, f64_from(5), "ray-tri hit t=5");
 
 # Miss: ray offset to the side
 var g_rt_miss = geo_ray_new(hvec3_new(f64_from(10), 0, 0), hvec3_unit_z());
@@ -2875,24 +2893,24 @@ test_group("geo: closest point");
 
 # Closest on plane
 var g_cp_plane = geo_closest_point_on_plane(g_plane, hvec3_new(f64_from(3), f64_from(7), F64_ONE));
-assert_eq(f64_to(HVec3_x(g_cp_plane)), 3, "closest plane.x");
-assert_eq(f64_to(HVec3_y(g_cp_plane)), 0, "closest plane.y");
+assert_eq(HVec3_x(g_cp_plane), f64_from(3), "closest plane.x");
+assert_eq(HVec3_y(g_cp_plane), f64_from(0), "closest plane.y");
 
 # Closest on sphere (outside)
 var g_cp_sph = geo_closest_point_on_sphere(g_s1, hvec3_new(f64_from(5), 0, 0));
-assert_eq(f64_to(HVec3_x(g_cp_sph)), 1, "closest sphere outside.x");
+assert_eq(HVec3_x(g_cp_sph), f64_from(1), "closest sphere outside.x");
 
 # Closest on sphere (at center — returns center + (r,0,0))
 var g_cp_sph_c = geo_closest_point_on_sphere(g_s1, hvec3_zero());
-assert_eq(f64_to(HVec3_x(g_cp_sph_c)), 1, "closest sphere at center.x");
+assert_eq(HVec3_x(g_cp_sph_c), f64_from(1), "closest sphere at center.x");
 
 # Closest on AABB (outside)
 var g_cp_aabb = geo_closest_point_on_aabb(g_aabb1, hvec3_new(f64_from(5), 0, 0));
-assert_eq(f64_to(HVec3_x(g_cp_aabb)), 1, "closest aabb outside.x");
+assert_eq(HVec3_x(g_cp_aabb), f64_from(1), "closest aabb outside.x");
 
 # Closest on AABB (inside, should clamp to self)
 var g_cp_aabb_in = geo_closest_point_on_aabb(g_aabb1, hvec3_new(F64_HALF, 0, 0));
-assert_eq(f64_to(f64_mul(HVec3_x(g_cp_aabb_in), f64_from(10))), 5, "closest aabb inside.x");
+assert_f64_eq(HVec3_x(g_cp_aabb_in), f64_div(f64_from(5), f64_from(10)), "closest aabb inside.x");
 
 # ----------------------------------------------------------------
 test_group("geo: triangle properties");
@@ -2905,7 +2923,7 @@ var g_tri2 = geo_triangle_new(
 
 # Area = 0.5 * |base| * |height| = 0.5 * 2 * 2 = 2
 var g_area = geo_triangle_area(g_tri2);
-assert_eq(f64_to(g_area), 2, "triangle area");
+assert_eq(g_area, f64_from(2), "triangle area");
 
 # Centroid = (2/3, 2/3, 0)
 var g_centroid = geo_triangle_centroid(g_tri2);
@@ -2915,30 +2933,30 @@ assert_eq(g_centroid_x3, 2, "triangle centroid.x*3");
 
 # Normal: cross of (2,0,0)x(0,2,0) = (0,0,4) — z-component = 4
 var g_normal = geo_triangle_normal(g_tri2);
-assert_eq(f64_to(HVec3_z(g_normal)), 4, "triangle normal.z");
+assert_eq(HVec3_z(g_normal), f64_from(4), "triangle normal.z");
 
 # ----------------------------------------------------------------
 test_group("geo: SDF");
 
 # SDF sphere: (3,0,0), center=origin, r=1 -> d = 2
 var g_sdf_s = sdf_sphere(hvec3_new(f64_from(3), 0, 0), hvec3_zero(), F64_ONE);
-assert_eq(f64_to(g_sdf_s), 2, "sdf sphere outside");
+assert_eq(g_sdf_s, f64_from(2), "sdf sphere outside");
 
 # SDF sphere inside: (0,0,0), center=origin, r=2 -> d = -2
 var g_sdf_si = sdf_sphere(hvec3_zero(), hvec3_zero(), F64_TWO);
-assert_eq(f64_to(g_sdf_si), (0 - 2), "sdf sphere inside");
+assert_eq(g_sdf_si, f64_neg(f64_from(2)), "sdf sphere inside");
 
 # SDF box: point at (3,0,0), center=origin, half=(1,1,1) -> d = 2
 var g_sdf_b = sdf_box(hvec3_new(f64_from(3), 0, 0), hvec3_zero(),
   hvec3_new(F64_ONE, F64_ONE, F64_ONE));
-assert_eq(f64_to(g_sdf_b), 2, "sdf box outside");
+assert_eq(g_sdf_b, f64_from(2), "sdf box outside");
 
 # CSG union
-assert_eq(f64_to(sdf_union(f64_from(3), f64_from(5))), 3, "sdf union");
+assert_eq(sdf_union(f64_from(3), f64_from(5)), f64_from(3), "sdf union");
 # CSG intersection
-assert_eq(f64_to(sdf_intersection(f64_from(3), f64_from(5))), 5, "sdf intersection");
+assert_eq(sdf_intersection(f64_from(3), f64_from(5)), f64_from(5), "sdf intersection");
 # CSG subtraction: max(3, -5) = 3
-assert_eq(f64_to(sdf_subtraction(f64_from(3), f64_from(5))), 3, "sdf subtraction");
+assert_eq(sdf_subtraction(f64_from(3), f64_from(5)), f64_from(3), "sdf subtraction");
 
 # ================================================================
 # CALC — derivatives, integration, bezier, catmull-rom, easing (~25)
@@ -2947,7 +2965,7 @@ test_group("calc: derivative");
 
 # d/dx(x^2) at x=3, h=1 central diff: (16-4)/2 = 6
 var c_deriv_x2 = calc_derivative(&_tc_x2, f64_from(3), F64_ONE);
-assert_eq(f64_to(c_deriv_x2), 6, "deriv x^2 at 3");
+assert_eq(c_deriv_x2, f64_from(6), "deriv x^2 at 3");
 
 # d/dx(sin) at 0 with small h: should be ~cos(0)=1
 var c_deriv_sin = calc_derivative(&_tc_sin, 0, f64_from(1));
@@ -2957,7 +2975,7 @@ assert_eq(c_ds_r, 841, "deriv sin at 0 *1000 ~ 841");
 
 # d/dx(const) = 0
 var c_deriv_c = calc_derivative(&_tc_const, F64_ONE, F64_ONE);
-assert_eq(f64_to(c_deriv_c), 0, "deriv const = 0");
+assert_eq(c_deriv_c, f64_from(0), "deriv const = 0");
 
 # ----------------------------------------------------------------
 test_group("calc: simpson integration");
@@ -3094,20 +3112,20 @@ var c_bz_p1 = hvec2_new(F64_ONE, F64_TWO);
 var c_bz_p2 = hvec2_new(F64_TWO, 0);
 
 var c_bz0 = calc_bezier_quad_2d(c_bz_p0, c_bz_p1, c_bz_p2, 0);
-assert_eq(f64_to(HVec2_x(c_bz0)), 0, "bezier t=0 x");
-assert_eq(f64_to(HVec2_y(c_bz0)), 0, "bezier t=0 y");
+assert_eq(HVec2_x(c_bz0), f64_from(0), "bezier t=0 x");
+assert_eq(HVec2_y(c_bz0), f64_from(0), "bezier t=0 y");
 
 var c_bz1 = calc_bezier_quad_2d(c_bz_p0, c_bz_p1, c_bz_p2, F64_ONE);
-assert_eq(f64_to(HVec2_x(c_bz1)), 2, "bezier t=1 x");
-assert_eq(f64_to(HVec2_y(c_bz1)), 0, "bezier t=1 y");
+assert_eq(HVec2_x(c_bz1), f64_from(2), "bezier t=1 x");
+assert_eq(HVec2_y(c_bz1), f64_from(0), "bezier t=1 y");
 
 # Straight line bezier: all points on x-axis
 var c_bz_s0 = hvec2_new(0, 0);
 var c_bz_s1 = hvec2_new(F64_ONE, 0);
 var c_bz_s2 = hvec2_new(F64_TWO, 0);
 var c_bz_mid = calc_bezier_quad_2d(c_bz_s0, c_bz_s1, c_bz_s2, F64_HALF);
-assert_eq(f64_to(HVec2_x(c_bz_mid)), 1, "bezier straight mid x");
-assert_eq(f64_to(HVec2_y(c_bz_mid)), 0, "bezier straight mid y");
+assert_eq(HVec2_x(c_bz_mid), f64_from(1), "bezier straight mid x");
+assert_eq(HVec2_y(c_bz_mid), f64_from(0), "bezier straight mid y");
 
 # ----------------------------------------------------------------
 test_group("calc: catmull-rom");
@@ -3119,12 +3137,12 @@ var c_cr_p2 = hvec3_new(F64_TWO, F64_TWO, 0);
 var c_cr_p3 = hvec3_new(f64_from(3), f64_from(3), 0);
 
 var c_cr_0 = calc_catmull_rom(c_cr_p0, c_cr_p1, c_cr_p2, c_cr_p3, 0);
-assert_eq(f64_to(HVec3_x(c_cr_0)), 1, "catmull t=0 x");
-assert_eq(f64_to(HVec3_y(c_cr_0)), 1, "catmull t=0 y");
+assert_eq(HVec3_x(c_cr_0), f64_from(1), "catmull t=0 x");
+assert_eq(HVec3_y(c_cr_0), f64_from(1), "catmull t=0 y");
 
 var c_cr_1 = calc_catmull_rom(c_cr_p0, c_cr_p1, c_cr_p2, c_cr_p3, F64_ONE);
-assert_eq(f64_to(HVec3_x(c_cr_1)), 2, "catmull t=1 x");
-assert_eq(f64_to(HVec3_y(c_cr_1)), 2, "catmull t=1 y");
+assert_eq(HVec3_x(c_cr_1), f64_from(2), "catmull t=1 x");
+assert_eq(HVec3_y(c_cr_1), f64_from(2), "catmull t=1 y");
 
 # The four assertions above were the WHOLE of this function's coverage through
 # 2.8.2, and they are the weakest fixture available for it: at t = 0 the t, t^2
@@ -3174,28 +3192,28 @@ assert_eq(HVec3_x(calc_catmull_rom(c_cr_q0, c_cr_q1, c_cr_q2, c_cr_q3, F64_ONE))
 test_group("calc: easing");
 
 # ease_in: t^2
-assert_eq(f64_to(ease_in(0)), 0, "ease_in(0)");
-assert_eq(f64_to(ease_in(F64_ONE)), 1, "ease_in(1)");
+assert_eq(ease_in(0), f64_from(0), "ease_in(0)");
+assert_eq(ease_in(F64_ONE), f64_from(1), "ease_in(1)");
 
 # ease_out: t*(2-t)
-assert_eq(f64_to(ease_out(0)), 0, "ease_out(0)");
-assert_eq(f64_to(ease_out(F64_ONE)), 1, "ease_out(1)");
+assert_eq(ease_out(0), f64_from(0), "ease_out(0)");
+assert_eq(ease_out(F64_ONE), f64_from(1), "ease_out(1)");
 
 # ease_in_out: t^2*(3-2t)
-assert_eq(f64_to(ease_in_out(0)), 0, "ease_in_out(0)");
-assert_eq(f64_to(ease_in_out(F64_ONE)), 1, "ease_in_out(1)");
+assert_eq(ease_in_out(0), f64_from(0), "ease_in_out(0)");
+assert_eq(ease_in_out(F64_ONE), f64_from(1), "ease_in_out(1)");
 
 # ease_in_cubic: t^3
-assert_eq(f64_to(ease_in_cubic(0)), 0, "ease_in_cubic(0)");
-assert_eq(f64_to(ease_in_cubic(F64_ONE)), 1, "ease_in_cubic(1)");
+assert_eq(ease_in_cubic(0), f64_from(0), "ease_in_cubic(0)");
+assert_eq(ease_in_cubic(F64_ONE), f64_from(1), "ease_in_cubic(1)");
 
 # ease_out_cubic: 1-(1-t)^3
-assert_eq(f64_to(ease_out_cubic(0)), 0, "ease_out_cubic(0)");
-assert_eq(f64_to(ease_out_cubic(F64_ONE)), 1, "ease_out_cubic(1)");
+assert_eq(ease_out_cubic(0), f64_from(0), "ease_out_cubic(0)");
+assert_eq(ease_out_cubic(F64_ONE), f64_from(1), "ease_out_cubic(1)");
 
 # ease_in_out_smooth (smootherstep)
-assert_eq(f64_to(ease_in_out_smooth(0)), 0, "smootherstep(0)");
-assert_eq(f64_to(ease_in_out_smooth(F64_ONE)), 1, "smootherstep(1)");
+assert_eq(ease_in_out_smooth(0), f64_from(0), "smootherstep(0)");
+assert_eq(ease_in_out_smooth(F64_ONE), f64_from(1), "smootherstep(1)");
 
 # ----------------------------------------------------------------
 # perlin noise tests skipped — perm table init causes heap corruption in large binaries
@@ -3311,14 +3329,14 @@ store64(n_kdata, f64_from(1));
 store64(n_kdata + 8, f64_from(2));
 store64(n_kdata + 16, f64_from(3));
 var n_ks = num_kahan_sum(n_kdata, 3);
-assert_eq(f64_to(n_ks), 6, "kahan sum");
+assert_eq(n_ks, f64_from(6), "kahan sum");
 
 var n_ns = num_neumaier_sum(n_kdata, 3);
-assert_eq(f64_to(n_ns), 6, "neumaier sum");
+assert_eq(n_ns, f64_from(6), "neumaier sum");
 
 # Empty sum (n=0)
 var n_ns0 = num_neumaier_sum(n_kdata, 0);
-assert_eq(f64_to(n_ns0), 0, "neumaier n=0");
+assert_eq(n_ns0, f64_from(0), "neumaier n=0");
 
 # ----------------------------------------------------------------
 test_group("num: fft roundtrip");
@@ -3334,8 +3352,8 @@ while (_fi < 4) {
 var n_fft_rc = num_fft(n_fft_data, 4);
 assert_eq(n_fft_rc, 0, "fft ok");
 # DC component (index 0) should be 4+0i
-assert_eq(f64_to(load64(n_fft_data)), 4, "fft DC re=4");
-assert_eq(f64_to(load64(n_fft_data + 8)), 0, "fft DC im=0");
+assert_eq(load64(n_fft_data), f64_from(4), "fft DC re=4");
+assert_eq(load64(n_fft_data + 8), f64_from(0), "fft DC im=0");
 
 # Roundtrip: ifft should recover original
 num_ifft(n_fft_data, 4);
@@ -3354,18 +3372,18 @@ var c_b = cx_new(F64_ONE, F64_TWO);
 
 # Add
 var c_add = cx_add(c_a, c_b);
-assert_eq(f64_to(HComplex_re(c_add)), 4, "cx add re");
-assert_eq(f64_to(HComplex_im(c_add)), 6, "cx add im");
+assert_eq(HComplex_re(c_add), f64_from(4), "cx add re");
+assert_eq(HComplex_im(c_add), f64_from(6), "cx add im");
 
 # Sub
 var c_sub = cx_sub(c_a, c_b);
-assert_eq(f64_to(HComplex_re(c_sub)), 2, "cx sub re");
-assert_eq(f64_to(HComplex_im(c_sub)), 2, "cx sub im");
+assert_eq(HComplex_re(c_sub), f64_from(2), "cx sub re");
+assert_eq(HComplex_im(c_sub), f64_from(2), "cx sub im");
 
 # Mul: (3+4i)(1+2i) = -5+10i
 var c_mul = cx_mul(c_a, c_b);
-assert_eq(f64_to(HComplex_re(c_mul)), (0 - 5), "cx mul re");
-assert_eq(f64_to(HComplex_im(c_mul)), 10, "cx mul im");
+assert_eq(HComplex_re(c_mul), f64_neg(f64_from(5)), "cx mul re");
+assert_eq(HComplex_im(c_mul), f64_from(10), "cx mul im");
 
 # Div: (3+4i)/(1+2i) = (3+4i)(1-2i)/5 = (11-2i)/5 = 2.2-0.4i
 var c_div = cx_div(c_a, c_b);
@@ -3375,11 +3393,11 @@ assert_eq(c_div_re10, 22, "cx div re*10");
 # ----------------------------------------------------------------
 test_group("complex: abs, conj, arg");
 
-assert_eq(f64_to(cx_abs(c_a)), 5, "abs(3+4i)=5");
+assert_eq(cx_abs(c_a), f64_from(5), "abs(3+4i)=5");
 
 var c_conj = cx_conj(c_a);
-assert_eq(f64_to(HComplex_im(c_conj)), (0 - 4), "conj im");
-assert_eq(f64_to(HComplex_re(c_conj)), 3, "conj re unchanged");
+assert_eq(HComplex_im(c_conj), f64_neg(f64_from(4)), "conj im");
+assert_eq(HComplex_re(c_conj), f64_from(3), "conj re unchanged");
 
 # arg(1+i) = pi/4
 var c_1i = cx_new(F64_ONE, F64_ONE);
@@ -3414,32 +3432,32 @@ test_group("complex: pauli matrices");
 var c_sx = pauli_x();
 var c_sx2 = cmat_mul(c_sx, c_sx);
 var c_tr_sx2 = cmat_trace(c_sx2);
-assert_eq(f64_to(HComplex_re(c_tr_sx2)), 2, "sx^2 trace=2");
+assert_eq(HComplex_re(c_tr_sx2), f64_from(2), "sx^2 trace=2");
 
 # sigma_y^2 = I
 var c_sy = pauli_y();
 var c_sy2 = cmat_mul(c_sy, c_sy);
 var c_tr_sy2 = cmat_trace(c_sy2);
-assert_eq(f64_to(HComplex_re(c_tr_sy2)), 2, "sy^2 trace=2");
+assert_eq(HComplex_re(c_tr_sy2), f64_from(2), "sy^2 trace=2");
 
 # sigma_z^2 = I
 var c_sz = pauli_z();
 var c_sz2 = cmat_mul(c_sz, c_sz);
 var c_tr_sz2 = cmat_trace(c_sz2);
-assert_eq(f64_to(HComplex_re(c_tr_sz2)), 2, "sz^2 trace=2");
+assert_eq(HComplex_re(c_tr_sz2), f64_from(2), "sz^2 trace=2");
 
 # Traceless: tr(sigma_x) = 0
 var c_tr_sx = cmat_trace(c_sx);
-assert_eq(f64_to(HComplex_re(c_tr_sx)), 0, "sx traceless");
+assert_eq(HComplex_re(c_tr_sx), f64_from(0), "sx traceless");
 var c_tr_sy = cmat_trace(c_sy);
-assert_eq(f64_to(HComplex_re(c_tr_sy)), 0, "sy traceless");
+assert_eq(HComplex_re(c_tr_sy), f64_from(0), "sy traceless");
 var c_tr_sz = cmat_trace(c_sz);
-assert_eq(f64_to(HComplex_re(c_tr_sz)), 0, "sz traceless");
+assert_eq(HComplex_re(c_tr_sz), f64_from(0), "sz traceless");
 
 # Commutation: [sx, sy] = 2i*sz
 var c_comm = cmat_commutator(c_sx, c_sy);
 var c_c00 = cmat_get(c_comm, 0, 0);
-assert_eq(f64_to(HComplex_im(c_c00)), 2, "[sx,sy]_00 im=2");
+assert_eq(HComplex_im(c_c00), f64_from(2), "[sx,sy]_00 im=2");
 
 # ----------------------------------------------------------------
 test_group("complex: matrix");
@@ -3447,21 +3465,21 @@ test_group("complex: matrix");
 # Identity trace
 var c_id = cmat_identity(3);
 var c_id_tr = cmat_trace(c_id);
-assert_eq(f64_to(HComplex_re(c_id_tr)), 3, "identity(3) trace=3");
+assert_eq(HComplex_re(c_id_tr), f64_from(3), "identity(3) trace=3");
 
 # Adjoint of identity = identity
 var c_id_adj = cmat_adjoint(c_id);
 var c_id_adj_tr = cmat_trace(c_id_adj);
-assert_eq(f64_to(HComplex_re(c_id_adj_tr)), 3, "adj(I) trace=3");
+assert_eq(HComplex_re(c_id_adj_tr), f64_from(3), "adj(I) trace=3");
 # If cmat_adjoint were a plain copy, the 8-generator hermitian sweep is A == A
 # again -- verified: such a stub passes all four suites, because 'adj(I) trace==3'
 # is satisfied by the identity function. Pin adjoint on a NON-hermitian matrix.
 var _adj_m = cmat_new(2, 2);
 cmat_set(_adj_m, 0, 1, cx_new(F64_TWO, f64_from(3)));
 var _adj_r = cmat_adjoint(_adj_m);
-assert_eq(f64_to(HComplex_re(cmat_get(_adj_r, 1, 0))), 2, "adj[1][0].re == 2 (transposed)");
-assert_eq(f64_to(HComplex_im(cmat_get(_adj_r, 1, 0))), (0 - 3), "adj[1][0].im == -3 (conjugated)");
-assert_eq(f64_to(HComplex_re(cmat_get(_adj_r, 0, 1))), 0, "adj[0][1] == 0 (not a copy)");
+assert_eq(HComplex_re(cmat_get(_adj_r, 1, 0)), f64_from(2), "adj[1][0].re == 2 (transposed)");
+assert_eq(HComplex_im(cmat_get(_adj_r, 1, 0)), f64_neg(f64_from(3)), "adj[1][0].im == -3 (conjugated)");
+assert_eq(HComplex_re(cmat_get(_adj_r, 0, 1)), f64_from(0), "adj[0][1] == 0 (not a copy)");
 
 # ================================================================
 # LIE GROUPS (~15)
@@ -3496,7 +3514,7 @@ test_group("lie: SU(2)");
 # Identity to_quat -> w=1
 var l_su2_id = su2_identity();
 var l_su2_q = su2_to_quat(l_su2_id);
-assert_eq(f64_to(HQuat_w(l_su2_q)), 1, "su2 identity w=1");
+assert_eq(HQuat_w(l_su2_q), f64_from(1), "su2 identity w=1");
 
 # Compose inverse = identity
 var l_su2_r = su2_from_axis_angle(hvec3_unit_z(), F64_PI_4);
@@ -3585,14 +3603,14 @@ while (_gm_a < 8) {
     assert_eq(_gm_is_herm(l_gma), 1, "gell-mann hermitian (all 9 entries, re and im)");
     # Hermitian + traceless is invariant under PERMUTING the generators: swapping the
     # lambda_4 and lambda_5 bodies passes all four suites. Pin each one's identity.
-    assert_eq(f64_to(HComplex_re(cmat_get(gell_mann(3), 0, 2))), 1, "lambda_4[0][2] == +1 (real)");
-    assert_eq(f64_to(HComplex_im(cmat_get(gell_mann(3), 0, 2))), 0, "lambda_4[0][2] has no i");
-    assert_eq(f64_to(HComplex_im(cmat_get(gell_mann(4), 0, 2))), (0 - 1), "lambda_5[0][2] == -i");
-    assert_eq(f64_to(HComplex_re(cmat_get(gell_mann(4), 0, 2))), 0, "lambda_5[0][2] is pure imaginary");
-    assert_eq(f64_to(HComplex_re(cmat_get(gell_mann(5), 1, 2))), 1, "lambda_6[1][2] == +1 (real)");
-    assert_eq(f64_to(HComplex_im(cmat_get(gell_mann(6), 1, 2))), (0 - 1), "lambda_7[1][2] == -i");
-    assert_eq(f64_to(HComplex_re(cmat_get(gell_mann(2), 0, 0))), 1, "lambda_3[0][0] == +1");
-    assert_eq(f64_to(HComplex_re(cmat_get(gell_mann(2), 1, 1))), (0 - 1), "lambda_3[1][1] == -1");
+    assert_eq(HComplex_re(cmat_get(gell_mann(3), 0, 2)), f64_from(1), "lambda_4[0][2] == +1 (real)");
+    assert_eq(HComplex_im(cmat_get(gell_mann(3), 0, 2)), f64_from(0), "lambda_4[0][2] has no i");
+    assert_eq(HComplex_im(cmat_get(gell_mann(4), 0, 2)), f64_neg(f64_from(1)), "lambda_5[0][2] == -i");
+    assert_eq(HComplex_re(cmat_get(gell_mann(4), 0, 2)), f64_from(0), "lambda_5[0][2] is pure imaginary");
+    assert_eq(HComplex_re(cmat_get(gell_mann(5), 1, 2)), f64_from(1), "lambda_6[1][2] == +1 (real)");
+    assert_eq(HComplex_im(cmat_get(gell_mann(6), 1, 2)), f64_neg(f64_from(1)), "lambda_7[1][2] == -i");
+    assert_eq(HComplex_re(cmat_get(gell_mann(2), 0, 0)), f64_from(1), "lambda_3[0][0] == +1");
+    assert_eq(HComplex_re(cmat_get(gell_mann(2), 1, 1)), f64_neg(f64_from(1)), "lambda_3[1][1] == -1");
     # cmat_adjoint must reproduce the matrix exactly — all 9 entries, both
     # components. Off-diagonal entries make this a real transpose+conjugate test.
     var l_gma_h = cmat_adjoint(l_gma);
@@ -3755,8 +3773,8 @@ var l_lor_id = lorentz_identity();
 var l_tv4 = alloc(32);
 store64(l_tv4, F64_ONE); store64(l_tv4 + 8, 0); store64(l_tv4 + 16, 0); store64(l_tv4 + 24, 0);
 var l_tv4_out = lorentz_transform_4vec(l_lor_id, l_tv4);
-assert_eq(f64_to(load64(l_tv4_out)), 1, "lorentz id t");
-assert_eq(f64_to(load64(l_tv4_out + 8)), 0, "lorentz id x");
+assert_eq(load64(l_tv4_out), f64_from(1), "lorentz id t");
+assert_eq(load64(l_tv4_out + 8), f64_from(0), "lorentz id x");
 
 # Boost validity: a boost should satisfy Lambda^T eta Lambda = eta
 var l_boost = lorentz_boost_x(F64_HALF);
@@ -3799,7 +3817,7 @@ var l_intv_diff = f64_abs(f64_sub(l_intv_before, l_intv_after));
 # Pin the interval itself: 5^2 - 3^2 = 16 exactly. A (-,+,+,+) signature would
 # give -16 and the before/after DIFFERENCE would still be 0, so the preservation
 # check alone is blind to a global sign flip.
-assert_eq(f64_to(l_intv_before), 16, "minkowski interval of (5,3,0,0) == +16");
+assert_eq(l_intv_before, f64_from(16), "minkowski interval of (5,3,0,0) == +16");
 # Boosted by rapidity 0.5: t' = 5cosh+3sinh = 7.201415742513145,
 # x' = 5sinh+3cosh = 5.988354423087879, t'^2 - x'^2 = 15.999999999999993.
 # Measured drift 7.105e-15 = 4 ulp of 16. The old bound of 1.0 was a 6.25%
@@ -3811,7 +3829,7 @@ var _mv = alloc(32);
 store64(_mv, f64_from(5)); store64(_mv + 8, f64_from(3));
 store64(_mv + 16, f64_from(4)); store64(_mv + 24, F64_TWO);
 # 25 - 9 - 16 - 4 = -4
-assert_eq(f64_to(minkowski_interval(_mv)), (0 - 4), "interval(5,3,4,2) == -4");
+assert_eq(minkowski_interval(_mv), f64_neg(f64_from(4)), "interval(5,3,4,2) == -4");
 var _mo = lorentz_transform_4vec(l_boost, _mv);
 assert(f64_lt(f64_abs(f64_sub(minkowski_interval(_mo), minkowski_interval(_mv))), TOL_1EM12) == 1,
   "boost preserves interval(5,3,4,2)");
@@ -3831,10 +3849,10 @@ var _dg_i = 0;
 while (_dg_i < 8) { store64(dg_deriv + _dg_i * 8, 0); _dg_i = _dg_i + 1; }
 
 var dg_chris = christoffel_symbols(dg_metric_inv, dg_deriv, 2);
-assert_eq(f64_to(christoffel_get(dg_chris, 2, 0, 0, 0)), 0, "flat Gamma^0_00=0");
-assert_eq(f64_to(christoffel_get(dg_chris, 2, 1, 0, 1)), 0, "flat Gamma^1_01=0");
-assert_eq(f64_to(christoffel_get(dg_chris, 2, 0, 1, 0)), 0, "flat Gamma^0_10=0");
-assert_eq(f64_to(christoffel_get(dg_chris, 2, 1, 1, 1)), 0, "flat Gamma^1_11=0");
+assert_eq(christoffel_get(dg_chris, 2, 0, 0, 0), f64_from(0), "flat Gamma^0_00=0");
+assert_eq(christoffel_get(dg_chris, 2, 1, 0, 1), f64_from(0), "flat Gamma^1_01=0");
+assert_eq(christoffel_get(dg_chris, 2, 0, 1, 0), f64_from(0), "flat Gamma^0_10=0");
+assert_eq(christoffel_get(dg_chris, 2, 1, 1, 1), f64_from(0), "flat Gamma^1_11=0");
 
 # ----------------------------------------------------------------
 # christoffel_symbols with a metric that actually CURVES (2.8.3)
@@ -3927,23 +3945,23 @@ var dg_chris_deriv = alloc(128);
 var _dg_j = 0;
 while (_dg_j < 16) { store64(dg_chris_deriv + _dg_j * 8, 0); _dg_j = _dg_j + 1; }
 var dg_riemann = riemann_tensor(dg_chris, dg_chris_deriv, 2);
-assert_eq(f64_to(riemann_get(dg_riemann, 2, 0, 0, 0, 1)), 0, "flat Riemann=0");
-assert_eq(f64_to(riemann_get(dg_riemann, 2, 1, 0, 0, 1)), 0, "flat Riemann b=0");
+assert_eq(riemann_get(dg_riemann, 2, 0, 0, 0, 1), f64_from(0), "flat Riemann=0");
+assert_eq(riemann_get(dg_riemann, 2, 1, 0, 0, 1), f64_from(0), "flat Riemann b=0");
 
 # Ricci tensor (all zero)
 var dg_ricci = ricci_tensor(dg_riemann, 2);
-assert_eq(f64_to(ricci_get(dg_ricci, 2, 0, 0)), 0, "flat Ricci=0");
+assert_eq(ricci_get(dg_ricci, 2, 0, 0), f64_from(0), "flat Ricci=0");
 
 # Ricci scalar = 0
 var dg_scalar = ricci_scalar(dg_ricci, dg_metric_inv, 2);
-assert_eq(f64_to(dg_scalar), 0, "flat scalar=0");
+assert_eq(dg_scalar, f64_from(0), "flat scalar=0");
 
 # Einstein tensor (R_mn - 1/2 R g_mn, but R=0 and all R_mn=0 -> 0)
 var dg_metric = alloc(32);
 store64(dg_metric, F64_ONE); store64(dg_metric + 8, 0);
 store64(dg_metric + 16, 0); store64(dg_metric + 24, F64_ONE);
 var dg_einstein = einstein_tensor(dg_ricci, dg_metric, dg_metric_inv, 2);
-assert_eq(f64_to(load64(dg_einstein)), 0, "flat Einstein=0");
+assert_eq(load64(dg_einstein), f64_from(0), "flat Einstein=0");
 
 # ----------------------------------------------------------------
 test_group("diffgeo: wedge product");
@@ -3954,11 +3972,11 @@ store64(dg_alpha, F64_ONE); store64(dg_alpha + 8, 0);
 var dg_beta = alloc(16);
 store64(dg_beta, 0); store64(dg_beta + 8, F64_ONE);
 var dg_w = wedge_1_1(dg_alpha, dg_beta, 2);
-assert_eq(f64_to(load64(dg_w)), 1, "wedge e1^e2=1");
+assert_eq(load64(dg_w), f64_from(1), "wedge e1^e2=1");
 
 # Antisymmetry: alpha ^ alpha = 0
 var dg_w2 = wedge_1_1(dg_alpha, dg_alpha, 2);
-assert_eq(f64_to(load64(dg_w2)), 0, "wedge alpha^alpha=0");
+assert_eq(load64(dg_w2), f64_from(0), "wedge alpha^alpha=0");
 
 # ================================================================
 # SYMBOLIC (~15)
@@ -3968,55 +3986,55 @@ test_group("symbolic: evaluate");
 # Evaluate constant
 var s_c = expr_const(f64_from(42));
 var s_empty = vec_new();
-assert_eq(f64_to(expr_eval(s_c, s_empty)), 42, "eval const");
+assert_eq(expr_eval(s_c, s_empty), f64_from(42), "eval const");
 
 # Evaluate variable
 var s_x = expr_var(str_from("x"));
 var s_binds = vec_new();
 vec_push(s_binds, expr_bind(str_from("x"), f64_from(7)));
-assert_eq(f64_to(expr_eval(s_x, s_binds)), 7, "eval var");
+assert_eq(expr_eval(s_x, s_binds), f64_from(7), "eval var");
 
 # Evaluate x^2 + 3 at x=2 -> 7
 var s_x2 = expr_mul(s_x, s_x);
 var s_e = expr_add(s_x2, expr_const(f64_from(3)));
 var s_binds2 = vec_new();
 vec_push(s_binds2, expr_bind(str_from("x"), f64_from(2)));
-assert_eq(f64_to(expr_eval(s_e, s_binds2)), 7, "eval x^2+3 at 2");
+assert_eq(expr_eval(s_e, s_binds2), f64_from(7), "eval x^2+3 at 2");
 
 # Evaluate sin(0) = 0
 var s_sin0 = expr_sin(expr_const(0));
-assert_eq(f64_to(expr_eval(s_sin0, s_empty)), 0, "eval sin(0)");
+assert_eq(expr_eval(s_sin0, s_empty), f64_from(0), "eval sin(0)");
 
 # Evaluate exp(0) = 1
 var s_exp0 = expr_exp(expr_const(0));
-assert_eq(f64_to(expr_eval(s_exp0, s_empty)), 1, "eval exp(0)");
+assert_eq(expr_eval(s_exp0, s_empty), f64_from(1), "eval exp(0)");
 
 # ----------------------------------------------------------------
 test_group("symbolic: differentiate");
 
 # d/dx(const) = 0
 var s_dc = expr_diff(expr_const(f64_from(5)), str_from("x"));
-assert_eq(f64_to(expr_eval(s_dc, s_empty)), 0, "diff const=0");
+assert_eq(expr_eval(s_dc, s_empty), f64_from(0), "diff const=0");
 
 # d/dx(x) = 1
 var s_dx = expr_diff(expr_var(str_from("x")), str_from("x"));
-assert_eq(f64_to(expr_eval(s_dx, s_binds2)), 1, "diff x=1");
+assert_eq(expr_eval(s_dx, s_binds2), f64_from(1), "diff x=1");
 
 # d/dx(x^2) at x=2 -> 4
 var s_dx2 = expr_simplify(expr_diff(s_x2, str_from("x")));
-assert_eq(f64_to(expr_eval(s_dx2, s_binds2)), 4, "diff x^2 at 2 = 4");
+assert_eq(expr_eval(s_dx2, s_binds2), f64_from(4), "diff x^2 at 2 = 4");
 
 # d/dx(sin(x)) at x=0 -> cos(0) = 1
 var s_sin_x = expr_sin(expr_var(str_from("x")));
 var s_dsin = expr_simplify(expr_diff(s_sin_x, str_from("x")));
 var s_binds0 = vec_new();
 vec_push(s_binds0, expr_bind(str_from("x"), 0));
-assert_eq(f64_to(expr_eval(s_dsin, s_binds0)), 1, "diff sin at 0 = cos(0)=1");
+assert_eq(expr_eval(s_dsin, s_binds0), f64_from(1), "diff sin at 0 = cos(0)=1");
 
 # d/dx(exp(x)) at x=0 -> exp(0) = 1
 var s_exp_x = expr_exp(expr_var(str_from("x")));
 var s_dexp = expr_simplify(expr_diff(s_exp_x, str_from("x")));
-assert_eq(f64_to(expr_eval(s_dexp, s_binds0)), 1, "diff exp at 0 = 1");
+assert_eq(expr_eval(s_dexp, s_binds0), f64_from(1), "diff exp at 0 = 1");
 
 # ----------------------------------------------------------------
 test_group("symbolic: simplify");
@@ -4041,7 +4059,7 @@ assert_eq(expr_tag(s_sp3), EXPR_CONST, "0*x -> const");
 var s_pow0 = expr_pow(s_xv, expr_const(0));
 var s_sp4 = expr_simplify(s_pow0);
 assert_eq(expr_tag(s_sp4), EXPR_CONST, "x^0 -> const");
-assert_eq(f64_to(expr_eval(s_sp4, s_empty)), 1, "x^0 = 1");
+assert_eq(expr_eval(s_sp4, s_empty), f64_from(1), "x^0 = 1");
 
 # x^1 = x
 var s_pow1 = expr_pow(s_xv, expr_const(F64_ONE));
@@ -4362,7 +4380,7 @@ store64(oz_bad, f64_from(77));
 store64(oz_bad + 8, f64_from(77));
 assert(ad_grad_into(oz_t, AD_FULL, oz_ids, 2, oz_bad) != 0,
   "ad_grad_into on a bad root returns the sweep's error");
-assert_eq(f64_to(load64(oz_bad)), 77,
+assert_eq(load64(oz_bad), f64_from(77),
   "and it wrote NOTHING -- the caller's buffer still holds its own sentinel");
 
 test_group("2.11.0 autodiff reverse mode: gradient matches forward mode AND finite differences");
@@ -4399,7 +4417,7 @@ assert(f64_approx_eq(ad_grad_of(rv_t2, rv_x), f64_from(30), LOOSE_TOL_M),
 assert_eq(ad_grad(rv_t2, rv_big), 0, "now a gradient from a SHORTER root");
 assert(f64_approx_eq(ad_grad_of(rv_t2, rv_x), f64_from(5), LOOSE_TOL_M),
   "d/dx of x*y is 5 -- not 30 left over from the previous sweep");
-assert_eq(f64_to(ad_grad_of(rv_t2, rv_top)), 0,
+assert_eq(ad_grad_of(rv_t2, rv_top), f64_from(0),
   "and the node ABOVE the new root has adjoint 0, not its stale 1");
 
 # ad_tape_reset lets a caller run many gradients on one tape. The bump allocator
@@ -4419,16 +4437,16 @@ assert(f64_approx_eq(f64_div(Dual_val(ad_q), f64_from(10000000000)), f64_from(10
 # and dual_ln(-5) came back (NaN, -0.2) -- a NaN value with a CONFIDENT finite
 # derivative, which is worse than either alone.
 var ad_ln5 = dual_ln(dual_var(f64_neg(f64_from(5))));
-assert_eq(f64_to(Dual_val(ad_ln5)), 0, "dual_ln(-5): value is the miss sentinel, not NaN");
-assert_eq(f64_to(Dual_deriv(ad_ln5)), 0,
+assert_eq(Dual_val(ad_ln5), f64_from(0), "dual_ln(-5): value is the miss sentinel, not NaN");
+assert_eq(Dual_deriv(ad_ln5), f64_from(0),
   "dual_ln(-5): derivative is 0, not a confident -0.2 beside a NaN value");
 var ad_ln13 = dual_ln(dual_var(ad_e13));
 assert(f64_approx_eq(Dual_val(ad_ln13), f64_neg(f64_div(f64_from(299336), f64_from(10000))),
     f64_div(F64_ONE, f64_from(1000))), "dual_ln(1e-13) is -29.9336, not a fabricated 0");
 # sqrt computed s BEFORE its guard, so a negative was already NaN.
 var ad_sq = dual_sqrt(dual_var(f64_neg(f64_from(4))));
-assert_eq(f64_to(Dual_val(ad_sq)), 0, "dual_sqrt(-4): value is the miss sentinel, not NaN");
-assert_eq(f64_to(Dual_deriv(ad_sq)), 0, "dual_sqrt(-4): derivative likewise");
+assert_eq(Dual_val(ad_sq), f64_from(0), "dual_sqrt(-4): value is the miss sentinel, not NaN");
+assert_eq(Dual_deriv(ad_sq), f64_from(0), "dual_sqrt(-4): derivative likewise");
 # pow: under ganita 1.0.4 f64_pow was exp(n*ln(base)) and therefore NaN for every
 # non-positive base. x^3 is a polynomial and differentiable everywhere.
 #
@@ -4438,11 +4456,11 @@ assert_eq(f64_to(Dual_deriv(ad_sq)), 0, "dual_sqrt(-4): derivative likewise");
 # something about the stdlib that the stdlib had stopped doing. The assertions
 # themselves are unchanged and still correct -- _ad_pow keeps the integer path for
 # PRECISION now rather than for domain (see src/autodiff.cyr).
-assert_eq(f64_to(Dual_deriv(dual_pow(dual_var(0), F64_ONE))), 1,
+assert_eq(Dual_deriv(dual_pow(dual_var(0), F64_ONE)), f64_from(1),
   "dual_pow: d/dx x^1 at 0 is 1");
-assert_eq(f64_to(Dual_deriv(dual_pow(dual_var(f64_neg(F64_TWO)), f64_from(3)))), 12,
+assert_eq(Dual_deriv(dual_pow(dual_var(f64_neg(F64_TWO)), f64_from(3))), f64_from(12),
   "dual_pow: d/dx x^3 at -2 is 12");
-assert_eq(f64_to(Dual_val(dual_pow(dual_var(f64_neg(F64_TWO)), f64_from(4)))), 16,
+assert_eq(Dual_val(dual_pow(dual_var(f64_neg(F64_TWO)), f64_from(4))), f64_from(16),
   "dual_pow: (-2)^4 is 16 by repeated multiplication");
 # ⚠ AND THE CONTROL: a case where NaN is the RIGHT answer must still be NaN, or
 # the repair has simply replaced one fabrication with another.
@@ -4470,9 +4488,9 @@ assert_eq(f64_eq(ganita_f64_pow(f64_neg(F64_TWO), f64_from(3)),
   "ganita_f64_pow(-2,3) is a number, not NaN (was NaN under ganita 1.0.4)");
 assert_eq(f64_to(f64_round(ganita_f64_pow(f64_neg(F64_TWO), f64_from(3)))), 0 - 8,
   "ganita_f64_pow(-2,3) rounds to -8");
-assert_eq(f64_to(ganita_f64_pow(f64_from(0), f64_from(0))), 1,
+assert_eq(ganita_f64_pow(f64_from(0), f64_from(0)), f64_from(1),
   "ganita_f64_pow(0,0) is 1, the conventional value (was NaN)");
-assert_eq(f64_to(ganita_f64_pow(f64_neg(F64_TWO), f64_from(0))), 1,
+assert_eq(ganita_f64_pow(f64_neg(F64_TWO), f64_from(0)), f64_from(1),
   "ganita_f64_pow(-2,0) is 1 -- x^0 wins over the negative-base case");
 # ⚠ AND THE CONTROL, same shape as the one above it: the domain must have widened
 # EXACTLY as far as the integers. A non-integral exponent on a negative base has no
@@ -4541,7 +4559,7 @@ assert_eq(_ad_pow(f64_neg(F64_TWO), apw_huge),
   ganita_f64_pow(f64_neg(F64_TWO), apw_huge),
   "past the +-1024 window _ad_pow defers to the stdlib and agrees with it");
 
-assert_eq(f64_to(_ad_pow(f64_neg(F64_TWO), f64_from(4))), 16,
+assert_eq(_ad_pow(f64_neg(F64_TWO), f64_from(4)), f64_from(16),
   "_ad_pow(-2,4) is exactly 16 -- repeated multiplication");
 # ⚠ _ad_pow now AGREES with the stdlib bit for bit, so this pair no longer
 # discriminates the two implementations. _ad_pow stays because autodiff needs the
@@ -4585,41 +4603,41 @@ test_group("autodiff: x^2");
 # f(x) = x^2 at x=3: val=9, deriv=6
 var ad_x3 = dual_var(f64_from(3));
 var ad_x3_sq = dual_mul(ad_x3, ad_x3);
-assert_eq(f64_to(Dual_val(ad_x3_sq)), 9, "x^2 at 3 val=9");
-assert_eq(f64_to(Dual_deriv(ad_x3_sq)), 6, "x^2 at 3 deriv=6");
+assert_eq(Dual_val(ad_x3_sq), f64_from(9), "x^2 at 3 val=9");
+assert_eq(Dual_deriv(ad_x3_sq), f64_from(6), "x^2 at 3 deriv=6");
 
 # f(x) = x^2 at x=0: val=0, deriv=0
 var ad_x0 = dual_var(0);
 var ad_x0_sq = dual_mul(ad_x0, ad_x0);
-assert_eq(f64_to(Dual_val(ad_x0_sq)), 0, "x^2 at 0 val=0");
-assert_eq(f64_to(Dual_deriv(ad_x0_sq)), 0, "x^2 at 0 deriv=0");
+assert_eq(Dual_val(ad_x0_sq), f64_from(0), "x^2 at 0 val=0");
+assert_eq(Dual_deriv(ad_x0_sq), f64_from(0), "x^2 at 0 deriv=0");
 
 # ----------------------------------------------------------------
 test_group("autodiff: sin/cos/exp/ln/sqrt");
 
 # sin(0)=0, deriv=cos(0)=1
 var ad_sin0 = dual_sin(dual_var(0));
-assert_eq(f64_to(Dual_val(ad_sin0)), 0, "sin(0) val");
-assert_eq(f64_to(Dual_deriv(ad_sin0)), 1, "sin(0) deriv=cos(0)=1");
+assert_eq(Dual_val(ad_sin0), f64_from(0), "sin(0) val");
+assert_eq(Dual_deriv(ad_sin0), f64_from(1), "sin(0) deriv=cos(0)=1");
 
 # cos(0)=1, deriv=-sin(0)=0
 var ad_cos0 = dual_cos(dual_var(0));
-assert_eq(f64_to(Dual_val(ad_cos0)), 1, "cos(0) val");
-assert_eq(f64_to(Dual_deriv(ad_cos0)), 0, "cos(0) deriv=-sin(0)=0");
+assert_eq(Dual_val(ad_cos0), f64_from(1), "cos(0) val");
+assert_eq(Dual_deriv(ad_cos0), f64_from(0), "cos(0) deriv=-sin(0)=0");
 
 # exp(0)=1, deriv=exp(0)=1
 var ad_exp0 = dual_exp(dual_var(0));
-assert_eq(f64_to(Dual_val(ad_exp0)), 1, "exp(0) val");
-assert_eq(f64_to(Dual_deriv(ad_exp0)), 1, "exp(0) deriv");
+assert_eq(Dual_val(ad_exp0), f64_from(1), "exp(0) val");
+assert_eq(Dual_deriv(ad_exp0), f64_from(1), "exp(0) deriv");
 
 # ln(1)=0, deriv=1/1=1
 var ad_ln1 = dual_ln(dual_var(F64_ONE));
-assert_eq(f64_to(Dual_val(ad_ln1)), 0, "ln(1) val");
-assert_eq(f64_to(Dual_deriv(ad_ln1)), 1, "ln(1) deriv");
+assert_eq(Dual_val(ad_ln1), f64_from(0), "ln(1) val");
+assert_eq(Dual_deriv(ad_ln1), f64_from(1), "ln(1) deriv");
 
 # sqrt(4)=2, deriv=1/(2*2)=0.25
 var ad_sqrt4 = dual_sqrt(dual_var(f64_from(4)));
-assert_eq(f64_to(Dual_val(ad_sqrt4)), 2, "sqrt(4) val");
+assert_eq(Dual_val(ad_sqrt4), f64_from(2), "sqrt(4) val");
 var ad_sqrt4_d = f64_to(f64_round(f64_mul(Dual_deriv(ad_sqrt4), f64_from(100))));
 assert_eq(ad_sqrt4_d, 25, "sqrt(4) deriv*100=25");
 
@@ -4631,8 +4649,8 @@ var ad_x = dual_var(f64_from(3));
 var ad_x_sq = dual_mul(ad_x, ad_x);
 var ad_2x = dual_mul(dual_const(F64_TWO), ad_x);
 var ad_comp = dual_add(ad_x_sq, ad_2x);
-assert_eq(f64_to(Dual_val(ad_comp)), 15, "x^2+2x at 3 val=15");
-assert_eq(f64_to(Dual_deriv(ad_comp)), 8, "x^2+2x at 3 deriv=8");
+assert_eq(Dual_val(ad_comp), f64_from(15), "x^2+2x at 3 val=15");
+assert_eq(Dual_deriv(ad_comp), f64_from(8), "x^2+2x at 3 deriv=8");
 
 # ================================================================
 # INTERVAL (~10)
@@ -4659,18 +4677,18 @@ var iv_b = ivl_new(f64_from(2), f64_from(4));
 
 # Add: [1,3]+[2,4] = [3,7]
 var iv_sum = ivl_add(iv_a, iv_b);
-assert_eq(f64_to(Interval_lo(iv_sum)), 3, "ivl add lo");
-assert_eq(f64_to(Interval_hi(iv_sum)), 7, "ivl add hi");
+assert_eq(Interval_lo(iv_sum), f64_from(3), "ivl add lo");
+assert_eq(Interval_hi(iv_sum), f64_from(7), "ivl add hi");
 
 # Sub: [1,3]-[2,4] = [1-4, 3-2] = [-3, 1]
 var iv_diff = ivl_sub(iv_a, iv_b);
-assert_eq(f64_to(Interval_lo(iv_diff)), (0 - 3), "ivl sub lo");
-assert_eq(f64_to(Interval_hi(iv_diff)), 1, "ivl sub hi");
+assert_eq(Interval_lo(iv_diff), f64_neg(f64_from(3)), "ivl sub lo");
+assert_eq(Interval_hi(iv_diff), f64_from(1), "ivl sub hi");
 
 # Mul: [1,3]*[2,4] = [2,12]
 var iv_prod = ivl_mul(iv_a, iv_b);
-assert_eq(f64_to(Interval_lo(iv_prod)), 2, "ivl mul lo");
-assert_eq(f64_to(Interval_hi(iv_prod)), 12, "ivl mul hi");
+assert_eq(Interval_lo(iv_prod), f64_from(2), "ivl mul lo");
+assert_eq(Interval_hi(iv_prod), f64_from(12), "ivl mul hi");
 
 # Div: [1,3]/[2,4] = [1/4, 3/2] = [0.25, 1.5]
 var iv_div = ivl_div(iv_a, iv_b);
@@ -4683,33 +4701,33 @@ test_group("interval: queries");
 assert_eq(ivl_contains(iv_a, f64_from(2)), 1, "ivl contains 2");
 assert_eq(ivl_contains(iv_a, f64_from(4)), 0, "ivl not contains 4");
 assert_eq(ivl_overlaps(iv_a, iv_b), 1, "ivl overlaps");
-assert_eq(f64_to(ivl_width(iv_a)), 2, "ivl width=2");
-assert_eq(f64_to(ivl_midpoint(iv_a)), 2, "ivl midpoint=2");
+assert_eq(ivl_width(iv_a), f64_from(2), "ivl width=2");
+assert_eq(ivl_midpoint(iv_a), f64_from(2), "ivl midpoint=2");
 
 # ----------------------------------------------------------------
 test_group("interval: neg, abs, sqrt, point");
 
 # Neg: -[1,3] = [-3,-1]
 var iv_neg = ivl_neg(iv_a);
-assert_eq(f64_to(Interval_lo(iv_neg)), (0 - 3), "ivl neg lo");
-assert_eq(f64_to(Interval_hi(iv_neg)), (0 - 1), "ivl neg hi");
+assert_eq(Interval_lo(iv_neg), f64_neg(f64_from(3)), "ivl neg lo");
+assert_eq(Interval_hi(iv_neg), f64_neg(f64_from(1)), "ivl neg hi");
 
 # Abs: |[-3,1]| = [0,3] (contains 0)
 var iv_neg3_1 = ivl_new(f64_neg(f64_from(3)), F64_ONE);
 var iv_abs = ivl_abs(iv_neg3_1);
-assert_eq(f64_to(Interval_lo(iv_abs)), 0, "ivl abs lo=0");
-assert_eq(f64_to(Interval_hi(iv_abs)), 3, "ivl abs hi=3");
+assert_eq(Interval_lo(iv_abs), f64_from(0), "ivl abs lo=0");
+assert_eq(Interval_hi(iv_abs), f64_from(3), "ivl abs hi=3");
 
 # Sqrt: sqrt([4,9]) = [2,3]
 var iv_49 = ivl_new(f64_from(4), f64_from(9));
 var iv_sqrt = ivl_sqrt(iv_49);
-assert_eq(f64_to(Interval_lo(iv_sqrt)), 2, "ivl sqrt lo=2");
-assert_eq(f64_to(Interval_hi(iv_sqrt)), 3, "ivl sqrt hi=3");
+assert_eq(Interval_lo(iv_sqrt), f64_from(2), "ivl sqrt lo=2");
+assert_eq(Interval_hi(iv_sqrt), f64_from(3), "ivl sqrt hi=3");
 
 # Point interval
 var iv_pt = ivl_point(f64_from(5));
-assert_eq(f64_to(ivl_width(iv_pt)), 0, "point width=0");
-assert_eq(f64_to(ivl_midpoint(iv_pt)), 5, "point mid=5");
+assert_eq(ivl_width(iv_pt), f64_from(0), "point width=0");
+assert_eq(ivl_midpoint(iv_pt), f64_from(5), "point mid=5");
 
 # ================================================================
 # TENSOR (~10)
@@ -4719,43 +4737,43 @@ test_group("tensor: create, get/set");
 var t_shape = alloc(16);
 store64(t_shape, 3); store64(t_shape + 8, 4);
 var t = tensor_new(2, t_shape);
-assert_eq(f64_to(tensor_get2(t, 0, 0)), 0, "tensor zero init");
+assert_eq(tensor_get2(t, 0, 0), f64_from(0), "tensor zero init");
 
 tensor_set2(t, 1, 2, f64_from(42));
-assert_eq(f64_to(tensor_get2(t, 1, 2)), 42, "tensor set/get");
-assert_eq(f64_to(tensor_get2(t, 2, 3)), 0, "tensor other still 0");
+assert_eq(tensor_get2(t, 1, 2), f64_from(42), "tensor set/get");
+assert_eq(tensor_get2(t, 2, 3), f64_from(0), "tensor other still 0");
 
 # ----------------------------------------------------------------
 test_group("tensor: kronecker delta");
 
-assert_eq(f64_to(kronecker_delta(0, 0)), 1, "delta ii=1");
-assert_eq(f64_to(kronecker_delta(1, 1)), 1, "delta jj=1");
-assert_eq(f64_to(kronecker_delta(0, 1)), 0, "delta ij=0");
-assert_eq(f64_to(kronecker_delta(2, 3)), 0, "delta 23=0");
+assert_eq(kronecker_delta(0, 0), f64_from(1), "delta ii=1");
+assert_eq(kronecker_delta(1, 1), f64_from(1), "delta jj=1");
+assert_eq(kronecker_delta(0, 1), f64_from(0), "delta ij=0");
+assert_eq(kronecker_delta(2, 3), f64_from(0), "delta 23=0");
 
 # ----------------------------------------------------------------
 test_group("tensor: minkowski metric");
 
-assert_eq(f64_to(minkowski(0, 0)), 1, "eta 00=+1");
-assert_eq(f64_to(minkowski(1, 1)), (0 - 1), "eta 11=-1");
-assert_eq(f64_to(minkowski(2, 2)), (0 - 1), "eta 22=-1");
-assert_eq(f64_to(minkowski(3, 3)), (0 - 1), "eta 33=-1");
-assert_eq(f64_to(minkowski(0, 1)), 0, "eta 01=0");
+assert_eq(minkowski(0, 0), f64_from(1), "eta 00=+1");
+assert_eq(minkowski(1, 1), f64_neg(f64_from(1)), "eta 11=-1");
+assert_eq(minkowski(2, 2), f64_neg(f64_from(1)), "eta 22=-1");
+assert_eq(minkowski(3, 3), f64_neg(f64_from(1)), "eta 33=-1");
+assert_eq(minkowski(0, 1), f64_from(0), "eta 01=0");
 
 # ----------------------------------------------------------------
 test_group("tensor: levi-civita 3D");
 
-assert_eq(f64_to(levi_civita_3(0, 1, 2)), 1, "eps 012=+1");
-assert_eq(f64_to(levi_civita_3(1, 2, 0)), 1, "eps 120=+1");
-assert_eq(f64_to(levi_civita_3(2, 0, 1)), 1, "eps 201=+1");
-assert_eq(f64_to(levi_civita_3(1, 0, 2)), (0 - 1), "eps 102=-1");
+assert_eq(levi_civita_3(0, 1, 2), f64_from(1), "eps 012=+1");
+assert_eq(levi_civita_3(1, 2, 0), f64_from(1), "eps 120=+1");
+assert_eq(levi_civita_3(2, 0, 1), f64_from(1), "eps 201=+1");
+assert_eq(levi_civita_3(1, 0, 2), f64_neg(f64_from(1)), "eps 102=-1");
 assert_eq(levi_civita_3(0, 0, 1), 0, "eps repeated=0");
 
 # ----------------------------------------------------------------
 test_group("tensor: levi-civita 4D");
 
-assert_eq(f64_to(levi_civita_4(0, 1, 2, 3)), 1, "eps4 0123=+1");
-assert_eq(f64_to(levi_civita_4(1, 0, 2, 3)), (0 - 1), "eps4 1023=-1");
+assert_eq(levi_civita_4(0, 1, 2, 3), f64_from(1), "eps4 0123=+1");
+assert_eq(levi_civita_4(1, 0, 2, 3), f64_neg(f64_from(1)), "eps4 1023=-1");
 assert_eq(levi_civita_4(0, 0, 1, 2), 0, "eps4 repeated=0");
 
 # ----------------------------------------------------------------
@@ -4776,10 +4794,10 @@ tensor_set2(t_b, 1, 0, f64_from(30));
 tensor_set2(t_b, 1, 1, f64_from(40));
 
 var t_sum = tensor_add(t_a, t_b);
-assert_eq(f64_to(tensor_get2(t_sum, 0, 0)), 11, "tensor_add [0,0]");
-assert_eq(f64_to(tensor_get2(t_sum, 0, 1)), 22, "tensor_add [0,1]");
-assert_eq(f64_to(tensor_get2(t_sum, 1, 0)), 33, "tensor_add [1,0]");
-assert_eq(f64_to(tensor_get2(t_sum, 1, 1)), 44, "tensor_add [1,1]");
+assert_eq(tensor_get2(t_sum, 0, 0), f64_from(11), "tensor_add [0,0]");
+assert_eq(tensor_get2(t_sum, 0, 1), f64_from(22), "tensor_add [0,1]");
+assert_eq(tensor_get2(t_sum, 1, 0), f64_from(33), "tensor_add [1,0]");
+assert_eq(tensor_get2(t_sum, 1, 1), f64_from(44), "tensor_add [1,1]");
 
 # ================================================================
 # COLLISION_CORE — contacts, sequential impulse smoke
@@ -4795,7 +4813,12 @@ var c_norm = hvec3_new(0, F64_ONE, 0);
 var contact = contact_new(0, 1, c_norm, F64_HALF, F64_HALF, F64_HALF, F64_ONE, F64_ONE);
 assert_eq(ColContact_body_a(contact), 0, "ColContact body_a");
 assert_eq(ColContact_body_b(contact), 1, "ColContact body_b");
-assert_eq(f64_to(ColContact_penetration(contact)), 0, "ColContact penetration (0.5 → f64_to → 0 truncated)");
+# ⭐ 2.13.0 — the one assertion in this sweep whose truncation was DELIBERATE, and
+# its own message said so. Kept as a truncation test, but now pinned on BOTH sides:
+# the stored value is bit-exactly 0.5, and reading it through `f64_to` gives 0.
+# Before, only the second half was asserted, so the first was free to drift.
+assert_eq(ColContact_penetration(contact), F64_HALF, "ColContact penetration is bit-exactly 0.5");
+assert_eq(f64_to(ColContact_penetration(contact)), 0, "ColContact penetration: 0.5 truncates to 0 through f64_to");
 
 # MPR narrowphase (2.4.4) — fixed a false-positive: separated shapes used to
 # report a hit (missing origin-containment early-out → degenerate colinear
@@ -4819,7 +4842,7 @@ var mpr_n = alloc(8);
 var mpr_d = alloc(8);
 var mpr_hit = mpr_penetration(&_mpr_sup_sphere, mpr_a, &_mpr_sup_sphere, mpr_b_ov, mpr_n, mpr_d);
 assert_eq(mpr_hit, 1, "mpr_penetration: overlap returns hit");
-assert_eq(f64_to(f64_mul(load64(mpr_d), f64_from(100))), 100, "mpr_penetration: depth ~1.0 (4-3)");
+assert_f64_eq(load64(mpr_d), f64_div(f64_from(100), f64_from(100)), "mpr_penetration: depth ~1.0 (4-3)");
 # 2.9.0: was assert_eq(f64_to(|nx| * 100), 100). f64_to TRUNCATES, so that read
 # "0.99 <= |nx| <= 1.00" -- and it FAILS the moment the normal is right to only
 # 15 digits instead of exact, because 0.9999999999 * 100 truncates to 99. The
@@ -4834,7 +4857,7 @@ var mpr_b_deep = hvec4_new(F64_ONE, 0, 0, F64_TWO);     # dist 1 → depth 4-1 =
 var mpr_n2 = alloc(8);
 var mpr_d2 = alloc(8);
 mpr_penetration(&_mpr_sup_sphere, mpr_a, &_mpr_sup_sphere, mpr_b_deep, mpr_n2, mpr_d2);
-assert_eq(f64_to(f64_mul(load64(mpr_d2), f64_from(100))), 300, "mpr_penetration: deep depth ~3.0 (4-1)");
+assert_f64_eq(load64(mpr_d2), f64_div(f64_from(300), f64_from(100)), "mpr_penetration: deep depth ~3.0 (4-1)");
 
 var mpr_n3 = alloc(8);
 var mpr_d3 = alloc(8);
@@ -5207,12 +5230,12 @@ var si_cs = vec_new();
 vec_push(si_cs, si_c);
 var si_out = alloc(16);
 sequential_impulse(si_cs, 1, 10, si_out);
-assert_eq(f64_to(f64_mul(load64(si_out), f64_from(100))), 25, "sequential_impulse: resting λ=0.25 (was 0)");
+assert_f64_eq(load64(si_out), f64_div(f64_from(25), f64_from(100)), "sequential_impulse: resting λ=0.25 (was 0)");
 
 # Idempotent: e=0 converges in a single iteration to the same impulse.
 var si_out1 = alloc(16);
 sequential_impulse(si_cs, 1, 1, si_out1);
-assert_eq(f64_to(f64_mul(load64(si_out1), f64_from(100))), 25, "sequential_impulse: converges in 1 iter");
+assert_f64_eq(load64(si_out1), f64_div(f64_from(25), f64_from(100)), "sequential_impulse: converges in 1 iter");
 
 # Dynamic vs static (inv_mass 1+0=1), pen=1.0 → λ=1.0.
 var si_c2 = contact_new(0, 1, hvec3_unit_y(), F64_ONE, 0, 0, F64_ONE, 0);
@@ -5220,7 +5243,7 @@ var si_cs2 = vec_new();
 vec_push(si_cs2, si_c2);
 var si_out2 = alloc(16);
 sequential_impulse(si_cs2, 1, 20, si_out2);
-assert_eq(f64_to(f64_mul(load64(si_out2), f64_from(100))), 100, "sequential_impulse: dynamic+static λ=1.0");
+assert_f64_eq(load64(si_out2), f64_div(f64_from(100), f64_from(100)), "sequential_impulse: dynamic+static λ=1.0");
 
 # Both static (inv_mass 0) → contact skipped, impulse stays 0.
 var si_c3 = contact_new(0, 1, hvec3_unit_y(), F64_HALF, 0, 0, 0, 0);
@@ -5228,7 +5251,7 @@ var si_cs3 = vec_new();
 vec_push(si_cs3, si_c3);
 var si_out3 = alloc(16);
 sequential_impulse(si_cs3, 1, 5, si_out3);
-assert_eq(f64_to(load64(si_out3)), 0, "sequential_impulse: both-static skipped (λ=0)");
+assert_eq(load64(si_out3), f64_from(0), "sequential_impulse: both-static skipped (λ=0)");
 
 # 2.8.3 — RESTITUTION. Every assertion above uses e = 0, where the pre-2.8.3
 # (1+e)-on-the-effective-velocity form happens to be right. For e > 0 that form
@@ -5256,7 +5279,7 @@ while (sr_i < 3) {
     sequential_impulse(sr_cs, 1, 8, sr_o8);
     sequential_impulse(sr_cs, 1, 9, sr_o9);
 
-    assert_eq(f64_to(f64_mul(load64(sr_o1), f64_from(1000))), sr_want,
+    assert_f64_eq(load64(sr_o1), f64_div(f64_from(sr_want), f64_from(1000)),
       "sequential_impulse: 1 sweep reaches (1+e)·pen/inv_mass");
     assert_eq(load64(sr_o8), load64(sr_o1),
       "sequential_impulse: 8 sweeps == 1 sweep (no period-2 orbit)");
@@ -5477,7 +5500,7 @@ var ch_a = f64_sub(f64_mul(HVec2_x(ch_h0), HVec2_y(ch_h1)), f64_mul(HVec2_x(ch_h
 ch_a = f64_add(ch_a, f64_sub(f64_mul(HVec2_x(ch_h1), HVec2_y(ch_h2)), f64_mul(HVec2_x(ch_h2), HVec2_y(ch_h1))));
 ch_a = f64_add(ch_a, f64_sub(f64_mul(HVec2_x(ch_h2), HVec2_y(ch_h3)), f64_mul(HVec2_x(ch_h3), HVec2_y(ch_h2))));
 ch_a = f64_add(ch_a, f64_sub(f64_mul(HVec2_x(ch_h3), HVec2_y(ch_h0)), f64_mul(HVec2_x(ch_h0), HVec2_y(ch_h3))));
-assert_eq(f64_to(ch_a), 8, "convex_hull_2d: shoelace 2xarea = +8 (CCW, exact square)");
+assert_eq(ch_a, f64_from(8), "convex_hull_2d: shoelace 2xarea = +8 (CCW, exact square)");
 
 # Degeneracies (2.4.0) — each must return a defined hull, never trap.
 
@@ -5501,7 +5524,7 @@ var ch_t2 = vec_get(ch_t, vec_get(ch_th, 2));
 var ch_ta = f64_sub(f64_mul(HVec2_x(ch_t0), HVec2_y(ch_t1)), f64_mul(HVec2_x(ch_t1), HVec2_y(ch_t0)));
 ch_ta = f64_add(ch_ta, f64_sub(f64_mul(HVec2_x(ch_t1), HVec2_y(ch_t2)), f64_mul(HVec2_x(ch_t2), HVec2_y(ch_t1))));
 ch_ta = f64_add(ch_ta, f64_sub(f64_mul(HVec2_x(ch_t2), HVec2_y(ch_t0)), f64_mul(HVec2_x(ch_t0), HVec2_y(ch_t2))));
-assert_eq(f64_to(ch_ta), 4, "convex_hull_2d: triangle shoelace 2xarea = +4 (CCW)");
+assert_eq(ch_ta, f64_from(4), "convex_hull_2d: triangle shoelace 2xarea = +4 (CCW)");
 
 # Collinear → only the 2 extreme endpoints (interior point dropped).
 var ch_c = vec_new();
@@ -5537,7 +5560,7 @@ vec_push(tp_q, hvec2_new(F64_TWO, F64_TWO));
 vec_push(tp_q, hvec2_new(0, F64_TWO));
 var tp_qt = triangulate_polygon(tp_q, 4);
 assert_eq(vec_len(tp_qt), 6, "triangulate_polygon: convex quad -> 2 triangles");
-assert_eq(f64_to(f64_abs(_tp_area2x(tp_q, tp_qt))), 8, "triangulate_polygon: quad tiles (2xarea=8)");
+assert_eq(f64_abs(_tp_area2x(tp_q, tp_qt)), f64_from(8), "triangulate_polygon: quad tiles (2xarea=8)");
 
 # Concave 5-gon (reflex at (1,1)) → 3 triangles, 2×area = 6.
 var tp_c = vec_new();
@@ -5548,7 +5571,7 @@ vec_push(tp_c, hvec2_new(F64_ONE, F64_ONE));
 vec_push(tp_c, hvec2_new(0, F64_TWO));
 var tp_ct = triangulate_polygon(tp_c, 5);
 assert_eq(vec_len(tp_ct), 9, "triangulate_polygon: concave 5-gon -> 3 triangles");
-assert_eq(f64_to(f64_abs(_tp_area2x(tp_c, tp_ct))), 6, "triangulate_polygon: concave tiles (2xarea=6)");
+assert_eq(f64_abs(_tp_area2x(tp_c, tp_ct)), f64_from(6), "triangulate_polygon: concave tiles (2xarea=6)");
 
 # Convex hexagon → 4 triangles, 2×area = 24.
 var tp_h = vec_new();
@@ -5560,7 +5583,7 @@ vec_push(tp_h, hvec2_new(0, f64_from(4)));
 vec_push(tp_h, hvec2_new(f64_neg(F64_ONE), F64_TWO));
 var tp_ht = triangulate_polygon(tp_h, 6);
 assert_eq(vec_len(tp_ht), 12, "triangulate_polygon: hexagon -> 4 triangles");
-assert_eq(f64_to(f64_abs(_tp_area2x(tp_h, tp_ht))), 24, "triangulate_polygon: hexagon tiles (2xarea=24)");
+assert_eq(f64_abs(_tp_area2x(tp_h, tp_ht)), f64_from(24), "triangulate_polygon: hexagon tiles (2xarea=24)");
 
 # U-shape (8 verts, 2 reflex) → 6 triangles, 2×area = 14.
 var tp_u = vec_new();
@@ -5574,7 +5597,7 @@ vec_push(tp_u, hvec2_new(F64_ONE, f64_from(3)));
 vec_push(tp_u, hvec2_new(0, f64_from(3)));
 var tp_ut = triangulate_polygon(tp_u, 8);
 assert_eq(vec_len(tp_ut), 18, "triangulate_polygon: U-shape (2 reflex) -> 6 triangles");
-assert_eq(f64_to(f64_abs(_tp_area2x(tp_u, tp_ut))), 14, "triangulate_polygon: U-shape tiles (2xarea=14)");
+assert_eq(f64_abs(_tp_area2x(tp_u, tp_ut)), f64_from(14), "triangulate_polygon: U-shape tiles (2xarea=14)");
 
 # CW winding (reversed square) → still 2 triangles tiling area 4.
 var tp_w = vec_new();
@@ -5584,7 +5607,7 @@ vec_push(tp_w, hvec2_new(F64_TWO, F64_TWO));
 vec_push(tp_w, hvec2_new(F64_TWO, 0));
 var tp_wt = triangulate_polygon(tp_w, 4);
 assert_eq(vec_len(tp_wt), 6, "triangulate_polygon: CW quad -> 2 triangles");
-assert_eq(f64_to(f64_abs(_tp_area2x(tp_w, tp_wt))), 8, "triangulate_polygon: CW quad tiles (2xarea=8)");
+assert_eq(f64_abs(_tp_area2x(tp_w, tp_wt)), f64_from(8), "triangulate_polygon: CW quad tiles (2xarea=8)");
 
 # Collinear edge vertex (1,0) on the bottom edge → 3 triangles, 2×area = 8.
 var tp_l = vec_new();
@@ -5595,7 +5618,7 @@ vec_push(tp_l, hvec2_new(F64_TWO, F64_TWO));
 vec_push(tp_l, hvec2_new(0, F64_TWO));
 var tp_lt = triangulate_polygon(tp_l, 5);
 assert_eq(vec_len(tp_lt), 9, "triangulate_polygon: collinear edge vertex -> 3 triangles");
-assert_eq(f64_to(f64_abs(_tp_area2x(tp_l, tp_lt))), 8, "triangulate_polygon: collinear tiles (2xarea=8)");
+assert_eq(f64_abs(_tp_area2x(tp_l, tp_lt)), f64_from(8), "triangulate_polygon: collinear tiles (2xarea=8)");
 
 # < 3 vertices → empty.
 var tp_deg = vec_new();
@@ -5763,27 +5786,27 @@ store64(es_one, es_A);
 
 var es_mm = einsum(str_from("ij,jk->ik"), es_two, 2);
 assert_neq(es_mm, 0, "einsum: matmul returns a tensor");
-assert_eq(f64_to(tensor_get2(es_mm, 0, 0)), 19, "einsum matmul [0][0]=19");
-assert_eq(f64_to(tensor_get2(es_mm, 0, 1)), 22, "einsum matmul [0][1]=22");
-assert_eq(f64_to(tensor_get2(es_mm, 1, 0)), 43, "einsum matmul [1][0]=43");
-assert_eq(f64_to(tensor_get2(es_mm, 1, 1)), 50, "einsum matmul [1][1]=50");
+assert_eq(tensor_get2(es_mm, 0, 0), f64_from(19), "einsum matmul [0][0]=19");
+assert_eq(tensor_get2(es_mm, 0, 1), f64_from(22), "einsum matmul [0][1]=22");
+assert_eq(tensor_get2(es_mm, 1, 0), f64_from(43), "einsum matmul [1][0]=43");
+assert_eq(tensor_get2(es_mm, 1, 1), f64_from(50), "einsum matmul [1][1]=50");
 
 var es_tr = einsum(str_from("ii->"), es_one, 1);
 assert_neq(es_tr, 0, "einsum: trace returns a tensor");
-assert_eq(f64_to(load64(HTensor_data(es_tr))), 5, "einsum trace(A)=5");
+assert_eq(load64(HTensor_data(es_tr)), f64_from(5), "einsum trace(A)=5");
 
 var es_tp = einsum(str_from("ij->ji"), es_one, 1);
 assert_neq(es_tp, 0, "einsum: transpose returns a tensor");
-assert_eq(f64_to(tensor_get2(es_tp, 0, 1)), 3, "einsum transpose [0][1]=3");
-assert_eq(f64_to(tensor_get2(es_tp, 1, 0)), 2, "einsum transpose [1][0]=2");
+assert_eq(tensor_get2(es_tp, 0, 1), f64_from(3), "einsum transpose [0][1]=3");
+assert_eq(tensor_get2(es_tp, 1, 0), f64_from(2), "einsum transpose [1][0]=2");
 
 test_group("mat3 — first coverage (module shipped untested through 2.6.12)");
 var m3i = m3_identity();
-assert_eq(f64_to(m3_determinant(m3i)), 1, "m3_determinant(I)=1");
-assert_eq(f64_to(m3_trace(m3i)), 3, "m3_trace(I)=3");
+assert_eq(m3_determinant(m3i), f64_from(1), "m3_determinant(I)=1");
+assert_eq(m3_trace(m3i), f64_from(3), "m3_trace(I)=3");
 var m3p = m3_mul(m3i, m3i);
-assert_eq(f64_to(m3_get(m3p, 0, 0)), 1, "m3_mul(I,I)[0][0]=1");
-assert_eq(f64_to(m3_get(m3p, 1, 0)), 0, "m3_mul(I,I)[1][0]=0");
+assert_eq(m3_get(m3p, 0, 0), f64_from(1), "m3_mul(I,I)[0][0]=1");
+assert_eq(m3_get(m3p, 1, 0), f64_from(0), "m3_mul(I,I)[1][0]=0");
 # M * M^-1 = I for a non-symmetric invertible matrix
 var m3a = m3_new();
 m3_set(m3a, 0, 0, f64_from(2)); m3_set(m3a, 0, 1, F64_ONE);   m3_set(m3a, 0, 2, 0);
@@ -5961,8 +5984,8 @@ while (ne_i < 3) {
 }
 assert_eq(num_tridiag_solve(ne_a, ne_b, ne_cc, ne_d, 3, ne_out), HSB_ERR_NONE,
   "num_tridiag_solve returns HSB_ERR_NONE");
-assert_eq(f64_to(load64(ne_out)), 1, "tridiag identity x[0]=1");
-assert_eq(f64_to(load64(ne_out + 16)), 3, "tridiag identity x[2]=3");
+assert_eq(load64(ne_out), f64_from(1), "tridiag identity x[0]=1");
+assert_eq(load64(ne_out + 16), f64_from(3), "tridiag identity x[2]=3");
 
 # ----------------------------------------------------------------
 # num_tridiag_solve on systems with LIVE off-diagonals (2.8.3)
@@ -6340,7 +6363,7 @@ test_group("calc_ext / calc / noise_simplex: fBm normalisation is guarded");
 # roughly [-1, 1] range — and NaN then propagated through every downstream sample.
 var fb2 = fbm_2d(F64_ONE, F64_ONE, 0, F64_ONE, F64_ONE, F64_HALF);
 assert_eq(f64_eq(fb2, fb2), 1, "fbm_2d(octaves=0) is not NaN");
-assert_eq(f64_to(fb2), 0, "fbm_2d(octaves=0) == 0");
+assert_eq(fb2, f64_from(0), "fbm_2d(octaves=0) == 0");
 var fb3 = fbm_3d(F64_ONE, F64_ONE, F64_ONE, 0, F64_ONE, F64_ONE, F64_HALF);
 assert_eq(f64_eq(fb3, fb3), 1, "fbm_3d(octaves=0) is not NaN");
 var sf2 = simplex_fbm_2d(F64_ONE, F64_ONE, 0, F64_ONE, F64_ONE, F64_HALF);
@@ -6399,12 +6422,12 @@ test_group("f64_fmod: truncated, not floored (sign of the DIVIDEND)");
 
 # The whole point of the fix. floor() gives the sign of the divisor, trunc()
 # gives the sign of the dividend, and only the latter is fmod.
-assert_eq(f64_to(f64_fmod(f64_neg(f64_from(7)), f64_from(3))), (0 - 1),
+assert_eq(f64_fmod(f64_neg(f64_from(7)), f64_from(3)), f64_neg(f64_from(1)),
   "fmod(-7, 3) = -1 (floor form gave +2)");
-assert_eq(f64_to(f64_fmod(f64_from(7), f64_neg(f64_from(3)))), 1,
+assert_eq(f64_fmod(f64_from(7), f64_neg(f64_from(3))), f64_from(1),
   "fmod(7, -3) = +1 (floor form gave -2)");
-assert_eq(f64_to(f64_fmod(f64_from(7), f64_from(3))), 1, "fmod(7, 3) = 1");
-assert_eq(f64_to(f64_fmod(f64_neg(f64_from(7)), f64_neg(f64_from(3)))), (0 - 1),
+assert_eq(f64_fmod(f64_from(7), f64_from(3)), f64_from(1), "fmod(7, 3) = 1");
+assert_eq(f64_fmod(f64_neg(f64_from(7)), f64_neg(f64_from(3))), f64_neg(f64_from(1)),
   "fmod(-7, -3) = -1");
 
 # Non-integer quotient: -5.5 mod 2 is -1.5 truncated, +0.5 floored.
@@ -6439,7 +6462,7 @@ test_group("geo_ray_capsule: ray parallel to the capsule axis");
 var rc_cap = geo_capsule_new(hvec3_zero(), hvec3_new(0, 0, f64_from(4)), F64_ONE);
 var rc_par = geo_ray_new(hvec3_new(0, 0, f64_neg(f64_from(10))), hvec3_unit_z());
 var rc_t = geo_ray_capsule(rc_par, rc_cap);
-assert_eq(f64_to(rc_t), 9, "parallel ray hits the start cap at t = 9");
+assert_eq(rc_t, f64_from(9), "parallel ray hits the start cap at t = 9");
 # A NaN return would satisfy neither of these (both comparisons are unordered).
 assert_eq(f64_gt(rc_t, 0), 1, "parallel-ray hit is a real ordered number (not NaN)");
 
@@ -6485,9 +6508,9 @@ assert_neq(cmat_exp(ce_inf), 0, "cmat_exp(+Inf entry) returns instead of hanging
 # And the ordinary path still works: exp(0) = I.
 var ce_zero = cmat_new(2, 2);
 var ce_i = cmat_exp(ce_zero);
-assert_eq(f64_to(HComplex_re(cmat_get(ce_i, 0, 0))), 1, "exp(0 matrix) diagonal = 1");
-assert_eq(f64_to(HComplex_re(cmat_get(ce_i, 0, 1))), 0, "exp(0 matrix) off-diagonal = 0");
-assert_eq(f64_to(HComplex_re(cmat_get(ce_i, 1, 1))), 1, "exp(0 matrix) diagonal = 1 (1,1)");
+assert_eq(HComplex_re(cmat_get(ce_i, 0, 0)), f64_from(1), "exp(0 matrix) diagonal = 1");
+assert_eq(HComplex_re(cmat_get(ce_i, 0, 1)), f64_from(0), "exp(0 matrix) off-diagonal = 0");
+assert_eq(HComplex_re(cmat_get(ce_i, 1, 1)), f64_from(1), "exp(0 matrix) diagonal = 1 (1,1)");
 
 # ================================================================
 # 2.7.0-B -- the three high findings from the 2026-08-04 re-audit.
@@ -6776,15 +6799,15 @@ store64(ift_d + 0,  f64_from(1));  store64(ift_d + 8,  f64_from(2));
 store64(ift_d + 16, f64_from(3));  store64(ift_d + 24, f64_from(4));
 store64(ift_d + 32, f64_from(5));  store64(ift_d + 40, f64_from(6));
 assert_eq(num_ifft(ift_d, 3), HSB_ERR_INVALID_INPUT, "n=3 rejected (rc is -10 either way)");
-assert_eq(f64_to(load64(ift_d + 8)),  2, "ifft error leaves im[0] intact");
-assert_eq(f64_to(load64(ift_d + 24)), 4, "ifft error leaves im[1] intact");
-assert_eq(f64_to(load64(ift_d + 40)), 6, "ifft error leaves im[2] intact");
+assert_eq(load64(ift_d + 8), f64_from(2), "ifft error leaves im[0] intact");
+assert_eq(load64(ift_d + 24), f64_from(4), "ifft error leaves im[1] intact");
+assert_eq(load64(ift_d + 40), f64_from(6), "ifft error leaves im[2] intact");
 # Deliberate control: passes BOTH ways. It proves the corruption was confined to
 # the imaginary lane -- i.e. silent, not obviously garbage.
-assert_eq(f64_to(load64(ift_d + 0)), 1, "re[0] intact (control -- passes both ways)");
+assert_eq(load64(ift_d + 0), f64_from(1), "re[0] intact (control -- passes both ways)");
 # One aggregate that flips sign: +12 correct, -12 corrupted.
 var ift_s = f64_add(f64_add(load64(ift_d + 8), load64(ift_d + 24)), load64(ift_d + 40));
-assert_eq(f64_to(ift_s), 12, "sum(im) still +12 after a failed ifft");
+assert_eq(ift_s, f64_from(12), "sum(im) still +12 after a failed ifft");
 
 # The success path must be untouched: n = 4 round-trips.
 var ift_r = alloc(64);
@@ -6794,19 +6817,19 @@ store64(ift_r + 32, f64_from(3));  store64(ift_r + 40, 0);
 store64(ift_r + 48, f64_from(4));  store64(ift_r + 56, 0);
 assert_eq(num_fft(ift_r, 4), HSB_ERR_NONE, "fft n=4 ok");
 assert_eq(num_ifft(ift_r, 4), HSB_ERR_NONE, "ifft n=4 ok");
-assert_eq(f64_to(load64(ift_r + 0)), 1, "round-trip re[0] = 1");
-assert_eq(f64_to(load64(ift_r + 48)), 4, "round-trip re[3] = 4");
+assert_eq(load64(ift_r + 0), f64_from(1), "round-trip re[0] = 1");
+assert_eq(load64(ift_r + 48), f64_from(4), "round-trip re[3] = 4");
 
 test_group("levi_civita: f64 bit patterns, not raw i64");
 
 # Raw (0 - 1) is 0xFFFF_FFFF_FFFF_FFFF -- a NEGATIVE NaN. These four catch the
 # ENCODING (pre-fix, f64_to of the raw 1 subnormal truncates to 0)...
-assert_eq(f64_to(levi_civita_3(0, 1, 2)), 1, "eps 012 = +1.0 as f64");
-assert_eq(f64_to(levi_civita_4(0, 1, 2, 3)), 1, "eps4 0123 = +1.0 as f64");
+assert_eq(levi_civita_3(0, 1, 2), f64_from(1), "eps 012 = +1.0 as f64");
+assert_eq(levi_civita_4(0, 1, 2, 3), f64_from(1), "eps4 0123 = +1.0 as f64");
 # ...and these two catch the SIGN. They are not redundant: a mutant with the
 # correct f64 encoding but f64_neg dropped passes every encoding assertion above.
-assert_eq(f64_to(levi_civita_3(1, 0, 2)), (0 - 1), "eps 102 = -1.0 (pins the sign)");
-assert_eq(f64_to(levi_civita_4(1, 0, 2, 3)), (0 - 1), "eps4 1023 = -1.0 (pins the sign)");
+assert_eq(levi_civita_3(1, 0, 2), f64_neg(f64_from(1)), "eps 102 = -1.0 (pins the sign)");
+assert_eq(levi_civita_4(1, 0, 2, 3), f64_neg(f64_from(1)), "eps4 1023 = -1.0 (pins the sign)");
 
 # NaN is unordered, so it fails BOTH directions of an ordered comparison -- the
 # cleanest statement that the odd branch is a real number at all.
@@ -6817,7 +6840,7 @@ assert_eq(f64_gt(levi_civita_3(0, 1, 2), 0), 1, "eps 012 is an ordered positive"
 # components a contraction should leave at exactly zero.
 var lc_prod = f64_mul(levi_civita_3(1, 0, 2), 0);
 assert_eq(f64_eq(lc_prod, 0), 1, "eps 102 * 0.0 == 0.0 (was NaN)");
-assert_eq(f64_to(levi_civita_3(0, 0, 1)), 0, "eps repeated = 0.0");
+assert_eq(levi_civita_3(0, 0, 1), f64_from(0), "eps repeated = 0.0");
 
 test_group("diffgeo: the documented 0 must not be dereferenced, and dims are capped");
 
@@ -7310,22 +7333,22 @@ assert_neq(csr_values(cs), 0, "csr_values is populated");
 var cs_x = alloc(24);
 store64(cs_x, F64_ONE); store64(cs_x + 8, F64_ONE); store64(cs_x + 16, F64_ONE);
 var cs_y = csr_spmv(cs, cs_x);
-assert_eq(f64_to(load64(cs_y)), 3, "csr_spmv row0 = 1+2 = 3");
-assert_eq(f64_to(load64(cs_y + 8)), 3, "csr_spmv row1 = 3");
-assert_eq(f64_to(load64(cs_y + 16)), 9, "csr_spmv row2 = 4+5 = 9");
+assert_eq(load64(cs_y), f64_from(3), "csr_spmv row0 = 1+2 = 3");
+assert_eq(load64(cs_y + 8), f64_from(3), "csr_spmv row1 = 3");
+assert_eq(load64(cs_y + 16), f64_from(9), "csr_spmv row2 = 4+5 = 9");
 
 # A + A = 2A, so spmv doubles.
 var cs_sum = csr_add(cs, cs);
 assert_neq(cs_sum, 0, "csr_add returns a matrix");
 var cs_y2 = csr_spmv(cs_sum, cs_x);
-assert_eq(f64_to(load64(cs_y2 + 16)), 18, "csr_add: (A+A)*x doubles row2 to 18");
+assert_eq(load64(cs_y2 + 16), f64_from(18), "csr_add: (A+A)*x doubles row2 to 18");
 
 # A^T = [[1,0,4],[0,3,0],[2,0,5]]; A^T*(1,1,1) = (5, 3, 7).
 var cs_t = csr_transpose(cs);
 assert_eq(csr_nnz(cs_t), 5, "csr_transpose preserves nnz");
 var cs_y3 = csr_spmv(cs_t, cs_x);
-assert_eq(f64_to(load64(cs_y3)), 5, "csr_transpose row0 = 1+4 = 5");
-assert_eq(f64_to(load64(cs_y3 + 16)), 7, "csr_transpose row2 = 2+5 = 7");
+assert_eq(load64(cs_y3), f64_from(5), "csr_transpose row0 = 1+4 = 5");
+assert_eq(load64(cs_y3 + 16), f64_from(7), "csr_transpose row2 = 2+5 = 7");
 
 # --- inertia_box: solid box I_xx = m(hy^2 + hz^2)/3 for HALF-extents.
 # m = 12, h = (1,1,1) -> 12*(1+1)/3 = 8 on every axis.
@@ -7333,9 +7356,9 @@ var ib = inertia_box(f64_from(12), F64_ONE, F64_ONE, F64_ONE);
 assert_neq(ib, 0, "inertia_box returns a tensor");
 # Returns a Mat3, not a vector. Formula uses FULL extents: w = 2*hx, so for
 # m = 12 and half-extents (1,1,1) the box is 2x2x2 and I_xx = (m/12)(h^2+d^2) = 8.
-assert_eq(f64_to(ganita_mat_get(ib, 0, 0)), 8, "inertia_box 2x2x2 cube I_xx = (m/12)(h^2+d^2) = 8");
-assert_eq(f64_to(ganita_mat_get(ib, 2, 2)), 8, "inertia_box cube is isotropic");
-assert_eq(f64_to(ganita_mat_get(ib, 0, 1)), 0, "inertia_box is diagonal for an axis-aligned box");
+assert_eq(ganita_mat_get(ib, 0, 0), f64_from(8), "inertia_box 2x2x2 cube I_xx = (m/12)(h^2+d^2) = 8");
+assert_eq(ganita_mat_get(ib, 2, 2), f64_from(8), "inertia_box cube is isotropic");
+assert_eq(ganita_mat_get(ib, 0, 1), f64_from(0), "inertia_box is diagonal for an axis-aligned box");
 
 # --- matrix_condition_number: identity is perfectly conditioned.
 var mc_i = ganita_mat_identity(3);
@@ -7357,7 +7380,7 @@ ganita_mat_set(es_A, 0, 0, f64_from(3)); ganita_mat_set(es_A, 1, 1, F64_ONE);
 var es_vals = alloc(16);
 var es_vecs = ganita_mat_new(2, 2);
 assert_eq(eigen_symmetric(es_A, 2, es_vals, es_vecs), HSB_ERR_NONE, "eigen_symmetric converges");
-assert_eq(f64_to(load64(es_vals)), 3, "eigen_symmetric dominant eigenvalue = 3");
+assert_eq(load64(es_vals), f64_from(3), "eigen_symmetric dominant eigenvalue = 3");
 
 # --- implicit ODE integrators on y' = y, y(0) = 1, dt = 1/4.
 # Backward Euler: y1 = y/(1-dt) = 1/0.75 = 4/3.
@@ -7438,13 +7461,13 @@ test_group("complex / geo / symbolic: closing the remaining coverage holes");
 
 # --- complex scalar ops with closed-form answers ---
 var cz = cx_new(f64_from(3), f64_from(4));
-assert_eq(f64_to(HComplex_re(cx_neg(cz))), (0 - 3), "cx_neg re");
-assert_eq(f64_to(HComplex_im(cx_neg(cz))), (0 - 4), "cx_neg im");
-assert_eq(f64_to(HComplex_re(cx_scale(cz, F64_TWO))), 6, "cx_scale re");
-assert_eq(f64_to(cx_norm_sq(cz)), 25, "cx_norm_sq(3+4i) = 25");
+assert_eq(HComplex_re(cx_neg(cz)), f64_neg(f64_from(3)), "cx_neg re");
+assert_eq(HComplex_im(cx_neg(cz)), f64_neg(f64_from(4)), "cx_neg im");
+assert_eq(HComplex_re(cx_scale(cz, F64_TWO)), f64_from(6), "cx_scale re");
+assert_eq(cx_norm_sq(cz), f64_from(25), "cx_norm_sq(3+4i) = 25");
 # polar: r=2, theta=0 -> 2 + 0i
 var cp = cx_from_polar(F64_TWO, 0);
-assert_eq(f64_to(HComplex_re(cp)), 2, "cx_from_polar(2, 0) re = 2");
+assert_eq(HComplex_re(cp), f64_from(2), "cx_from_polar(2, 0) re = 2");
 assert(f64_lt(f64_abs(HComplex_im(cp)), LOOSE_TOL_M) == 1, "cx_from_polar(2, 0) im = 0");
 # ln(1) = 0
 var cl = cx_ln(cx_one());
@@ -7458,8 +7481,8 @@ assert(f64_lt(f64_abs(HComplex_re(cx_sin(cx_zero()))), LOOSE_TOL_M) == 1, "cx_si
 assert(f64_lt(f64_abs(f64_sub(HComplex_re(cx_cos(cx_zero())), F64_ONE)), LOOSE_TOL_M) == 1,
   "cx_cos(0) = 1");
 # pauli_0 is the 2x2 identity.
-assert_eq(f64_to(HComplex_re(cmat_get(pauli_0(), 0, 0))), 1, "pauli_0 is the identity");
-assert_eq(f64_to(HComplex_re(cmat_get(pauli_0(), 0, 1))), 0, "pauli_0 off-diagonal = 0");
+assert_eq(HComplex_re(cmat_get(pauli_0(), 0, 0)), f64_from(1), "pauli_0 is the identity");
+assert_eq(HComplex_re(cmat_get(pauli_0(), 0, 1)), f64_from(0), "pauli_0 off-diagonal = 0");
 # Dirac gammas: gamma_0^2 = I, and gamma_5 is traceless.
 assert_neq(gamma_0(), 0, "gamma_0 exists");
 assert_neq(gamma_spatial(1), 0, "gamma_spatial(1) exists");
@@ -7469,28 +7492,28 @@ assert(f64_lt(f64_abs(HComplex_re(cmat_trace(cg5))), LOOSE_TOL_M) == 1, "gamma_5
 var cmv = alloc(32);
 store64(cmv, F64_ONE); store64(cmv + 8, 0); store64(cmv + 16, F64_TWO); store64(cmv + 24, 0);
 var cmr = cmat_mul_vec(cmat_identity(2), cmv);
-assert_eq(f64_to(load64(cmr)), 1, "cmat_mul_vec I*v keeps v0");
-assert_eq(f64_to(load64(cmr + 16)), 2, "cmat_mul_vec I*v keeps v1");
+assert_eq(load64(cmr), f64_from(1), "cmat_mul_vec I*v keeps v0");
+assert_eq(load64(cmr + 16), f64_from(2), "cmat_mul_vec I*v keeps v1");
 
 # --- geo ---
 var gl = geo_line_new(hvec3_zero(), hvec3_unit_x());
 assert_neq(gl, 0, "geo_line_new returns a line");
 # Closest point on the x-axis to (5, 3, 0) is (5, 0, 0).
 var glc = geo_line_closest_point(gl, hvec3_new(f64_from(5), f64_from(3), 0));
-assert_eq(f64_to(HVec3_x(glc)), 5, "line closest point x = 5");
+assert_eq(HVec3_x(glc), f64_from(5), "line closest point x = 5");
 assert(f64_lt(f64_abs(HVec3_y(glc)), LOOSE_TOL_M) == 1, "line closest point y = 0");
 # Segment from origin to (4,0,0): midpoint (2,0,0), distance to (2,3,0) is 3.
 var gs = geo_segment_new(hvec3_zero(), hvec3_new(f64_from(4), 0, 0));
-assert_eq(f64_to(HVec3_x(geo_segment_midpoint(gs))), 2, "segment midpoint x = 2");
-assert_eq(f64_to(geo_segment_distance_to_point(gs, hvec3_new(F64_TWO, f64_from(3), 0))), 3,
+assert_eq(HVec3_x(geo_segment_midpoint(gs)), f64_from(2), "segment midpoint x = 2");
+assert_eq(geo_segment_distance_to_point(gs, hvec3_new(F64_TWO, f64_from(3), 0)), f64_from(3),
   "segment distance to (2,3,0) = 3");
 # Unit normal of the xy triangle is +z.
 # These take a Triangle, not three loose vertices.
 var gtri = geo_triangle_new(hvec3_zero(), hvec3_unit_x(), hvec3_unit_y());
 var gn = geo_triangle_unit_normal(gtri);
-assert_eq(f64_to(HVec3_z(gn)), 1, "triangle unit normal is +z");
+assert_eq(HVec3_z(gn), f64_from(1), "triangle unit normal is +z");
 var gb = geo_barycentric_coords(gtri, hvec3_zero());
-assert_eq(f64_to(HVec3_x(gb)), 1, "barycentric of vertex a is (1,0,0)");
+assert_eq(HVec3_x(gb), f64_from(1), "barycentric of vertex a is (1,0,0)");
 var gcp = geo_closest_point_on_triangle(gtri, hvec3_new(f64_div(F64_ONE, f64_from(4)),
     f64_div(F64_ONE, f64_from(4)), F64_ONE));
 assert(f64_lt(f64_abs(HVec3_z(gcp)), LOOSE_TOL_M) == 1, "closest point on triangle lies in its plane");
@@ -7504,10 +7527,10 @@ assert_eq(geo_ray_obb(geo_ray_new(hvec3_new(f64_from(10), 0, 0), hvec3_new(f64_n
 # --- symbolic accessors ---
 var sxv = expr_var(str_from("x"));
 assert_eq(str_eq_cstr(expr_var_name(sxv), "x"), 1, "expr_var_name round-trips");
-assert_eq(f64_to(expr_const_val(expr_const(f64_from(7)))), 7, "expr_const_val = 7");
+assert_eq(expr_const_val(expr_const(f64_from(7))), f64_from(7), "expr_const_val = 7");
 var sadd = expr_add(sxv, expr_const(F64_ONE));
 assert_eq(expr_tag(expr_left(sadd)), expr_tag(sxv), "expr_left of a+b is a");
-assert_eq(f64_to(expr_const_val(expr_right(sadd))), 1, "expr_right of x+1 is 1");
+assert_eq(expr_const_val(expr_right(sadd)), f64_from(1), "expr_right of x+1 is 1");
 assert_neq(expr_cos(sxv), 0, "expr_cos builds a node");
 assert_neq(expr_ln(sxv), 0, "expr_ln builds a node");
 assert_eq(expr_tag(expr_child(expr_cos(sxv))), expr_tag(sxv), "expr_child of cos(x) is x");
@@ -7708,11 +7731,11 @@ test_group("2.7.3 coverage: autodiff, tensor, interval, calc_ext, cga, patterns"
 
 # --- autodiff duals: value and derivative are both exact here.
 var d9 = dual_new(f64_from(3), F64_ONE);
-assert_eq(f64_to(Dual_val(d9)), 3, "dual_new value");
-assert_eq(f64_to(Dual_deriv(d9)), 1, "dual_new derivative");
+assert_eq(Dual_val(d9), f64_from(3), "dual_new value");
+assert_eq(Dual_deriv(d9), f64_from(1), "dual_new derivative");
 # d/dx (x/2) at x=4 is 1/2.
 var dq = dual_div(dual_var(f64_from(4)), dual_const(F64_TWO));
-assert_eq(f64_to(Dual_val(dq)), 2, "dual_div value 4/2 = 2");
+assert_eq(Dual_val(dq), f64_from(2), "dual_div value 4/2 = 2");
 assert_eq(Dual_deriv(dq), F64_HALF, "dual_div derivative = 1/2");
 # d/dx x^3 at x=2 is 12.
 # n is a plain f64, not an integer -- a raw 3 is a subnormal ~1.5e-323.
@@ -7728,8 +7751,8 @@ assert(f64_lt(f64_abs(f64_sub(Dual_deriv(dp), f64_from(12))), LOOSE_TOL_M) == 1,
   "dual_pow derivative 3x^2 = 12");
 # |x| at x=-5 is 5 with derivative -1.
 var da = dual_abs(dual_var(f64_neg(f64_from(5))));
-assert_eq(f64_to(Dual_val(da)), 5, "dual_abs value = 5");
-assert_eq(f64_to(Dual_deriv(da)), (0 - 1), "dual_abs derivative = -1");
+assert_eq(Dual_val(da), f64_from(5), "dual_abs value = 5");
+assert_eq(Dual_deriv(da), f64_neg(f64_from(1)), "dual_abs derivative = -1");
 
 # --- tensor: get/set/scale/contract with exact integers.
 var t9_shape = alloc(16);
@@ -7738,14 +7761,14 @@ var t9 = tensor_new(2, t9_shape);
 var t9_i = alloc(16);
 store64(t9_i, 0); store64(t9_i + 8, 1);
 tensor_set(t9, t9_i, f64_from(7));
-assert_eq(f64_to(tensor_get(t9, t9_i)), 7, "tensor_set/get round-trips");
+assert_eq(tensor_get(t9, t9_i), f64_from(7), "tensor_set/get round-trips");
 var t9s = tensor_scale(t9, f64_from(3));
-assert_eq(f64_to(tensor_get(t9s, t9_i)), 21, "tensor_scale multiplies entries");
+assert_eq(tensor_get(t9s, t9_i), f64_from(21), "tensor_scale multiplies entries");
 # Trace of diag(2,5) is 7.
 tensor_set2(t9, 0, 0, F64_TWO);
 tensor_set2(t9, 0, 1, 0);
 tensor_set2(t9, 1, 1, f64_from(5));
-assert_eq(f64_to(tensor_get2(t9, 1, 1)), 5, "tensor_set2/get2 round-trips");
+assert_eq(tensor_get2(t9, 1, 1), f64_from(5), "tensor_set2/get2 round-trips");
 var t9c = tensor_contract(t9, 0, 1);
 assert_neq(t9c, 0, "tensor_contract returns a tensor");
 
@@ -7869,7 +7892,7 @@ assert(f64_lt(f64_abs(simplex_3d(F64_HALF, F64_HALF, F64_HALF)), F64_ONE) == 1, 
 
 # --- SDF
 var s9 = sdf_capsule(hvec3_new(0, F64_TWO, 0), hvec3_zero(), hvec3_unit_x(), F64_ONE);
-assert_eq(f64_to(s9), 1, "sdf_capsule at distance 2 from a radius-1 capsule = 1");
+assert_eq(s9, f64_from(1), "sdf_capsule at distance 2 from a radius-1 capsule = 1");
 # Smooth union is never worse than the plain min.
 # Smooth union is a blend, so it sits between the two distances (it need not dip
 # below min for every k -- that depends on the smoothing width).
@@ -7899,12 +7922,12 @@ assert_neq(cga_blade_inverse(cga_point(F64_ONE, F64_TWO, 0)), 0, "cga_blade_inve
 
 # --- symbolic_ext pattern constructors and accessors.
 var p9c = pat_const(f64_from(5));
-assert_eq(f64_to(pat_val(p9c)), 5, "pat_const stores its value");
+assert_eq(pat_val(p9c), f64_from(5), "pat_const stores its value");
 var p9v = pat_var(str_from("x"));
 assert_eq(str_eq_cstr(pat_name(p9v), "x"), 1, "pat_var stores its name");
 var p9p = pat_pow(p9v, p9c);
 assert_eq(pat_tag(pat_left(p9p)), pat_tag(p9v), "pat_left of pow is the base");
-assert_eq(f64_to(pat_val(pat_right(p9p))), 5, "pat_right of pow is the exponent");
+assert_eq(pat_val(pat_right(p9p)), f64_from(5), "pat_right of pow is the exponent");
 assert_eq(pat_tag(pat_child(pat_neg(p9v))), pat_tag(p9v), "pat_child of neg is the operand");
 assert_neq(pat_sin(p9v), 0, "pat_sin builds a pattern");
 assert_neq(pat_cos(p9v), 0, "pat_cos builds a pattern");
@@ -7927,7 +7950,7 @@ assert(f64_lt(f64_abs(f64_sub(load64(c80_o), 0x3FD5555555555555)), f64_div(F64_O
 # lerp endpoints are exact.
 assert_eq(calc_lerp(F64_TWO, f64_from(6), 0), F64_TWO, "calc_lerp t=0 is a");
 assert_eq(calc_lerp(F64_TWO, f64_from(6), F64_ONE), f64_from(6), "calc_lerp t=1 is b");
-assert_eq(f64_to(calc_lerp(0, f64_from(10), F64_HALF)), 5, "calc_lerp midpoint = 5");
+assert_eq(calc_lerp(0, f64_from(10), F64_HALF), f64_from(5), "calc_lerp midpoint = 5");
 # Bezier ease is pinned at both ends by construction.
 assert(f64_lt(f64_abs(cubic_bezier_ease(f64_div(F64_ONE, f64_from(4)), 0,
         f64_div(f64_from(3), f64_from(4)), F64_ONE, 0)), LOOSE_TOL_M) == 1, "cubic_bezier_ease(0) = 0");
@@ -8591,7 +8614,7 @@ assert_eq(tensor_add(tensor_new(2, ms_sh26), tensor_new(2, ms_sh34)), 0,
   "tensor_add: 2x6 + 3x4 (equal totals) -> 0");
 # The valid path is untouched: 1+3 = 4 and 2+4 = 6 on identical shapes.
 var ms_sum = tensor_add(ms_a, ms_a);
-assert_eq(f64_to(tensor_get2(ms_sum, 1, 0)), 6, "tensor_add: identical shapes still add");
+assert_eq(tensor_get2(ms_sum, 1, 0), f64_from(6), "tensor_add: identical shapes still add");
 
 test_group("2.8.3: tensor_contract validates idx_i / idx_j against the rank");
 
@@ -8623,18 +8646,18 @@ while (ms_fi < 36) {
 }
 var ms_c02 = tensor_contract(ms_t4, 0, 2);
 assert_eq(HTensor_rank(ms_c02), 2, "contract(0,2): rank 4 -> 2");
-assert_eq(f64_to(tensor_get2(ms_c02, 0, 0)), 23, "contract(0,2)[0][0] = 23");
-assert_eq(f64_to(tensor_get2(ms_c02, 0, 2)), 27, "contract(0,2)[0][2] = 27");
-assert_eq(f64_to(tensor_get2(ms_c02, 2, 0)), 47, "contract(0,2)[2][0] = 47");
-assert_eq(f64_to(tensor_get2(ms_c02, 2, 2)), 51, "contract(0,2)[2][2] = 51");
+assert_eq(tensor_get2(ms_c02, 0, 0), f64_from(23), "contract(0,2)[0][0] = 23");
+assert_eq(tensor_get2(ms_c02, 0, 2), f64_from(27), "contract(0,2)[0][2] = 27");
+assert_eq(tensor_get2(ms_c02, 2, 0), f64_from(47), "contract(0,2)[2][0] = 47");
+assert_eq(tensor_get2(ms_c02, 2, 2), f64_from(51), "contract(0,2)[2][2] = 51");
 var ms_c13 = tensor_contract(ms_t4, 1, 3);
-assert_eq(f64_to(tensor_get2(ms_c13, 0, 0)), 24, "contract(1,3)[0][0] = 24");
-assert_eq(f64_to(tensor_get2(ms_c13, 0, 1)), 33, "contract(1,3)[0][1] = 33");
-assert_eq(f64_to(tensor_get2(ms_c13, 1, 0)), 78, "contract(1,3)[1][0] = 78");
-assert_eq(f64_to(tensor_get2(ms_c13, 1, 1)), 87, "contract(1,3)[1][1] = 87");
+assert_eq(tensor_get2(ms_c13, 0, 0), f64_from(24), "contract(1,3)[0][0] = 24");
+assert_eq(tensor_get2(ms_c13, 0, 1), f64_from(33), "contract(1,3)[0][1] = 33");
+assert_eq(tensor_get2(ms_c13, 1, 0), f64_from(78), "contract(1,3)[1][0] = 78");
+assert_eq(tensor_get2(ms_c13, 1, 1), f64_from(87), "contract(1,3)[1][1] = 87");
 # Axis order must not matter for a trace.
 var ms_c20 = tensor_contract(ms_t4, 2, 0);
-assert_eq(f64_to(tensor_get2(ms_c20, 1, 1)), 37, "contract(2,0) == contract(0,2)");
+assert_eq(tensor_get2(ms_c20, 1, 1), f64_from(37), "contract(2,0) == contract(0,2)");
 
 test_group("2.8.3: cmat_* null guards (the four the 2.7.0-B family missed)");
 
@@ -8658,8 +8681,8 @@ assert_eq(cmat_inverse(0), 0, "cmat_inverse(0) -> 0 (SIGSEGV)");
 # exp(0) = I on a square input is unchanged.
 var ms_e = cmat_exp(cmat_new(2, 2));
 assert_neq(ms_e, 0, "cmat_exp(2x2 zero) still returns a matrix");
-assert_eq(f64_to(HComplex_re(cmat_get(ms_e, 0, 0))), 1, "cmat_exp(0) = I: [0][0] = 1");
-assert_eq(f64_to(HComplex_re(cmat_get(ms_e, 0, 1))), 0, "cmat_exp(0) = I: [0][1] = 0");
+assert_eq(HComplex_re(cmat_get(ms_e, 0, 0)), f64_from(1), "cmat_exp(0) = I: [0][0] = 1");
+assert_eq(HComplex_re(cmat_get(ms_e, 0, 1)), f64_from(0), "cmat_exp(0) = I: [0][1] = 0");
 
 test_group("2.8.3: calc_partial_derivative bounds BOTH ends of index");
 
