@@ -11,10 +11,10 @@ Hisab owns **typed mathematical operations**. It does NOT own:
 - **Physics simulation** -- impetus
 - **Game engine** -- kiran
 
-## Current — v2.13.0
+## Current — v2.16.0
 
-Suite **3574** across five harnesses (hisab 416, foundation 351, modules 1798, edge_cases 233,
-abuse 776), constant gate **159/159**, **72** benchmarks, **35** `[lib]` modules, toolchain
+Suite **3807** across five harnesses (hisab 454, foundation 379, modules 1965, edge_cases 233,
+abuse 776), constant gate **156/156**, **72** benchmarks, **35** `[lib]` modules, toolchain
 **6.6.2**, sakshi **2.5.1**, ganita **1.2.4**, and **zero** deprecated-alias call sites. All gates green:
 `lint` 0 warnings and `fmt <file> --check` 0 drift across all 44 sources, `vet` 2 deps / 0 untrusted
 / 0 missing, `deps --verify` 31/31, `fuzz` 1/0, `coverage` 640/644 (99%) functions over 36/36 files,
@@ -94,9 +94,10 @@ items: they are tracked in `issues/` and discharged as a **precondition** of the
 | ~~**2.14.0 — the epsilon release**~~ | ✅ **SHIPPED, PARTIALLY.** ⛔ **This row said "~20 sites"; the census found 136 guards and 97 confirmed defects in 23 modules** — the estimate came from the 2026-08-11 audit's *confirmed* table, which is a list of instances someone reproduced, not a census of the class. **23 confirmed sites repaired, 58 mutants killed, +83 assertions.** ⭐ Three repairs were NOT on the census list and came from grepping for the shape. **74 remain, enumerated with evidence.** | 2.13.0 |
 | ~~**2.15.0 — the epsilon tier, remainder**~~ | ✅ **SHIPPED.** **73 of the 74 repaired**, 81 mutants installed and **73 killed**; 8 survivors documented with their reasons rather than tidied away. ⛔ **1 DEFERRED — `su2_log`, and it is a formula change, not a threshold**: it divides by θ² and θ³, and at θ ≤ 2.2e-162 both `θ*θ` and `1−cos θ` are exactly 0, so lowering the guard would make the coefficient `0/0 = NaN`. ⭐ **Three siblings of it were never on the census list** (`so3_log`, `se3_exp`, `se3_log`) and were found by grepping for the shape. | 2.14.0 |
 | ~~**2.16.0 — the small-angle series**~~ | ✅ **SHIPPED.** All four maps repaired; 7 mutants, 5 killed, 2 documented equivalences that exist BECAUSE the repairs made each other redundant. ⛔ **The log maps had a larger defect the guard was hiding**: `acos` of a value that rounds to exactly 1.0 below θ ≈ 1.5e-8, so the whole rotation was lost — measured, exactly 0 from 2^-28 down. `atan2` recovers it bit-exactly. ⭐ **Round-trip floor 2^-26 → 2^-537, 511 decades.** | 2.15.0 |
-| **Scaled norms on the exp side** | ⛔ Found in 2.16.0 and NOT closed by it: `su2_exp` and `so3_from_axis_angle` still take their norms as a naive sum of squares, which flushes to zero below ~2^-511 — so they collapse the rotation at **2^-538**, before the repaired log maps ever see it. Same class as `cx_div` and the same fix (scale by the largest component first). | 2.16.0 |
-| **SVD factor reconstruction** | ⛔ Found in 2.15.0 and NOT closed by it: `‖A − U S Vt‖_F` is exactly 0 for block ratios 1e-2…1e-5, then **4.17e-7 at 1e-6**, decaying proportionally to c. The singular VALUES stay correct — it is `U` and `Vt` that stop reconstructing the small block, so nine threshold repairs do not touch it. 4.17e-7 reproduces the census's own figure for a half-repaired bidiagonalisation. | 2.15.0 |
-| **3.0.0** | `Result<T,E>` API — breaking. ⚠ Re-scope before planning: it is the **v6.6.0 value form**, not the boxed form this file was written against | 2.16.0 |
+| **2.17.0 — the norm tier** | ⛔ Found in 2.16.0 by a mutant that would not die, and NOT closed by it: `su2_exp` and `so3_from_axis_angle` still take their norms as a naive sum of squares, which flushes to zero below ~2^-511 — so they collapse the rotation at **2^-538**, before 2.16.0's repaired log maps ever see it. ⭐ Same class as `cx_div` and the same fix (scale by the largest component first), a technique now proven twice. ⚠ **Grep for the shape before sizing this**: every `sqrt(sum of squares)` in the tree is a candidate, `hvec3_length`'s floor was measured at 2^-537 in 2.14.0, and the last three releases each found the class wider than its list said. | 2.16.0 |
+| **2.18.0 — the SVD factors** | ⛔ Found in 2.15.0 and NOT closed by it: `‖A − U S Vt‖_F` is exactly 0 for block ratios 1e-2…1e-5, then **4.17e-7 at 1e-6**, decaying proportionally to c. The singular VALUES stay correct — it is `U` and `Vt` that stop reconstructing the small block, so none of 2.15.0's nine threshold repairs touch it. 4.17e-7 reproduces the census's own figure for a half-repaired bidiagonalisation. ⚠ **Open-ended: a known defect with no known fix**, unlike 2.17.0. Also carries the EPA seed-upgrade trade, which is blocked on re-measurement. | 2.17.0 |
+| **2.19.0 — the 3.0.0 prep** | `#must_use` on the fallible surface (167 `return HSB_ERR` sites; 199 `#must_use` annotations already exist, so this extends a pattern rather than starting one), negative enum values for the 12 `HSB_ERR_*` codes, and the decisions owed below. ⭐ All of it is non-breaking and all of it makes the `Result<T,E>` migration smaller. | 2.18.0 |
+| **3.0.0** | `Result<T,E>` API — breaking. ⚠ Re-scope before planning: it is the **v6.6.0 value form**, not the boxed form this file was written against. Carries the public/private function surface, which is breaking for the same reason. | 2.19.0 |
 
 ### ⛔ Why the epsilon tier is no longer first, and why its old gate is gone
 
@@ -137,6 +138,25 @@ notice. Reconcile the tier lists against the audit's confirmed table, by row, on
 
 ## Open items
 
+⭐ **HOW TO READ THIS FILE.** The **Release train** table above is the authority on ORDER and on what
+ships when. This section is the EVIDENCE behind those rows, and **every open item carries its version
+in bold brackets** — `**[2.17.0]**` — so the two views cannot drift apart. If an item here has no
+version tag, that is a bug in this file, not an item without a home.
+
+⚠ **A struck item under a `> Original text` quote is HISTORY, not work.** Four such items read as open
+checkboxes until 2026-09-10 and made the backlog look larger than it was.
+
+⚠ **Two sections are deliberately unversioned and that is not a gap**: *Optional, demand-gated* and
+*Parked / deferred* hold work with **no driver yet**. Nothing moves out of them without a consumer
+asking; when one does, it gets a version here first.
+
+⛔ **AND A CHECKED ITEM IS NOT A VERIFIED ONE.** The 2026-09-09 sweep found **18 of 39** items stale,
+and a re-read on 2026-09-10 found three more that were done but still listed open — including one
+discharged by RE-READING rather than repairing, because it had asked for a null check on an allocation
+RESULT where a cap on the INPUT was already the stronger guarantee. Check the tree before believing a
+row in either direction.
+
+
 Everything still owed, in one place. Each carries why it has not been done, because "deferred with a
 reason" and "forgotten" are indistinguishable once the reason is lost.
 
@@ -148,7 +168,7 @@ The full P(-1) sweep of the 2.11.0 tree is
 executed four repairs; the rest is here, **reordered 2026-09-09** — see the release train for why the
 epsilon tier is no longer first.
 
-- [ ] ~~**Re-verify the 28 findings that were never sent to a skeptic.** … **This gates every item
+  > **Original text, kept for the record:** ~~**Re-verify the 28 findings that were never sent to a skeptic.** … **This gates every item
       below it.**~~ ⛔ **GATE RETIRED 2026-09-09 — it could not be executed and it bound nothing.**
       The 28 are **not enumerated anywhere**: the audit report records them only as a count, and its
       only per-finding tables are explicitly the *confirmed* and *fixed* sets. No ledger in `docs/`,
@@ -195,7 +215,17 @@ epsilon tier is no longer first.
   allocates. A canary only proves what its `n` reaches.
   **Repairs are O(1) `vec_len` comparisons — but the zeroing loop must be bounded too, not just
   the `vec_get` loop.** **Scheduled: 2.12.0.**
-- [ ] **The remaining 7 public entry points with an unchecked parameter-sized allocation.**
+- [x] ✅ **The remaining 7 public entry points — DISCHARGED, and by RE-READING rather than by
+      repairing.** Verified 2026-09-10: every one of the seven is bounded by a DIMENSION CAP
+      small enough that `alloc` cannot reach `ALLOC_MAX` — `tensor_new` rank <= 8 (64 B),
+      `geodesic_state_new` / `geodesic_rk4` / `parallel_transport` dim <= `_DG_MAX_DIM` = 16
+      (<= 256 B), `opt_bfgs` / `opt_lbfgs` n <= `_OPT_MAX_DIM` = 4096, and
+      `opt_conjugate_gradient` carries the 2.12.0 round-trip check AND null-checks all five
+      allocations. ⚠ **The row asked the wrong question**: it looked for a null check on the
+      RESULT, and a cap on the INPUT is the stronger form of the same guarantee. The class was
+      real when filed; the sweep that produced this list did not re-read the caps already
+      present. Original text follows.
+  > **Original text, kept for the record:** ~~**The remaining 7 public entry points with an unchecked parameter-sized allocation.**~~
       ⭐ **This item exists because 2.12.0 stopped trusting the tier's list and ran the grep.** The
       class is: `alloc(<caller parameter> * 8)` with no check that the result is non-zero. Sweep
       result — **90 sites tree-wide, 9 of them PUBLIC entry points**; 2 repaired in 2.12.0, these 7
@@ -251,7 +281,13 @@ epsilon tier is no longer first.
       vacuous** — they compared through a tolerance and a round, so when upstream repaired the defect
       they pinned, they kept passing while the property they claimed to test evaporated.
 
-- [ ] **The epsilon tier — the count is wrong, the grep it prescribes has never been run, and it
+- [x] ✅ **The epsilon tier — CLOSED across 2.14.0, 2.15.0 and 2.16.0.** The grep was run: a
+      census of **136 guards in 25 modules** found **97 confirmed defects in 23**, against a row
+      that said "~20 sites". **96 repaired** (23 + 73), **1 deferred and then closed** by
+      2.16.0's small-angle series. Dispositions per site in
+      [`docs/audit/2026-09-09-epsilon-open.json`](../audit/2026-09-09-epsilon-open.json).
+      Original text follows.
+  > **Original text, kept for the record:** ~~**The epsilon tier — the count is wrong, the grep it prescribes has never been run, and it
       is LAST rather than first. Scheduled: 2.14.0.**
       ⚠ "~20 sites" came from a *review*. The mechanical grep the item itself asks for returns
       **123 `f64_(lt|gt|le|ge)(…, EPSILON_F64)` comparison guards across 24 of 35 modules**
@@ -286,6 +322,23 @@ The other survivor is **"any cross-module interaction"**. ⚠ An earlier draft s
 "has ever contained that string" — false: both full sweeps name it, in their own *did NOT reach*
 sections. It has been declared out of scope twice, which is a stronger claim than never mentioned. Those two are where the next sweep starts.
 
+### The norm tier [2.17.0]
+
+- [ ] **[2.17.0]** **Scaled norms on the exp side.** ⛔ Found in 2.16.0 **by a mutant that would not
+      die** — a fixture built to reach `se3_log`'s coefficient never did, and chasing why turned up
+      the norm. `su2_exp` and `so3_from_axis_angle` compute `sqrt(x² + y² + z²)` directly, so a
+      component below ~2^-511 makes the SQUARE underflow to zero and the whole rotation collapses.
+      Measured: the log/exp round-trip is exact to **2^-537** and fails at **2^-538**, and that floor
+      is now on the exp side — 2.16.0 moved the log side from 2^-26 to 2^-537, and this is what
+      stops it going further.
+      ⭐ **The fix is known and proven twice**: divide through by the largest component before
+      squaring, exactly as `cx_div` (2.15.0) and the two log maps (2.16.0) now do.
+      ⚠ **Grep for the shape before sizing this.** Every `sqrt(sum of squares)` in the tree is a
+      candidate — `hvec3_length`'s own floor was measured at 2^-537 in 2.14.0 and is pinned by two
+      assertions in `foundation.tcyr` — and the last three releases each found this class wider than
+      its list said (2.12.0: 3 sites became 4; 2.14.0: "~20" became 97; 2.16.0: 4 became 4 plus two
+      norms). Size it from the grep, not from this paragraph.
+
 ### EPA — one routine, three entangled questions
 
 ~~All three touch `gjk_epa_*` and none should be done alone: they share a benchmark and a live filing.~~
@@ -294,7 +347,14 @@ a double cold guard, and none of the **four** EPA benchmarks can enter that bran
 sites do **not** share a benchmark with the other two. The three questions are independent and one of
 them is not a defect at all.
 
-- [ ] **The three squared-epsilon sites.** `geo_advanced.cyr:1056/1060/1067` compare
+- [x] ✅ **The three squared-epsilon sites — SHIPPED IN 2.15.0.** All three repaired and
+      mutation-proven: the two `e1` tests became exact-zero, the cross-product test became the
+      dimensionless sin form this file already uses at :530 and :682. ⭐ Proving them needed a
+      PLANAR degenerate simplex — crossing segments give a two-vertex one, where the code takes
+      its perpendicular branch and the cross test never decides. ⛔ And a reachability probe
+      returned the right answer BY ACCIDENT: a constant `+z` passes every existing assertion
+      there, because they check only x = 0, y = 0 and unit length. Original text follows.
+  > **Original text, kept for the record:** ~~**The three squared-epsilon sites.**~~ `geo_advanced.cyr:1056/1060/1067` compare
       `hvec3_length_sq` against `EPSILON_F64` — the same squared-vs-unsquared mistake 2.10.1 and
       2.10.2 repaired at six sites in `geo.cyr`. **Deferred, not dismissed**: tightening them is a
       narrowphase behaviour change on a routine with a measured cost, so it needs its own
@@ -305,7 +365,7 @@ them is not a defect at all.
       repair currently has nothing to prove itself with. Write the test first.
       The disposition table for all nine sites is in
       [`issues/archived/2026-08-10-squared-epsilon-guards-in-geo-ray.md`](issues/archived/2026-08-10-squared-epsilon-guards-in-geo-ray.md).
-- [ ] ⚠ **The seed-upgrade trade — DO NOT ACT ON THE NUMBER BELOW; it is void.** The "+19.4%" was
+- [ ] **[2.18.0]** ⚠ **The seed-upgrade trade — DO NOT ACT ON THE NUMBER BELOW; it is void.** The "+19.4%" was
       priced against a `gjk_epa_sphere_box` baseline of **125.6 µs** which now reads **78.5 µs**
       (cycc 6.6.x accessor inlining). Its own linked filing has said since 2026-09-09: *"Do not
       rescale the old percentage — re-measure both halves."* Both the baseline and the added work
@@ -334,7 +394,7 @@ them is not a defect at all.
 
 ### Decisions owed
 
-- [ ] **`scripts/check-measurements.sh`: keep it or delete it.** The gate runs PR-only on the claims
+- [ ] **[2.19.0]** **`scripts/check-measurements.sh`: keep it or delete it.** The gate runs PR-only on the claims
       a branch *adds*, detector recall 21/22 with 0/15 decoys, but paragraph-level false positives
       sit at ~21% and **522** unmarked pre-existing claims mean it cannot be widened past the diff
       without a marking campaign first. It has now earned its keep several times over — it caught
@@ -355,7 +415,7 @@ them is not a defect at all.
       the implied fix would have left both markers broken. A wrong diagnosis on a two-line repair is
       worse than none. The real
       decision is smaller and different: **should it run on push, not only on PRs?**
-- [ ] **Whether `dual_*` should gain a vector layer.** 2.10.0 answered "no dual vectors" for the
+- [ ] **[2.19.0]** **Whether `dual_*` should gain a vector layer.** 2.10.0 answered "no dual vectors" for the
       *geometry*, on measured grounds (allocation per op, one seed per pass), and 2.11.0's
       reverse-mode tape removed the pressure entirely for the many-input case — one sweep instead of
       n passes. What remains is whether a *small fixed-size* vector dual is worth it for callers who
@@ -366,7 +426,7 @@ them is not a defect at all.
 
 ### Documentary
 
-- [ ] **Two items inside the archived `triangulate_polygon` filing** — the 2.7.x CHANGELOG entries
+- [ ] **[2.19.0]** **Two items inside the archived `triangulate_polygon` filing** — the 2.7.x CHANGELOG entries
       state the prune's divergence direction backwards on at least one reproducer, and the
       neighbour-refresh locals shadow the winding loop's `pn`/`nn`. Neither changes behaviour; both
       were recorded rather than buried when the file was archived.
@@ -396,11 +456,11 @@ apply are named too, so a later reader knows they were examined rather than skip
 
 | item | state |
 |---|---|
-| **Negative enum values** (6.5.32, `enum E { NONE = -1; }`) | `src/error.cyr` carries **11** negative error codes as `var` globals with the `(0 - N)` workaround, and CLAUDE.md's own principle is "enums for constants — zero `gvar_toks` cost vs. `var` globals". 562 `HSB_ERR_` references across `src/` + `tests/`. ⛔ **"Gate first" is BACKWARDS — the gate does not check these constants at all.** `check-constants.sh`'s value regex requires a >=12-digit hex literal; all 12 `HSB_ERR_` lines fail it and contribute **0 of the 159 verified**. Converting moves them from a form cycc is *silent* about (a duplicate `var` global is last-wins, and the wrong value ships) into one it **diagnoses by file:line**. So convert freely; optionally widen `check-constants.sh:237`'s `GLOBAL_DECL` afterwards so the duplicate scan stays fail-closed. 12-line edit; the 562 call sites reference by name and are unchanged. |
-| **`CYRIUS_PKG_VERSION`** (6.5.21) | Would let `src/main.cyr` stop hardcoding its printed version — the one version site `${file:VERSION}` cannot reach, and the site the 2.9.1 → 2.9.2 bump silently missed. ⚠ **Weigh against the gate it removes**: CI asserts that literal independently today. ⚠ **That caveat is stale**: the included-file case was fixed in 6.5.34 and re-verified on 6.6.2 — `CYRIUS_PKG_VERSION` resolves from the entry file **and** from an included file. ⛔ Separately, `scripts/version-bump.sh:21` and `ci.yml:285` both still assert *"Cyrius has no build-time string interpolation"*, which has been **false since 6.5.21**. Fix that sentence whether or not the symbol is adopted. |
-| **`bench_run` auto-batching** (6.5.19) | Already in force — it is what moved the 44 rows. The **36 `bench_batch()` call sites are deliberately unchanged**: they now buy a FIXED window rather than escape the floor, which is still worth having when comparing two runs at identical batch sizes. Re-evaluate only if a reason appears. |
-| **A `load` column for `bench-history.csv`** (6.5.25 documents the signature) | Upstream records that a **~4% move in both metrics together** is box-wide contention, not a code change. hisab records neither load nor any second metric, so it cannot currently tell the two apart. ⚠ **Nothing technical blocks it; what is missing is a RULE THAT READS IT.** Upstream ships a prose ~4% heuristic and has no load column of its own, and the guard hisab actually adopted in 2.11.5 — re-run the identical binary and compare each row to **its own** spread — already settles the cases this would. A load snapshot at run *start* does not describe load *during*. ⭐ **The distinct and more useful item is a per-benchmark noise band** recorded in `benchmarks.md`, replacing its global +-10% filter; 2.11.5 did that by hand. File that instead. |
-| **`_sym_render_f64` is a hand-copied `fmt_float_buf`** | 6.5.30's carry fix is now vendored in `lib/fmt.cyr`, making hisab's private copy a redundant duplicate carrying its own now-stale rationale comments. ⛔ **"Pure debt, zero output change" is REFUTED.** Over 30,149 probed inputs, **30 diverge**, all at \|val\| >= 2^63: `sym_to_latex(1e19)` gives `-9223372036854775808.000000` today versus a malformed `-9223372036854775808.-9223372036854775808` after deletion — and `symbolic_ext.cyr:211` routes \|val\| >= 1e15 down that branch **on purpose**. ⚠ The 41,998-input equivalence run is **not reproducible from the tree** (`git log -S"41,998"` finds only the commit that filed the claim). This is a **behaviour decision now, not a cleanup**. |
+| **[2.19.0]** **Negative enum values** (6.5.32, `enum E { NONE = -1; }`) | `src/error.cyr` carries **11** negative error codes as `var` globals with the `(0 - N)` workaround, and CLAUDE.md's own principle is "enums for constants — zero `gvar_toks` cost vs. `var` globals". 562 `HSB_ERR_` references across `src/` + `tests/`. ⛔ **"Gate first" is BACKWARDS — the gate does not check these constants at all.** `check-constants.sh`'s value regex requires a >=12-digit hex literal; all 12 `HSB_ERR_` lines fail it and contribute **0 of the 159 verified**. Converting moves them from a form cycc is *silent* about (a duplicate `var` global is last-wins, and the wrong value ships) into one it **diagnoses by file:line**. So convert freely; optionally widen `check-constants.sh:237`'s `GLOBAL_DECL` afterwards so the duplicate scan stays fail-closed. 12-line edit; the 562 call sites reference by name and are unchanged. |
+| **[2.19.0]** **`CYRIUS_PKG_VERSION`** (6.5.21) | Would let `src/main.cyr` stop hardcoding its printed version — the one version site `${file:VERSION}` cannot reach, and the site the 2.9.1 → 2.9.2 bump silently missed. ⚠ **Weigh against the gate it removes**: CI asserts that literal independently today. ⚠ **That caveat is stale**: the included-file case was fixed in 6.5.34 and re-verified on 6.6.2 — `CYRIUS_PKG_VERSION` resolves from the entry file **and** from an included file. ⛔ Separately, `scripts/version-bump.sh:21` and `ci.yml:285` both still assert *"Cyrius has no build-time string interpolation"*, which has been **false since 6.5.21**. Fix that sentence whether or not the symbol is adopted. |
+| **[no version — in force already]** **`bench_run` auto-batching** (6.5.19) | Already in force — it is what moved the 44 rows. The **36 `bench_batch()` call sites are deliberately unchanged**: they now buy a FIXED window rather than escape the floor, which is still worth having when comparing two runs at identical batch sizes. Re-evaluate only if a reason appears. |
+| **[2.19.0, as the noise band]** **A `load` column for `bench-history.csv`** (6.5.25 documents the signature) | Upstream records that a **~4% move in both metrics together** is box-wide contention, not a code change. hisab records neither load nor any second metric, so it cannot currently tell the two apart. ⚠ **Nothing technical blocks it; what is missing is a RULE THAT READS IT.** Upstream ships a prose ~4% heuristic and has no load column of its own, and the guard hisab actually adopted in 2.11.5 — re-run the identical binary and compare each row to **its own** spread — already settles the cases this would. A load snapshot at run *start* does not describe load *during*. ⭐ **The distinct and more useful item is a per-benchmark noise band** recorded in `benchmarks.md`, replacing its global +-10% filter; 2.11.5 did that by hand. File that instead. |
+| **[2.19.0 — a BEHAVIOUR decision, not a cleanup]** **`_sym_render_f64` is a hand-copied `fmt_float_buf`** | 6.5.30's carry fix is now vendored in `lib/fmt.cyr`, making hisab's private copy a redundant duplicate carrying its own now-stale rationale comments. ⛔ **"Pure debt, zero output change" is REFUTED.** Over 30,149 probed inputs, **30 diverge**, all at \|val\| >= 2^63: `sym_to_latex(1e19)` gives `-9223372036854775808.000000` today versus a malformed `-9223372036854775808.-9223372036854775808` after deletion — and `symbolic_ext.cyr:211` routes \|val\| >= 1e15 down that branch **on purpose**. ⚠ The 41,998-input equivalence run is **not reproducible from the tree** (`git log -S"41,998"` finds only the commit that filed the claim). This is a **behaviour decision now, not a cleanup**. |
 
 #### Closed by the 2.11.3 bump — both re-tested on 6.6.1, both fixed upstream
 
@@ -485,11 +545,11 @@ a major, with a migration guide, not a 2.x patch.
 > `Result` for none of the breakage. ⚠ Caveat: it is a *compiler* warning, not a lint warning, so
 > CI's `^  warn ` grep will not gate it — wire that before relying on it.
 
-- [ ] Wrap fallible returns in `Result<T,E>` (keep `ERR_*` codes as the `E` payload) — **value form**
-- [ ] Adopt `?` to replace manual `-1`-return + check chains
-- [ ] **Do first, at 2.x**: `#must_use` on the fallible surface (47 fallible fns, 162 `return HSB_ERR` sites)
-- [ ] Migration guide + deprecation window for the old integer-code API
-- [ ] **Public / private function surface.** hisab currently signals intent by naming convention
+- [ ] **[3.0.0]** Wrap fallible returns in `Result<T,E>` (keep `ERR_*` codes as the `E` payload) — **value form**
+- [ ] **[3.0.0]** Adopt `?` to replace manual `-1`-return + check chains
+- [ ] **[2.19.0]** `#must_use` on the fallible surface (**167** `return HSB_ERR` sites across 12 files; re-counted 2026-09-10, the row said 162)
+- [ ] **[3.0.0]** Migration guide + deprecation window for the old integer-code API
+- [ ] **[3.0.0]** **Public / private function surface.** hisab currently signals intent by naming convention
       alone — a leading `_` means "internal" and nothing enforces it. Two consequences already
       visible in the tree: `geo_diff.cyr` reaches `geo.cyr`'s helpers across a module boundary
       because nothing distinguishes "public API" from "implementation detail", and the 2.10.1 split
