@@ -5341,6 +5341,13 @@ var _GA_F64_TINY        = F64_TINY;      # alias of error.cyr (DBL_MIN)
 var _CGA_NULL_TOL       = 0x3CE0_0000_0000_0000;  # 1.7763568394002505e-15
 var _GA_F64_POS_INF = F64_POS_INF;   # alias of error.cyr
 var _GA_F64_NEG_INF     = 0xFFF0_0000_0000_0000;  # -Infinity
+# The window in which a 32-slot geometric product can neither overflow nor go
+# subnormal: every term is a product of two coefficients, so the largest is mx²,
+# and 32 of them sum below DBL_MAX while the largest stays normal. Outside it
+# `cga_norm` rescales by a power of two first. Derived, not chosen: mx² is
+# subnormal below 2^-511, and 32*mx² passes DBL_MAX above 2^509.
+var _GA_2_POW_M511      = 0x2000_0000_0000_0000;  # 1.4916681462400413e-154
+var _GA_2_POW_P508      = 0x5FB0_0000_0000_0000;  # 8.379879956214123e+152
 # _GA_F64_001 (0.01) is gone: its only consumer was time_of_impact's sampling
 # step, and an absolute world length was exactly the wrong thing for that loop
 # to be built on.
@@ -7744,9 +7751,73 @@ fn cga_norm_sq(mv) {
     return cga_scalar_part(cga_geometric_product(mv, cga_mv_reverse(mv)));
 }
 
+# Power-of-two floor of |s|, INCLUDING SUBNORMALS. `linalg_precision.cyr`'s
+# `_lp_pow2_floor` masks the exponent field and returns 1.0 when it is zero —
+# which is every subnormal — and that is exactly the case this needs to handle,
+# so the mantissa's highest set bit is used there instead. The returned bit
+# pattern IS the subnormal 2^(p-1074).
+fn _ga_pow2_floor(s) {
+    var e = s & 0x7FF0_0000_0000_0000;
+    if (e != 0) { return e; }
+    var m = s & 0x000F_FFFF_FFFF_FFFF;
+    if (m == 0) { return F64_ONE; }
+    var b = 1 << 51;
+    while (m & b == 0) { b = b >> 1; }
+    return b;
+}
+
 # Norm: sqrt(|norm_sq|)
+#
+# ⛔ 2.17.0 — `cga_norm_sq` runs a geometric product, so every term is a product
+# of two coefficients and the whole class applies: a multivector whose largest
+# coefficient is below 2^-538 has a norm of exactly 0, and above 2^511 the terms
+# overflow. Measured: `cga_norm(k*e1)` — whose answer is exactly k — was wrong on
+# **992 of 2041 binades**, returning 0 at 2^-600.
+# [measured: 2041-binade two-sided sweep on a lone e1 coefficient, 2026-09-10]
+#
+# ⭐ THE SCALE MUST BE A POWER OF TWO, and that is not a micro-optimisation.
+# Dividing by an arbitrary max — what `_hvec3_len_scaled` does — perturbs the
+# EXACT CANCELLATION that makes a null blade read bit-exactly 0, and
+# `tests/hisab.tcyr` asserts `cga_norm(...) == 0` on four of them. A power of two
+# scales every product by exactly s² with no rounding, so the cancellation
+# survives unchanged.
+# ⭐ AND THE GATE IS ON THE INPUT RANGE, NOT ON THE RESULT. Everywhere else in
+# this release the naive sum announces its own failure; here it does NOT, because
+# `nsq == 0` is the legitimate and common answer for every conformal point. A
+# result-triggered rescue would put a second full 32x32 geometric product on the
+# most frequent input in the module.
+# ⚠ DIVIDE, NEVER MULTIPLY BY `1/s`. Three independent reviewers measured the
+# reciprocal form returning NaN across the deepest band it exists to repair: `s`
+# is subnormal there, `1/s` is +Inf, and every structurally-zero slot becomes
+# `0 * Inf`. A fabricated NaN is not an improvement on a fabricated 0.
+# [measured: 2026-09-09 norm census, three independent verifiers on this site]
+# ⚠ WHAT THIS DOES NOT FIX, measured and stated so it is not read as more:
+# `cga_norm(cga_translator(t,0,0))` must be exactly 1 and stops being so at
+# t = 2^28, and `cga_norm(cga_point(x,0,0))` must be exactly 0 and stops at
+# x = 2^-27. Neither is this class — both are CATASTROPHIC CANCELLATION in the
+# product's accumulation order (1 + t²/4 - t²/4 loses the 1 once t²/4 passes
+# 2^53), and a power-of-two rescale is exact, so it cannot and does not move
+# them. They are filed on the roadmap rather than folded in here.
 fn cga_norm(mv) {
-    return f64_sqrt(f64_abs(cga_norm_sq(mv)));
+    var mx = f64_from(0);
+    for (var ni = 0; ni < 32; ni = ni + 1) {
+        var a = f64_abs(load64(mv + ni * 8));
+        if (f64_gt(a, mx) == 1) { mx = a; }
+    }
+    if (f64_eq(mx, _GA_F64_POS_INF) == 1) { return mx; }
+    # In range the products cannot over- or underflow, so take the direct form.
+    # ⚠ An all-zero or all-NaN multivector leaves `mx` at 0 and falls through
+    # here too, which is what keeps NaN propagating.
+    if (f64_lt(mx, _GA_2_POW_M511) == 0 && f64_gt(mx, _GA_2_POW_P508) == 0) {
+        return f64_sqrt(f64_abs(cga_norm_sq(mv)));
+    }
+    if (f64_gt(mx, 0) == 0) { return f64_sqrt(f64_abs(cga_norm_sq(mv))); }
+    var s = _ga_pow2_floor(mx);
+    var t = cga_mv_zero();
+    for (var si = 0; si < 32; si = si + 1) {
+        store64(t + si * 8, f64_div(load64(mv + si * 8), s));
+    }
+    return f64_mul(s, f64_sqrt(f64_abs(cga_norm_sq(t))));
 }
 
 # Unit pseudoscalar I = e1∧e2∧e3∧ep∧em (grade-5 blade [31]).
@@ -13507,8 +13578,29 @@ fn calc_monotone_cubic(xs, ys, n, x) {
 
             var s = f64_add(f64_mul(alpha, alpha), f64_mul(beta, beta));
             if (f64_lt(F64_NINE, s) == 1) {
-                # s > 9: constrain
-                var tau = f64_div(F64_THREE, f64_sqrt(s));
+                # s > 9: constrain, by projecting (alpha, beta) onto the
+                # Fritsch-Carlson circle of radius 3 — which is a norm-scaled
+                # projection, so the norm class applies.
+                # ⛔ 2.17.0 — `alpha*alpha + beta*beta` overflowed to +Inf once
+                # hypot(alpha, beta) reached 2^512, making `tau` exactly +0 and
+                # FLATTENING the segment instead of projecting it. Measured on a
+                # unit grid whose two adjacent secants differ by 2^q: the spline
+                # returns 1.5 from q = 512 down where 1.875 is correct — **20%
+                # out, finite, monotone and plausible**, so the monotonicity
+                # oracle this function already has still passes.
+                # ⚠ ONLY THE `+Inf` LEG. The line above guarantees `s > 9`
+                # strictly, so `s` can never be zero, subnormal or
+                # precision-degraded — the 2^-537 half of the class does not
+                # exist at this site and an `F64_TINY` leg would be dead code.
+                # ⚠ THE DISCRIMINATING VARIABLE IS THE RATIO BETWEEN ADJACENT
+                # SECANTS, not a global scale: `alpha` and `beta` are
+                # tangent-over-secant ratios, so the uniform x-axis sweep that
+                # already covers this function is bit-exactly invariant here and
+                # could never have seen it.
+                # [measured: 999-step secant-ratio sweep before and after]
+                var root = f64_sqrt(s);
+                if (f64_eq(s, F64_POS_INF) == 1) { root = ganita_f64_hypot(alpha, beta); }
+                var tau = f64_div(F64_THREE, root);
                 _f64arr_set(ms, i, f64_mul(f64_mul(tau, alpha), di));
                 _f64arr_set(ms, i + 1, f64_mul(f64_mul(tau, beta), di));
             }

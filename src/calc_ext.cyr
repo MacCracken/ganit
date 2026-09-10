@@ -789,8 +789,29 @@ fn calc_monotone_cubic(xs, ys, n, x) {
 
             var s = f64_add(f64_mul(alpha, alpha), f64_mul(beta, beta));
             if (f64_lt(F64_NINE, s) == 1) {
-                # s > 9: constrain
-                var tau = f64_div(F64_THREE, f64_sqrt(s));
+                # s > 9: constrain, by projecting (alpha, beta) onto the
+                # Fritsch-Carlson circle of radius 3 — which is a norm-scaled
+                # projection, so the norm class applies.
+                # ⛔ 2.17.0 — `alpha*alpha + beta*beta` overflowed to +Inf once
+                # hypot(alpha, beta) reached 2^512, making `tau` exactly +0 and
+                # FLATTENING the segment instead of projecting it. Measured on a
+                # unit grid whose two adjacent secants differ by 2^q: the spline
+                # returns 1.5 from q = 512 down where 1.875 is correct — **20%
+                # out, finite, monotone and plausible**, so the monotonicity
+                # oracle this function already has still passes.
+                # ⚠ ONLY THE `+Inf` LEG. The line above guarantees `s > 9`
+                # strictly, so `s` can never be zero, subnormal or
+                # precision-degraded — the 2^-537 half of the class does not
+                # exist at this site and an `F64_TINY` leg would be dead code.
+                # ⚠ THE DISCRIMINATING VARIABLE IS THE RATIO BETWEEN ADJACENT
+                # SECANTS, not a global scale: `alpha` and `beta` are
+                # tangent-over-secant ratios, so the uniform x-axis sweep that
+                # already covers this function is bit-exactly invariant here and
+                # could never have seen it.
+                # [measured: 999-step secant-ratio sweep before and after]
+                var root = f64_sqrt(s);
+                if (f64_eq(s, F64_POS_INF) == 1) { root = ganita_f64_hypot(alpha, beta); }
+                var tau = f64_div(F64_THREE, root);
                 _f64arr_set(ms, i, f64_mul(f64_mul(tau, alpha), di));
                 _f64arr_set(ms, i + 1, f64_mul(f64_mul(tau, beta), di));
             }

@@ -12358,6 +12358,112 @@ assert_eq(cx_is_zero(cx_new(_gp2(0 - 600), 0), _gp2(0 - 600)), 0,
 assert_eq(cx_is_zero(cx_zero(), _gp2(0 - 1000)), 1,
   "cx_is_zero: exact zero is below even a 2^-1000 tolerance");
 
+test_group("2.17.0: the last two norm sites");
+
+# ⛔ `cga_norm` runs a GEOMETRIC PRODUCT, so every term is a product of two
+# coefficients and the whole class applies. `cga_norm(k*e1)` — whose answer is
+# exactly k — was wrong on **992 of 2041 binades**, returning 0 at 2^-600 and
+# overflowing above 2^511.
+# ⭐ THE RESCALE IS BY A POWER OF TWO AND THAT IS LOAD-BEARING. An arbitrary
+# divisor would perturb the exact cancellation that makes a null blade read
+# bit-exactly 0, and four assertions in tests/hisab.tcyr depend on it.
+# [measured: 2041-binade two-sided sweep before and after, 2026-09-10]
+var _CN_RUN = 0;
+var _CN_BAD = 0;
+for (var _cn_e = 0 - 1020; _cn_e <= 1020; _cn_e = _cn_e + 1) {
+    var _cn_k = (1023 + _cn_e) << 52;
+    var _cn_mv = cga_mv_zero();
+    cga_mv_set(_cn_mv, 1, _cn_k);
+    _CN_RUN = _CN_RUN + 1;
+    if (cga_norm(_cn_mv) != _cn_k) { _CN_BAD = _CN_BAD + 1; }
+}
+assert_eq(_CN_RUN, 2041, "the cga_norm binade sweep actually ran 2041 scales");
+assert_eq(_CN_BAD, 0, "cga_norm: |k*e1| = k bit-exact from 2^-1020 to 2^1020");
+
+# ⚠ AND A SUBNORMAL COEFFICIENT, which the sweep above cannot reach — the
+# power-of-two floor that `linalg_precision.cyr` uses reads the EXPONENT FIELD,
+# which is 0 for every subnormal, so it would return 1.0 and rescale by nothing.
+# The version here falls back to the mantissa's highest set bit. ⚠ And the scaled
+# copy must DIVIDE: three reviewers measured the `1/s` form returning NaN across
+# exactly this band, because `1/s` is +Inf and every zero slot becomes `0 * Inf`.
+# [measured: 2026-09-09 norm census verifiers; 8-mutant run, 2026-09-10]
+var _cn_sub = cga_mv_zero();
+cga_mv_set(_cn_sub, 1, 1 << 44);                  # 2^-1030, subnormal
+assert_eq(cga_norm(_cn_sub), 1 << 44,
+  "cga_norm: a subnormal coefficient survives, and does not become 0 * Inf = NaN");
+
+# ⭐ AND THE NULL BLADE AT EXTREME SCALE — the assertion the power-of-two choice
+# exists for, and the one the four unit-scale null-blade checks in
+# tests/hisab.tcyr cannot make, because at unit scale the rescue never runs at
+# all. A conformal point is null, so `cga_norm` is exactly 0; scaling it by a
+# power of two keeps it null, and now the rescue path IS taken. Measured: with an
+# arbitrary `mx` divisor instead of a power of two, the exact cancellation is
+# perturbed and the norm comes back NON-ZERO at every one of these scales — the
+# mutant survived until this block existed.
+# [measured: 3-scale null-point probe with the mx divisor installed, 2026-09-10]
+var _cn_np = cga_point(f64_from(3), f64_from(4), 0);
+assert_eq(cga_norm(cga_mv_scale(_cn_np, (1023 - 600) << 52)), 0,
+  "cga_norm: a null point scaled to 2^-600 still reads exactly 0");
+assert_eq(cga_norm(cga_mv_scale(_cn_np, (1023 - 900) << 52)), 0,
+  "cga_norm: and at 2^-900");
+assert_eq(cga_norm(cga_mv_scale(_cn_np, (1023 + 700) << 52)), 0,
+  "cga_norm: and at 2^700, where the rescue runs on the overflow side");
+
+# ⭐ ANTI-DELETION: the null blades must still read exactly 0, which is what the
+# power-of-two choice protects. ⚠ And an all-zero multivector, and NaN.
+var _cn_z = cga_mv_zero();
+assert_eq(cga_norm(_cn_z), 0, "cga_norm: the zero multivector still has norm 0");
+var _cn_i = cga_mv_zero();
+cga_mv_set(_cn_i, 1, F64_POS_INF);
+assert_eq(cga_norm(_cn_i), F64_POS_INF, "cga_norm: +Inf in, +Inf out");
+var _cn_n = cga_mv_zero();
+cga_mv_set(_cn_n, 1, 0x7FF8000000000000);
+var _cn_nv = cga_norm(_cn_n);
+assert_eq(f64_eq(_cn_nv, _cn_nv), 0, "cga_norm: NaN propagates");
+
+# ⛔ `calc_monotone_cubic` PROJECTS (alpha, beta) ONTO THE FRITSCH-CARLSON CIRCLE
+# of radius 3, which is a norm-scaled projection — and `alpha² + beta²` overflowed
+# to +Inf at hypot >= 2^512, making tau exactly +0 and FLATTENING the segment.
+# The result stays finite and monotone, so the monotonicity oracle this function
+# already has still passed while the value was **20% wrong**.
+# ⚠ THE DISCRIMINATING VARIABLE IS THE RATIO BETWEEN ADJACENT SECANTS. alpha and
+# beta are tangent-over-secant ratios, so the uniform x-axis sweep that already
+# covers this function is bit-exactly invariant and could never have seen it —
+# the 2.15.0 "a uniform units change is vacuous" lesson, third instance.
+# ⭐ The grid is xs = (0, 2^-q, 1) with ys = (0, 1, 2): the two secants differ by
+# 2^q, so the sweep IS the ratio. Above q = 60 the spline has reached its limit
+# shape and f(0.5) is exactly 1.875 at every ratio.
+# [measured: 941-step secant-ratio sweep — 488 wrong before, 0 after, 2026-09-10]
+var _MC_RUN = 0;
+var _MC_BAD = 0;
+for (var _mc_q = 60; _mc_q <= 1000; _mc_q = _mc_q + 1) {
+    var _mc_xs = alloc(24);
+    store64(_mc_xs, 0);
+    store64(_mc_xs + 8, (1023 - _mc_q) << 52);
+    store64(_mc_xs + 16, F64_ONE);
+    var _mc_ys = alloc(24);
+    store64(_mc_ys, 0);
+    store64(_mc_ys + 8, F64_ONE);
+    store64(_mc_ys + 16, F64_TWO);
+    _MC_RUN = _MC_RUN + 1;
+    if (calc_monotone_cubic(_mc_xs, _mc_ys, 3, F64_HALF) != 0x3FFE000000000000) {
+        _MC_BAD = _MC_BAD + 1;
+    }
+}
+assert_eq(_MC_RUN, 941, "the secant-ratio sweep actually ran 941 ratios");
+assert_eq(_MC_BAD, 0,
+  "calc_monotone_cubic: f(0.5) = 1.875 for secant ratios 2^60 .. 2^1000 (was 1.5 above 2^512)");
+
+# ⚠ ONE MUTANT SURVIVES AND IT IS A CORRECTNESS EQUIVALENCE, recorded so the next
+# reader does not go looking for a missing assertion: replacing the fast path with
+# an UNCONDITIONAL `ganita_f64_hypot` is right at every ratio. The fast path is
+# there for cost, not correctness — `calc_monotone_cubic` rebuilds every tangent
+# on EVERY evaluation, so a spline sampled at m points is O(n*m), and vec2.cyr
+# measured the same choice at +119% unconditional against +12% guarded. ⚠ No
+# tracked benchmark touches calc_ext, so that figure is carried from vec2's
+# measurement rather than re-measured here, and no performance claim is made.
+# [measured: 8-mutant run over geo_advanced.cyr + calc_ext.cyr, 7 killed]
+
 test_group("geo 2.14.0: ray/geometry guards are scale-free");
 
 # --- 2.17.0: geo_triangle_unit_normal / geo_segment_direction. Both had an
