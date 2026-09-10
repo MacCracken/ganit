@@ -2,6 +2,100 @@
 
 ## [Unreleased]
 
+## [2.17.0] - 2026-09-10 — the norm tier, and the class that was five times wider than its list
+
+Every `sqrt(x² + y² + …)` in the tree squares before summing, so a component below **2^-537** has a
+square below the smallest subnormal and flushes to zero, one above **2^511** overflows, and — the
+dangerous third — a **subnormal sum** returns an answer that is finite, plausible and wrong. **39
+sites repaired across 16 modules, 73 mutants installed, 67 killed and 6 recorded with their
+reasons.** Suites **3807 → 3920**.
+
+⛔ **The roadmap row that scoped this named two sites. The tree-wide grep found 51 `f64_sqrt` sites
+in 16 files**, and a 10-agent census with 60 adversarial verifiers (three lenses each — reachability,
+dimension, arithmetic) confirmed 19 more defects in 9 modules and refuted one. **Fifth release
+running that this class was wider than its own list** — and the row's own instruction to *"grep for
+the shape before sizing this"* is what caught it.
+
+⛔ **In a solver the class does not return a wrong number. It returns a CONFIDENT SUCCESS AT THE
+STARTING POINT.** Every convergence test in `optimize.cyr` and `linalg_ext.cyr` is `norm < tol`, so a
+flushed norm fires on the first iteration and the routine hands back `HSB_ERR_NONE` with `out_x`
+still equal to `x0`: **446 of 1001** objective scales for conjugate gradient and **461 of 1001**
+residual scales for Levenberg-Marquardt did exactly that. Both are 0 now.
+
+⛔ **Three repairs describe defects that earlier releases record as already fixed.** `cga_rotor`'s
+2.14.0 note says *"an absolute 1e-12 turned a real rotation into the identity rotor"* — and the
+identity rotor was still returned, 500 binades lower, **991 times in 2041**. `hquat_inverse`'s 2.11.1
+note says the same about quaternions, and it still fabricated the identity at **507 scales**.
+`geo_triangle_unit_normal`'s 2.10.2 note says the fabricated `(0,1,0)` was repaired; it still came
+back for **877 of 1401** leg scales. **Moving a threshold does not help when the quantity it tests
+has already lost the value.**
+
+⭐ **A repair that moves no number is pointing at a second defect.** Repairing the Givens radius in
+`_lp_tridiag_qr` changed nothing measurable — 463 of 998 block ratios lost before and after. The loss
+was the Wilkinson shift forming `e2*e2`, which flushes, collapsing `mu` to `d2`; and an unshifted
+step on a symmetric block with equal diagonals is a **fixed point**, so `eigen_qr` burned its whole
+budget and returned `HSB_ERR_NO_CONVERGENCE`, losing the *large* block's eigenvalues too. ⚠ The
+2026-09-09 census had classified that line **SAFE_UNREACHABLE**, correctly about the `f64_sqrt` and
+wrongly about the function.
+
+⛔ **The suite could not see any of this, and the reason is structural.** `hvec3_length`'s own floor
+was pinned by two assertions that **asserted the defect as a requirement** — `assert_eq(hvec3_length(2^-538), 0)`
+— and the 2.11.1 quaternion sweep bracketed every *threshold* a repair might have chosen while
+stopping 142 decades above the *arithmetic* floor. **Bracketing the candidate thresholds is not the
+same as reaching the floor.**
+
+⚠ **No performance change is claimed, and the control says so rather than a hedge.** An orphaned
+`python3` (PPID 1, stdin a deleted temp file) had held a full core for 12.5 hours and was killed
+before the benchmark run, so the whole board moved: **72 of 72 rows, median −6.8%.** The control
+separates that from the repairs — **guard-touched rows moved −6.49% median against −6.83% for
+untouched, i.e. the UNTOUCHED MOVED MORE** — and every one of the 6 rows past ±10% sits inside its
+own historical spread (`vec3_add` −36.0% against a 52.9% spread; `bvh_query_ray_200x4k` −12.4%
+against 89.4%). **Check what the machine was doing before believing the delta.**
+
+### Fixed
+
+- **vec2 / vec3 / vec4 / quat** — `hvecN_length` and `hquat_length` rewritten as a fast path plus a
+  scaled rescue. The naive sum announces its own failure (subnormal, zero or +Inf), so the direct
+  form is kept wherever it is exact; unconditional scaling measured **+119%**, the guarded form
+  **+12%**. `_hvec2_len_scaled` delegates to `ganita_f64_hypot`, measured **bit-identical on 6294
+  comparisons**.
+- **quat** — `hquat_inverse` (**1018 of 2041 binades**, 507 the fabricated identity) and
+  `hquat_normalize` (48 of 48 subnormal magnitudes → the identity). Both were **missed by this
+  release's own first pass**, and a comment it wrote claiming `hquat_inverse` "routes through" the
+  repaired norm was false — it reads `hquat_length_sq` directly.
+- **complex** — `cx_abs` (**994 of 2041**), which `cx_ln`, `cx_sqrt` and `cx_powf` are all built on,
+  so one repair fixed four public functions. `cx_powf` now guards the modulus, not its square;
+  `cx_is_zero` stopped squaring **both** the value and the caller's tolerance.
+- **mat3** — `m3_frobenius` (**992 of 2041**), guarded by exactly one assertion, at scale 1.
+- **geo** — `geo_segment_direction` (**994 of 2041**) and `geo_triangle_unit_normal` (**877 of
+  1401**). The residual band is now `hvec3_cross` itself, upstream of the norm, and the comment says
+  so rather than claiming the class closed.
+- **geo_advanced** — `cga_plane` and `cga_rotor` (**995 of 2041** each) and `cga_norm` (**992 of
+  2041**). `cga_norm` rescales by a **power of two**, which is load-bearing: with an arbitrary
+  divisor a null point's norm comes back non-zero at every extreme scale.
+- **optimize** — `_opt_norm` plus the convergence tests in `opt_conjugate_gradient` and
+  `opt_levenberg_marquardt`, via a sum-aware helper so the two sites that already hold the sum do not
+  recompute it.
+- **linalg_ext** — `_lext_norm` (`solve_gmres` **461 of 1001**), the GMRES Givens radius (**463 of
+  1001** on an isolating fixture with `_lext_norm` already repaired), and `cmat_inverse`, which
+  called **498 of 1010** perfectly invertible matrices singular. Three lines had to move together:
+  the one-line fix takes 489 of 2001 to 488.
+- **linalg_precision** — both arms of `_lp_split_zero_diag`, both bidiagonal bulge rotations, the
+  tridiagonal rotation, and the symmetric Wilkinson shift. `svd_golub_kahan` lost the small block for
+  **472 of 999** ratios, **all of them silent**; `eigen_qr` for **463 of 998**.
+- **calc_ext** — `calc_monotone_cubic`'s Fritsch-Carlson projection overflowed at hypot ≥ 2^512,
+  flattening the segment: **488 of 941** secant ratios wrong by 20%, and still monotone, so the
+  function's own oracle passed.
+
+### Changed
+
+- **error.cyr** — `_QUAT_F64_TINY` **retired, not renamed**. Both of its uses turned out to be the
+  wrong test once the norms below them stopped flushing: DBL_MIN is one binade too strict for a
+  reciprocal.
+- **tests** — the 2.14.0 `hvec3_length` assertions that pinned the defect are replaced; the 2.11.1
+  quaternion sweep, the 2.15.0 CGA sweep (400 → 2041, one-sided → two) and the log/exp round-trip are
+  deepened to the arithmetic floor rather than to a chosen decade.
+
 ## [2.16.0] - 2026-09-10 — the small-angle series, and the defect the guard was hiding
 
 2.15.0 deferred four maps because **lowering their guard alone would have made them worse**: `se3_exp`
