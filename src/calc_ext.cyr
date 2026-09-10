@@ -424,7 +424,14 @@ fn calc_bspline(degree, ctrl_pts, n_pts, knots, n_knots, t) {
             var ki_dr = _f64arr_get(knots, idx + degree + 1 - r);
             var denom = f64_sub(ki_dr, ki);
 
-            if (f64_lt(f64_abs(denom), EPSILON_F64) == 0) {
+            # ⛔ THIS READ `< EPSILON_F64`. `denom` is a de Boor knot-span WIDTH —
+            # degree 1 in the caller's parameterisation — tested against an absolute
+            # 1e-12, so the same curve in different units takes a different branch.
+            # ⭐ By the span search's own invariant knots[idx] <= t <= knots[idx+d+1-r],
+            # so alpha is in [0,1] BY CONSTRUCTION and the division cannot overflow for
+            # any non-zero denom. Only denom == 0 can fail it; F64_TINY is that test.
+            # [measured: knot-scale sweep, fabricates P_last from s = 2^-40 down]
+            if (f64_lt(f64_abs(denom), F64_TINY) == 0) {
                 var alpha = f64_div(f64_sub(t, ki), denom);
                 var one_minus = f64_sub(F64_ONE, alpha);
 
@@ -520,7 +527,14 @@ fn calc_nurbs(degree, ctrl_pts, weights, n_pts, knots, n_knots, t) {
             var ki_dr = _f64arr_get(knots, idx + degree + 1 - r);
             var denom = f64_sub(ki_dr, ki);
 
-            if (f64_lt(f64_abs(denom), EPSILON_F64) == 0) {
+            # ⛔ THIS READ `< EPSILON_F64`. `denom` is a de Boor knot-span WIDTH —
+            # degree 1 in the caller's parameterisation — tested against an absolute
+            # 1e-12, so the same curve in different units takes a different branch.
+            # ⭐ By the span search's own invariant knots[idx] <= t <= knots[idx+d+1-r],
+            # so alpha is in [0,1] BY CONSTRUCTION and the division cannot overflow for
+            # any non-zero denom. Only denom == 0 can fail it; F64_TINY is that test.
+            # [measured: knot-scale sweep, fabricates P_last from s = 2^-40 down]
+            if (f64_lt(f64_abs(denom), F64_TINY) == 0) {
                 var alpha = f64_div(f64_sub(t, ki), denom);
                 var one_minus = f64_sub(F64_ONE, alpha);
 
@@ -546,7 +560,12 @@ fn calc_nurbs(degree, ctrl_pts, weights, n_pts, knots, n_knots, t) {
 
     # Perspective divide
     var final_w = _f64arr_get(pw_w, degree);
-    if (f64_lt(f64_abs(final_w), EPSILON_F64) == 1) { return 0; }
+    # ⛔ `final_w` is a blend of the caller's WEIGHTS, and the weight gauge is
+    # arbitrary and unobservable — w and 1000*w describe the SAME curve. Against
+    # an absolute 1e-12 this rejected a valid curve as a pole purely for being
+    # written in a small gauge, returning the invalid-input 0 for a curve it
+    # accepts in another. The divide fails only at zero. [measured: gauge sweep]
+    if (f64_lt(f64_abs(final_w), F64_TINY) == 1) { return 0; }
 
     return hvec3_new(
       f64_div(_f64arr_get(pw_x, degree), final_w),
@@ -571,7 +590,16 @@ fn calc_hermite_tcb(times, values, n, tension, continuity, bias, t) {
     var tn = _f64arr_get(times, n - 1);
     if (f64_lt(t, t0) == 1) { return _f64arr_get(values, 0); }
     if (f64_lt(tn, t) == 1) { return _f64arr_get(values, n - 1); }
-    if (f64_lt(f64_abs(f64_sub(t, tn)), EPSILON_F64) == 1) { return _f64arr_get(values, n - 1); }
+    # ⛔ `|t - tn|` is a key-TIME distance — the same animation in milliseconds
+    # moves it by 1000x — and it was tested against an absolute 1e-12, so a query
+    # ON key 1 of 3 returned the LAST key's value once the times were fine enough
+    # (measured 10.0 where 5.0 is correct, from s = 2^-40 down).
+    # ⚠ NOT F64_TINY here, and NOT deletion: this clamp is not protecting a
+    # division, it is protecting the h10*m0 product from 0*Inf at an overflowing
+    # tangent. Deletion is mutation-refuted twice (see the sweep's controls C/D).
+    # Exact equality is what the clamp always meant, and it is scale-free.
+    # [measured: key-time sweep, 9 scales to 2^-1000, plus an overflow control]
+    if (f64_eq(t, tn) == 1) { return _f64arr_get(values, n - 1); }
 
     # Find segment: largest k such that times[k] <= t and k < n-1
     var seg = 0;
@@ -591,7 +619,13 @@ fn calc_hermite_tcb(times, values, n, tension, continuity, bias, t) {
     var t_seg_end = _f64arr_get(times, seg + 1);
     var seg_len = f64_sub(t_seg_end, t_seg_start);
     var u = 0;
-    if (f64_lt(f64_abs(seg_len), EPSILON_F64) == 0) {
+    # ⛔ Same class, same function, and repairing :574 alone merely RELOCATES it:
+    # `seg_len` is a key-segment WIDTH in the caller's time unit. Left absolute,
+    # the segment interior stayed wrong after the end-key clamp was fixed —
+    # measured 5.0 (u collapsed to 0, i.e. exactly p1) where 7.8125 is correct.
+    # This one DOES protect a division, so the threshold is DBL_MIN.
+    # [measured: interior query t = 1.5s, 9 scales]
+    if (f64_lt(f64_abs(seg_len), F64_TINY) == 0) {
         u = f64_div(f64_sub(t, t_seg_start), seg_len);
     }
 
@@ -683,7 +717,16 @@ fn calc_monotone_cubic(xs, ys, n, x) {
     var i = 0;
     while (i < nm1) {
         var hi = f64_sub(_f64arr_get(xs, i + 1), _f64arr_get(xs, i));
-        if (f64_lt(hi, EPSILON_F64) == 1) { return 0; }  # Not sorted
+        # ⛔ The comment said "not sorted" and the code tested "smaller than
+        # 1e-12" — two different questions. `hi` is a grid interval in the
+        # caller's x unit, so a correctly sorted fine grid was rejected as
+        # unsorted: measured 0.0 (which is also a legal y value) where 2.25 is
+        # correct, from s = 2^-40 down. ⭐ A NOT-GREATER test, not a smaller
+        # threshold: `f64_lt(NaN, x)` is 0, so the old shape let a NaN abscissa
+        # through and returned NaN; `f64_gt(hi, 0)` is 0 for NaN and rejects it.
+        # F64_TINY would add nothing here — the division fails only at hi == 0.
+        # [measured: x-unit sweep 2^+90..2^-1000, plus NaN and unsorted controls]
+        if (f64_gt(hi, 0) == 0) { return 0; }  # not sorted, zero-width, or NaN
         _f64arr_set(hs, i, hi);
         _f64arr_set(deltas, i, f64_div(f64_sub(_f64arr_get(ys, i + 1), _f64arr_get(ys, i)), hi));
         i = i + 1;

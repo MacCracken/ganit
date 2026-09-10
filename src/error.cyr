@@ -25,6 +25,25 @@ var HSB_ERR_ALLOC            = (0 - 11);
 var EPSILON_F32 = 0x33D6BF95;               # 1e-7 as f32 bits (unused -- all math is f64)
 var EPSILON_F64 = 0x3D719799812DEA11;        # 1e-12 as f64 bits
 
+# The smallest MAGNITUDE whose reciprocal is still finite: DBL_MIN.
+#
+# ⭐ THE THIRD INSTANCE, so by this project's own rule it gets extracted. 2.10.2
+# settled the rule this constant exists for — **guard exactly what makes the
+# operation fail and nothing more; a threshold that needs a scale chosen for it
+# IS the defect** — and three modules then wrote the same value under three
+# different names: `_GEO_F64_TINY` (geo, 15 uses), `_AD_F64_TINY` (autodiff, 4)
+# and `_QUAT_F64_TINY` (quat, 3). All three are byte-identical
+# `0x0010_0000_0000_0000`; they are now aliases of this one, so the VALUE has a
+# single definition and the constant gate has one literal to check instead of
+# three. The 22 existing use sites and 2 test references are untouched.
+#
+# ⚠ NOT A REPLACEMENT FOR `EPSILON_F64`. This is the right threshold when the
+# guard protects a DIVISION and the only thing that can actually fail is a zero
+# (or subnormal) denominator. `EPSILON_F64` remains right for a genuinely
+# dimensionless, bounded quantity — a normalised cosine, a barycentric weight, a
+# parameter in [0,1] — where an absolute tolerance means something.
+var F64_TINY = 0x0010_0000_0000_0000;        # 2.2250738585072014e-308 (DBL_MIN)
+
 fn hisab_is_err(code) {
     if (code < 0) { return 1; }
     return 0;

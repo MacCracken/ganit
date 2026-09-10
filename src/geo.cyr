@@ -23,7 +23,7 @@ var _GEO_F64_EPS_SQ  = 0x3AF3_57C2_99A8_8EA7;  # 1e-24
 # The smallest MAGNITUDE whose reciprocal is still finite (DBL_MIN). Anything at
 # or above this can be divided by; anything below it makes 1/x overflow. 2.10.2
 # uses it as the slab method's parallel test -- see geo_ray_aabb_face.
-var _GEO_F64_TINY    = 0x0010_0000_0000_0000;  # 2.2250738585072014e-308
+var _GEO_F64_TINY    = F64_TINY;   # alias of error.cyr's F64_TINY (DBL_MIN)
 var _GEO_F64_THREE   = 0x4008_0000_0000_0000;  # 3.0
 var _GEO_F64_THIRD   = 0x3FD5_5555_5555_5555;  # 1.0/3.0
 
@@ -164,7 +164,19 @@ fn geo_triangle_normal(tri) {
 fn geo_triangle_unit_normal(tri) {
     var n = geo_triangle_normal(tri);
     var len_sq = hvec3_length_sq(n);
-    if (f64_lt(len_sq, _GEO_F64_TINY) == 1) { return hvec3_unit_y(); }
+    # ⛔ 2.10.2 MOVED THIS THRESHOLD AND LEFT THE EXPONENT WRONG. `len_sq` is a
+    # cross product SQUARED — degree FOUR in the caller's units — and DBL_MIN is
+    # the threshold for a degree-ONE quantity, so the guard still fired 77 decades
+    # early and still returned a FABRICATED (0,1,0) for a well-formed right
+    # triangle. Measured on the 2.13.0 tree: correct through legs of 1e-76, then
+    # unit_y from 1e-77 down, which is exactly where sc^4 crosses DBL_MIN.
+    # ⭐ The division is `1 / sqrt(len_sq)`, and sqrt of any non-zero double —
+    # subnormal included — is normal, so the ONLY input that fails is an exact
+    # zero. A not-greater test is that, exactly, and needs no scale. It also
+    # closes a NaN hole the `<` form had: `f64_lt(NaN, x)` is 0, so a NaN
+    # triangle used to return a NaN normal instead of the degenerate fallback.
+    # [measured: tests/modules.tcyr _sc_sweep, first bad decade 77 of 90]
+    if (f64_gt(len_sq, 0) == 0) { return hvec3_unit_y(); }
     return hvec3_scale(n, f64_div(F64_ONE, f64_sqrt(len_sq)));
 }
 
@@ -219,7 +231,10 @@ fn geo_segment_midpoint(seg) {
 fn geo_segment_direction(seg) {
     var d = hvec3_sub(GeoSegment_end(seg), GeoSegment_start(seg));
     var len_sq = hvec3_length_sq(d);
-    if (f64_lt(len_sq, _GEO_F64_TINY) == 1) { return hvec3_unit_x(); }
+    # ⛔ Same shape as geo_triangle_unit_normal above: a SQUARED length against a
+    # threshold meant for an unsquared one, so a valid short segment still got a
+    # fabricated unit_x. `1 / sqrt(len_sq)` fails only at an exact zero.
+    if (f64_gt(len_sq, 0) == 0) { return hvec3_unit_x(); }
     return hvec3_scale(d, f64_div(F64_ONE, f64_sqrt(len_sq)));
 }
 
@@ -232,7 +247,11 @@ fn geo_segment_direction(seg) {
 fn geo_segment_closest_point(seg, point) {
     var ab = hvec3_sub(GeoSegment_end(seg), GeoSegment_start(seg));
     var len_sq = hvec3_dot(ab, ab);
-    if (f64_lt(len_sq, _GEO_F64_TINY) == 1) { return GeoSegment_start(seg); }
+    # ⛔ Same class. Here the division IS by `len_sq`, but `t` is clamped to [0,1]
+    # immediately after, so a subnormal denominator cannot produce a bad answer —
+    # only an exact zero can. Collapsing a valid short segment to its start point
+    # is what 2.10.2 recorded as misleading its own capsule probe.
+    if (f64_gt(len_sq, 0) == 0) { return GeoSegment_start(seg); }
     var t = f64_clamp(f64_div(hvec3_dot(hvec3_sub(point, GeoSegment_start(seg)), ab), len_sq), 0, F64_ONE);
     return hvec3_add(GeoSegment_start(seg), hvec3_scale(ab, t));
 }
@@ -360,7 +379,12 @@ fn geo_face_is_max(face) {
 # return convention, pinned".
 fn geo_ray_plane(ray, plane) {
     var denom = hvec3_dot(GeoPlane_normal(plane), GeoRay_direction(ray));
-    if (f64_lt(f64_abs(denom), EPSILON_F64) == 1) { return 0; }
+    # ⛔ `denom` = n·d carries the MAGNITUDE of the ray direction, so this absolute
+    # 1e-12 made the answer depend on how long the caller's direction vector is.
+    # Measured: plane z = 0, ray from (0,0,5) along (0,0,-2^-40) returns 0 — the
+    # module's documented MISS — where the true hit is t = 5*2^40.
+    # [measured: shipped binary, direction magnitude sweep]
+    if (f64_lt(f64_abs(denom), _GEO_F64_TINY) == 1) { return 0; }
     var t = f64_div(f64_sub(GeoPlane_distance(plane), hvec3_dot(GeoPlane_normal(plane), GeoRay_origin(ray))), denom);
     if (f64_lt(t, 0) == 1) { return 0; }
     return t;
@@ -411,7 +435,12 @@ fn _geo_sphere_roots(ray, sphere, out) {
     # a unit sphere at (0,0,5) with d = (0,0,1e-7) has t = 4e7, and it returned 0.
     # geo_ray_capsule inherited it through its end caps, exactly as in 2.10.0.
     # [measured: docs/development/issues/archived/2026-08-10-squared-epsilon-guards-in-geo-ray.md]
-    if (f64_lt(a, _GEO_F64_EPS_SQ) == 1) { return 0; }
+    # ⚠ 2.14.0: 2.10.2 fixed the EXPONENT here (squared length vs squared epsilon)
+    # but kept an absolute SCALE, so the miss just moved: a unit sphere at (0,0,5)
+    # with d = (0,0,2^-40) still returned 0. `a` only has to admit a finite
+    # reciprocal at :438, and DBL_MIN guarantees that (1/DBL_MIN = 2^1022).
+    # [measured: shipped binary, hit at k = 0 and miss from k = -41]
+    if (f64_lt(a, _GEO_F64_TINY) == 1) { return 0; }
     var discriminant = f64_sub(f64_mul(half_b, half_b), f64_mul(a, c));
 
     if (f64_lt(discriminant, 0) == 1) { return 0; }
@@ -695,9 +724,20 @@ fn geo_ray_triangle(ray, tri) {
     var h = hvec3_cross(GeoRay_direction(ray), edge2);
     var a = hvec3_dot(edge1, h);
 
-    if (f64_lt(f64_abs(a), EPSILON_F64) == 1) { return 0; }
-
+    # ⛔ `a` is a scalar triple product — degree TWO in the triangle's edge lengths
+    # for a unit direction — against an absolute 1e-12, so a small triangle was a
+    # silent MISS. Measured: legs 2^-30, a ray through the interior, u = v = 0.25,
+    # returns 0 where the answer is t = 1.
+    # ⭐ AND THE THRESHOLD IS NOT THE FIX. What fails is `1 / a`, so test THAT:
+    # `f64_lt(|f|, +Inf)` is 1 for every finite f and 0 for both +Inf and NaN, so
+    # one comparison rejects a = 0, any `a` whose reciprocal overflows, and a NaN
+    # triangle — with no scale to choose. ⚠ NOT the `f64_gt(x, 0) == 0` form used
+    # for the `1/sqrt(x)` guards above: sqrt of any non-zero double is normal, but
+    # a RECIPROCAL overflows for subnormal a, and that form returns +Inf here on a
+    # corner-on ray where u and v are NaN and the [0,1] tests cannot reject it.
+    # [measured: 7-point bracket x 5 mutants; DBL_MIN fails 2 of 7, this fails 0]
     var f = f64_div(F64_ONE, a);
+    if (f64_lt(f64_abs(f), _GEO_F64_POS_INF) == 0) { return 0; }
     var s = hvec3_sub(GeoRay_origin(ray), GeoTriangle_v0(tri));
     var u = f64_mul(f, hvec3_dot(s, h));
 
@@ -927,7 +967,11 @@ fn geo_ray_capsule_branch(ray, capsule, out) {
     # `start`. Measured: capsule (0,0,0)-(s,0,0) with radius s/4 answers 1.75s at
     # every scale down to 1e-6 and then 0 (a miss) at 1e-7.
     # [measured: docs/development/issues/archived/2026-08-10-squared-epsilon-guards-in-geo-ray.md]
-    if (f64_lt(ab_len_sq, _GEO_F64_TINY) == 1) {
+    # ⚠ 2.14.0: the threshold moved again, for the reason above it. `d_par` is
+    # `dot(dir, ab) / ab_len_sq` with a unit `dir`, so |d_par| <= 1/|ab| and stays
+    # finite for any non-zero ab_len_sq, subnormal included. Only an exact zero
+    # makes a capsule genuinely a sphere.
+    if (f64_gt(ab_len_sq, 0) == 0) {
         var sph = geo_sphere_new(GeoCapsule_start(capsule), GeoCapsule_radius(capsule));
         var dt = geo_ray_sphere(ray, sph);
         if (out != 0) { if (dt != 0) { store64(out, GEO_CAP_SPHERE); } }
@@ -968,7 +1012,10 @@ fn geo_ray_capsule_branch(ray, capsule, out) {
     # (see complex.cyr:58) and 2.10.1 repaired in geo_ray_sphere above.
     # [measured: docs/development/issues/archived/2026-08-10-squared-epsilon-guards-in-geo-ray.md]
     var cyl_missed = 0;
-    if (f64_lt(f64_abs(a), _GEO_F64_EPS_SQ) == 1) { cyl_missed = 1; }
+    # ⚠ 2.14.0, same correction as _geo_sphere_roots: the exponent was fixed in
+    # 2.10.2, the absolute scale was not. `a` is the squared perpendicular
+    # component of the direction and only needs a finite reciprocal.
+    if (f64_lt(f64_abs(a), _GEO_F64_TINY) == 1) { cyl_missed = 1; }
     if (f64_lt(disc, 0) == 1) { cyl_missed = 1; }
 
     var best = 0;
@@ -1125,12 +1172,23 @@ fn geo_closest_point_on_plane(plane, point) {
 fn geo_closest_point_on_sphere(sphere, point) {
     var dir = hvec3_sub(point, GeoSphere_center(sphere));
     var len = hvec3_length(dir);
-    if (f64_lt(len, EPSILON_F64) == 1) {
+    # ⛔ `len` is a DISTANCE, absolute 1e-12, so a query point near a small sphere
+    # got center + (radius,0,0) — a point genuinely ON the sphere, in a direction
+    # the caller never asked for. Measured at radius 2^-32 with the query on +y.
+    # ⚠ Asserting |cp - center| == radius does NOT catch this; the fabrication has
+    # the right length. Only the DIRECTION discriminates.
+    # [measured: tests/modules.tcyr closest_point_on_sphere 3-axis sweep]
+    if (f64_lt(len, _GEO_F64_TINY) == 1) {
         return hvec3_add(GeoSphere_center(sphere),
           hvec3_new(GeoSphere_radius(sphere), 0, 0));
     }
+    # ⭐ TWO STEPS, AND THAT IS PART OF THE REPAIR. `radius / len` overflows to
+    # +Inf whenever the ratio exceeds DBL_MAX — measured 77 of 601 radii at a
+    # fixed offset — so normalise FIRST and scale second. This is only safe
+    # because of the guard above: 1/len is bounded by 1/DBL_MIN, which is finite.
+    # [measured: 3-axis sweep; 1-step fails 77 of 601, 2-step 0 of 601]
     return hvec3_add(GeoSphere_center(sphere),
-      hvec3_scale(dir, f64_div(GeoSphere_radius(sphere), len)));
+      hvec3_scale(hvec3_scale(dir, f64_div(F64_ONE, len)), GeoSphere_radius(sphere)));
 }
 
 # Closest point on an AABB to a given point (clamp to box). Returns HVec3.
@@ -1238,7 +1296,13 @@ fn geo_barycentric_coords(tri, point) {
     var d21 = hvec3_dot(v2, v1);
 
     var denom = f64_sub(f64_mul(d00, d11), f64_mul(d01, d01));
-    if (f64_lt(f64_abs(denom), EPSILON_F64) == 1) {
+    # ⛔ `denom` is the Gram determinant — (2*Area)², degree FOUR in the triangle's
+    # units — against an absolute 1e-12, and the fallback is a FABRICATION that
+    # cannot be told from success: (1/3, 1/3, 1/3) sums to 1 and lies inside the
+    # triangle. Measured in 241 of 241 failing samples for a point whose true
+    # weights are (0.25, 0.25, 0.5). Only `1 / denom` can fail, at :1268.
+    # [measured: triangle-scale sweep on the shipped binary]
+    if (f64_lt(f64_abs(denom), _GEO_F64_TINY) == 1) {
         # Degenerate triangle -- return centroid weights
         return hvec3_new(_GEO_F64_THIRD, _GEO_F64_THIRD, _GEO_F64_THIRD);
     }

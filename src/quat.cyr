@@ -9,7 +9,7 @@
 # below divide, and this is exactly the point at which the division stops
 # producing a usable answer -- the rule that settled six thresholds in geo.cyr
 # across 2.10.2 and four in autodiff.cyr in 2.11.0.
-var _QUAT_F64_TINY = 0x0010_0000_0000_0000;  # 2.2250738585072014e-308
+var _QUAT_F64_TINY = F64_TINY;   # alias of error.cyr's F64_TINY (DBL_MIN)
 
 #derive(accessors)
 struct HQuat { x; y; z; w; }

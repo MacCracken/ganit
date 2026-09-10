@@ -1117,6 +1117,105 @@ assert_eq(HVec3_y(hvec3_reject(c73_v3a, c73_v3x)), f64_from(4), "hvec3_reject fr
 assert(f64_lt(f64_abs(f64_sub(hvec3_angle(hvec3_unit_x(), hvec3_unit_y()), F64_PI_2)),
     LOOSE_TOL) == 1, "hvec3_angle(x, y) = pi/2");
 
+# ================================================================
+# 2.14.0 — scale covariance for hvec3_angle
+# ================================================================
+# ⛔ THE ASSERTION ABOVE WAS THE ONLY ONE THIS FUNCTION HAD, AND IT RUNS AT UNIT
+# SCALE, so it could not have caught the defect: `hvec3_angle` guarded
+# `|a|·|b| < EPSILON_F64`, a length SQUARED against an absolute 1e-12, and
+# returned **0 rad — the value that means PARALLEL — for two EXACTLY
+# PERPENDICULAR vectors** once they were short enough. Measured before the
+# repair: pi/2 at lengths 1, 1e-3 and 1e-6, and **0 at 1e-18**.
+# [measured: probe over 4 scales on the 2.13.0 tree, 2026-09-09]
+#
+# ⭐ SCALE COVARIANCE IS THE ONLY SHAPE OF TEST A BAD THRESHOLD CANNOT PASS. The
+# angle between two perpendicular vectors is pi/2 at EVERY length; a guard with a
+# scale baked into it makes the same geometry answer differently in different
+# units, and nothing at a single scale can see that.
+#
+# ⚠ 154 DECADES, AND THE DEPTH IS BOTH LOAD-BEARING AND *DERIVED*. The sweep
+# must bracket every threshold a repair might plausibly have chosen, not just
+# the one chosen — 2.11.1 recorded a 12-decade quaternion sweep killing only 1
+# of 3 mutants because both rejected thresholds sat below where it looked, and a
+# 20-decade version of THIS sweep repeated that mistake: `denom` is QUADRATIC in
+# the scale, so 20 decades reaches only 1e-38 and a mutant threshold of 1e-100
+# SURVIVED it. There is no depth that is safely "deep enough" by argument, so
+# the depth is taken from the arithmetic instead: run until the guarded quantity
+# genuinely fails. 154 is where it does — `denom` = scale² first goes SUBNORMAL
+# at scale = 1e-154, which is `F64_TINY` itself and therefore the last decade
+# that can exist. Every threshold above DBL_MIN is now inside the sweep.
+# ⚠ The existing 10-decade `_sc_sweep` in modules.tcyr bottoms out at 1e-9 and
+# could not reach a LINEAR 1e-12 guard at all — measured: `hisab_inverse_lerp`
+# first misbehaves at the 14th decade.
+# [measured: probe over decades 0..156, first failing decade 154, 2026-09-09]
+var _FA_BAD = 0;
+var _FA_RUN = 0;
+var _fa_sc = F64_ONE;
+var _fa_e = 0;
+while (_fa_e < 154) {
+    var _fa_a = hvec3_new(_fa_sc, 0, 0);
+    var _fa_b = hvec3_new(0, _fa_sc, 0);
+    _FA_RUN = _FA_RUN + 1;
+    if (f64_approx_eq(hvec3_angle(_fa_a, _fa_b), F64_PI_2, LOOSE_TOL) != 1) {
+        _FA_BAD = _FA_BAD + 1;
+    }
+    _fa_sc = f64_div(_fa_sc, f64_from(10));
+    _fa_e = _fa_e + 1;
+}
+# ⚠ The RUN counter is asserted too. A sweep that silently stops running is
+# indistinguishable from a sweep that passes — this repo caught two such
+# fixtures in 2.10.2, one all-misses and one where 3 of 4 configs never fired.
+# [measured: CHANGELOG.md, the 2.10.2 and 2.11.1 entries]
+assert_eq(_FA_RUN, 154, "hvec3_angle scale sweep actually ran 154 decades");
+assert_eq(_FA_BAD, 0,
+  "hvec3_angle: perpendicular is pi/2 at every scale from 1e0 down to 1e-153");
+
+# ⭐ AND THE OTHER SIDE OF THE BOUNDARY. A covariance sweep alone only proves the
+# guard is silent where it should be; it cannot prove the guard still EXISTS. One
+# decade further `denom` is subnormal — the division really is degenerate — and
+# the function must take its `return 0`. Asserting both sides pins the threshold
+# to DBL_MIN exactly: anything higher fails the sweep, anything lower fails here.
+assert_eq(f64_lt(f64_mul(hvec3_length(hvec3_new(_fa_sc, 0, 0)),
+      hvec3_length(hvec3_new(0, _fa_sc, 0))), F64_TINY), 1,
+  "hvec3_angle boundary: denom is subnormal one decade past the sweep");
+assert_eq(hvec3_angle(hvec3_new(_fa_sc, 0, 0), hvec3_new(0, _fa_sc, 0)), 0,
+  "hvec3_angle: the guard still fires where the division genuinely degenerates");
+
+# ⛔ AND A DECADE SWEEP HAS A BLIND SPOT AT ITS OWN BOTTOM. `denom` steps by two
+# decades per iteration, so it goes 1e-306 (decade 153, normal) straight to
+# 1e-308 (decade 154, subnormal) and NEVER LANDS in [DBL_MIN, 1e-306]. Measured:
+# a mutant threshold anywhere in that ~2.65-decade band passes both assertions
+# above — the sweep sees it silent at 1e-306 and firing at 1e-308, exactly like
+# the real guard. Stepping finer everywhere would not help either; the gap is
+# where the answer changes, so that is where a sub-decade probe has to go.
+# [measured: mutation sweep of the guard threshold, 2026-09-09]
+# `_fa_edge` is chosen so `|a|·|b|` lands at 1.5 x DBL_MIN — NORMAL by one
+# binade, so the division is fine and the guard must stay silent.
+var _fa_edge = 0x2003988E1409212E;   # 1.8269129119256893e-154; squared = 1.5*DBL_MIN
+assert_eq(f64_lt(f64_mul(hvec3_length(hvec3_new(_fa_edge, 0, 0)),
+      hvec3_length(hvec3_new(0, _fa_edge, 0))), F64_TINY), 0,
+  "hvec3_angle edge: denom is normal by one binade, so the guard must not fire");
+assert(f64_approx_eq(hvec3_angle(hvec3_new(_fa_edge, 0, 0),
+      hvec3_new(0, _fa_edge, 0)), F64_PI_2, LOOSE_TOL) == 1,
+  "hvec3_angle: pi/2 at the last scale where the division still works");
+
+# ⭐ AND THE THRESHOLD IS PINNED TO THE LAST BIT, because it can be. DBL_MIN is
+# 2^-1022, so a scale of 2^-511 squares to it EXACTLY — no rounding anywhere, the
+# product is representable by construction — which puts `denom` precisely ON the
+# constant the guard tests. `<` must therefore be silent here (the division is
+# still perfectly well defined at DBL_MIN) and must fire one ULP below. Together
+# these two assertions leave a mutant no room at all: a threshold one ULP high
+# fails the first, one ULP low fails the second. Measured: with only the decade
+# sweep and the 1.5 x DBL_MIN edge probe, `F64_TINY + 1 ULP` still survived.
+# [measured: mutation sweep of the guard threshold, 2026-09-09]
+var _fa_exact = 0x2000000000000000;   # 2^-511; squared = 2^-1022 = DBL_MIN exactly
+var _fa_under = 0x1FFFFFFFFFFFFFFF;   # one ULP below it; squared = DBL_MIN - 1 ULP
+assert(f64_approx_eq(hvec3_angle(hvec3_new(_fa_exact, 0, 0),
+      hvec3_new(0, _fa_exact, 0)), F64_PI_2, LOOSE_TOL) == 1,
+  "hvec3_angle: denom exactly DBL_MIN still divides, so the guard stays silent");
+assert_eq(hvec3_angle(hvec3_new(_fa_under, 0, 0), hvec3_new(0, _fa_under, 0)), 0,
+  "hvec3_angle: one ULP below DBL_MIN the guard fires");
+
 # --- misc singletons
 assert_eq(hisab_is_err(0), 0, "hisab_is_err(0) is false");
 assert_eq(hisab_is_err(0 - 5), 1, "hisab_is_err(negative) is true");

@@ -14,7 +14,7 @@
 # that were about geometry rather than about the division. Same constant and same
 # rule as geo.cyr's `_GEO_F64_TINY`; the modules are self-contained by design, so
 # each carries its own and the constant gate verifies both.
-var _AD_F64_TINY = 0x0010_0000_0000_0000;  # 2.2250738585072014e-308
+var _AD_F64_TINY = F64_TINY;   # alias of error.cyr's F64_TINY (DBL_MIN)
 
 #derive(accessors)
 struct Dual { val; deriv; }

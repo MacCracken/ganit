@@ -1499,9 +1499,26 @@ fn _sc_bad(got, want) {
     return 1;
 }
 
+# ⚠ 2.14.0 — THIS SWEEP WAS 10 DECADES AND THAT WAS 70 DECADES TOO SHALLOW.
+# 2.10.2 moved four geo thresholds from EPSILON_F64 to `_GEO_F64_TINY` (DBL_MIN)
+# and proved the repair with this sweep — but the sweep bottomed out at 1e-9,
+# so it could only ever show that the OLD threshold was wrong, never that the new
+# one was right. ⛔ It was not: `geo_triangle_unit_normal` guards `len_sq`, a
+# cross product SQUARED and therefore degree FOUR in the caller's units, against
+# a threshold for a degree-ONE quantity. Measured by deepening this very loop —
+# correct through legs of 1e-76, fabricated (0,1,0) from 1e-77 down, which is
+# exactly where sc^4 crosses DBL_MIN. Three sibling guards had the same shape.
+# [measured: depth bisect of this loop, first bad decade 77 of 90]
+#
+# ⭐ 80 IS MEASURED, NOT CHOSEN. After the repair the first failing decade is 80,
+# and that is ARITHMETIC rather than a guard: at sc = 1e-80 the quartic `len_sq`
+# is 1e-320 — subnormal, ~12 mantissa bits left — so the normal it reconstructs
+# is imprecise no matter what any threshold does. Running deeper would assert
+# something false about doubles, not something true about this code.
+# [measured: depth bisect of this loop, 77 before the repair, 80 after]
 fn _sc_sweep() {
     var root_half = f64_div(F64_ONE, f64_sqrt(F64_TWO));
-    for (var e = 0; e < 10; e = e + 1) {
+    for (var e = 0; e < 80; e = e + 1) {
         var sc = F64_ONE;
         for (var i = 0; i < e; i = i + 1) { sc = f64_div(sc, f64_from(10)); }
 
@@ -2629,7 +2646,59 @@ assert(f64_approx_eq(cw_t, f64_from(6), LOOSE_TOL_M),
 
 test_group("2.10.2 geo: the same scene in different units gives the same answer");
 _sc_sweep();
-assert_eq(_SC_RUN, 40, "the scale-covariance sweep ran 4 properties x 10 decades");
+assert_eq(_SC_RUN, 320, "the scale-covariance sweep ran 4 properties x 80 decades");
+
+# ⛔ AND THE SWEEP ALONE PROVES LESS THAN IT LOOKS. Mutation-tested after the
+# repair: with the 80-decade sweep as the only evidence, DELETING the triangle
+# guard entirely SURVIVED, and restoring `_GEO_F64_TINY` at the other three sites
+# SURVIVED TOO — the sweep's quantities there are only QUADRATIC in the scale, so
+# they never reach DBL_MIN inside 80 decades and the sweep cannot see the
+# difference. Two kinds of assertion close that, and neither is a deeper sweep.
+# [measured: 11-mutant run over src/geo.cyr, 4 survivors before this block]
+
+# --- (1) ANTI-DELETION. Each guard must still fire on a genuinely degenerate
+# input, or "repairing" it is indistinguishable from removing it.
+var _gd_tri = geo_triangle_new(hvec3_new(F64_ONE, 0, 0), hvec3_new(F64_ONE, 0, 0),
+  hvec3_new(F64_ONE, 0, 0));
+var _gd_n = geo_triangle_unit_normal(_gd_tri);
+assert_eq(HVec3_y(_gd_n), 0x3FF0000000000000,
+  "geo_triangle_unit_normal: a zero-area triangle still returns the unit_y fallback");
+assert_eq(HVec3_x(_gd_n), 0,
+  "geo_triangle_unit_normal: the degenerate fallback is exact, not NaN");
+
+var _gd_seg = geo_segment_new(hvec3_new(F64_TWO, 0, 0), hvec3_new(F64_TWO, 0, 0));
+assert_eq(HVec3_x(geo_segment_direction(_gd_seg)), 0x3FF0000000000000,
+  "geo_segment_direction: a zero-length segment still returns the unit_x fallback");
+assert_eq(HVec3_x(geo_segment_closest_point(_gd_seg, hvec3_new(0, 0, 0))),
+  0x4000000000000000,
+  "geo_segment_closest_point: a zero-length segment still collapses to its start");
+
+# --- (2) THE SUBNORMAL BAND. `len_sq` is quadratic, so the only scale that
+# separates DBL_MIN from an exact-zero test is one where the SQUARE itself goes
+# subnormal while staying non-zero. s = 2^-512 puts len_sq at exactly 2^-1023 —
+# one binade below DBL_MIN, so still 51 bits of mantissa and the answer is
+# bit-exact — which the old threshold rejects and the division handles fine.
+var _gs = (1023 - 512) << 52;                 # 2^-512
+var _gs_seg = geo_segment_new(hvec3_new(0, 0, 0), hvec3_new(_gs, _gs, 0));
+assert_eq(hvec3_length_sq(hvec3_new(_gs, _gs, 0)), 0x0008000000000000,
+  "the subnormal-band fixture really is subnormal (2^-1023, below DBL_MIN)");
+assert_eq(HVec3_x(geo_segment_direction(_gs_seg)), 0x3FE6A09E667F3BCC,
+  "geo_segment_direction: a subnormal len_sq still yields a bit-exact 1/sqrt(2)");
+assert_eq(HVec3_y(geo_segment_direction(_gs_seg)), 0x3FE6A09E667F3BCC,
+  "geo_segment_direction: both components, not just the one that could alias");
+assert_eq(geo_segment_distance_to_point(_gs_seg,
+    hvec3_scale(hvec3_new(_gs, _gs, 0), F64_HALF)), 0,
+  "geo_segment_closest_point: a subnormal len_sq is not collapsed to the start");
+
+# ⚠ geo_ray_capsule's guard is on the same quantity, so it needs the same band.
+var _gc_cap = geo_capsule_new(hvec3_new(0, 0, 0), hvec3_new(_gs, 0, 0),
+  f64_div(_gs, f64_from(4)));
+var _gc_ray = alloc(sizeof(GeoRay));
+GeoRay_set_origin(_gc_ray, hvec3_new(f64_div(_gs, F64_TWO), f64_mul(F64_TWO, _gs), 0));
+GeoRay_set_direction(_gc_ray, hvec3_new(0, f64_neg(F64_ONE), 0));
+assert(f64_approx_eq(f64_div(geo_ray_capsule(_gc_ray, _gc_cap), _gs),
+    f64_div(f64_from(7), f64_from(4)), LOOSE_TOL_M) == 1,
+  "geo_ray_capsule: a subnormal axis len_sq is still a capsule, not a sphere");
 assert_eq(_SC_BAD, 0,
   "triangle normal, segment direction, segment distance and capsule t are all scale-covariant to 1e-9");
 
@@ -10191,6 +10260,644 @@ assert(f64_lt(_nz_mxp3, F64_ONE) == 1, "perlin_3d: inside the analytic bound of 
 assert(f64_lt(_nz_mxs3, F64_ONE) == 1, "simplex_3d: inside the documented [-1, 1] range");
 
 # ================================================================
+# ================================================================
+# 2.14.0 — scale covariance for calc_ext's five epsilon guards
+# ================================================================
+# ⛔ FIVE GUARDS IN THIS FILE COMPARED A DIMENSIONED QUANTITY AGAINST AN ABSOLUTE
+# 1e-12 AND THEN FABRICATED A PLAUSIBLE ANSWER — the same class the repo has been
+# recording since complex.cyr:58 in 2.6.14. All five passed every assertion in the
+# tree before this block existed, and all five still pass them after the repair:
+# the existing calc_ext tests are reject-path assertions that return before the
+# guard runs, so NO test in the tree ever evaluated a B-spline to a value.
+#
+# ⭐ SCALE COVARIANCE IS THE ONLY SHAPE OF TEST A BAD THRESHOLD CANNOT PASS, and
+# these fixtures are BIT-EXACT rather than tolerance-based: every scale is a power
+# of two, so each blend weight is exactly representable and the expected value does
+# not move by a single ULP across ~600 decimal decades. A tolerance would have
+# re-introduced the 2.13.0 problem — an assertion that accepts a range accepts a
+# fabrication that lands in the range.
+#
+# ⚠ THE DEPTH IS BRACKETING, NOT DECORATION. Each sweep must straddle every
+# threshold a repair might plausibly have reached for, because 2.11.1 recorded a
+# 12-decade quaternion sweep killing 1 of 3 mutants by looking above where the
+# rejected thresholds sat. Measured kill matrix for the de Boor sweep, one build
+# per candidate: 1e-6 first fails at 2^-20, 1e-9 at 2^-30, the shipped 1e-12 at
+# 2^-40, 1e-15 at 2^-50, DBL_EPSILON at 2^-60, and F64_1E_NEG30 — already declared
+# at the top of calc_ext.cyr, so the likeliest in-file grab — at 2^-200. Only
+# DBL_MIN survives all ten. That is why 2^-200 and 2^-1000 are here and why the
+# 2^-60 -> 2^-200 gap must not be closed up.
+# [measured: per-candidate rebuild of the whole sweep, 2026-09-09]
+
+test_group("calc_ext 2.14.0: scale covariance of the epsilon guards");
+
+# 2^e as an f64 bit pattern: exponent field (1023 + e), zero mantissa.
+fn _ce_p2(e) { return (1023 + e) << 52; }
+
+# The shared cubic fixture: P = [(0,0,0),(1,2,0),(3,-1,0),(4,0,0)].
+fn _ce_cps4() {
+    var c = alloc(4 * 8);
+    store64(c + 0,  hvec3_new(0, 0, 0));
+    store64(c + 8,  hvec3_new(f64_from(1), f64_from(2), 0));
+    store64(c + 16, hvec3_new(f64_from(3), f64_neg(F64_ONE), 0));
+    store64(c + 24, hvec3_new(f64_from(4), 0, 0));
+    return c;
+}
+
+# knots = [0,0,0,0,s,s,s,s]; t = s/2 sits mid-span, so alpha = 1/2 exactly.
+fn _ce_knots8(s) {
+    var k = _f64arr_alloc(8);
+    var i = 0;
+    while (i < 4) {
+        _f64arr_set(k, i, 0);
+        _f64arr_set(k, i + 4, s);
+        i = i + 1;
+    }
+    return k;
+}
+
+# --- A. calc_bspline: the knot vector is a UNIT CHOICE, so the curve must not move
+var _CE_RUN = 0;
+var _CE_BAD = 0;
+var _ce_exps = _f64arr_alloc(10);
+_f64arr_set(_ce_exps, 0, 0);       _f64arr_set(_ce_exps, 1, 0 - 10);
+_f64arr_set(_ce_exps, 2, 0 - 20);  _f64arr_set(_ce_exps, 3, 0 - 30);
+_f64arr_set(_ce_exps, 4, 0 - 39);  _f64arr_set(_ce_exps, 5, 0 - 40);
+_f64arr_set(_ce_exps, 6, 0 - 50);  _f64arr_set(_ce_exps, 7, 0 - 60);
+_f64arr_set(_ce_exps, 8, 0 - 200); _f64arr_set(_ce_exps, 9, 0 - 1000);
+# ⚠ 2^-39 is here deliberately: it is the LAST scale that passes on the stock
+# tree, so the sweep pins the breakpoint instead of merely straddling it.
+
+var _ce_i = 0;
+while (_ce_i < 10) {
+    var _ce_s = _ce_p2(_f64arr_get(_ce_exps, _ce_i));
+    var _ce_r = calc_bspline(3, _ce_cps4(), 4, _ce_knots8(_ce_s), 8,
+      f64_mul(_ce_s, F64_HALF));
+    _CE_RUN = _CE_RUN + 1;
+    if (_ce_r == 0) {
+        _CE_BAD = _CE_BAD + 1;
+    } else {
+        if (HVec3_x(_ce_r) != 0x4000000000000000) { _CE_BAD = _CE_BAD + 1; }
+        if (HVec3_y(_ce_r) != 0x3FD8000000000000) { _CE_BAD = _CE_BAD + 1; }
+    }
+    _ce_i = _ce_i + 1;
+}
+# ⚠ The RUN counter is asserted, not assumed. A sweep that silently stops running
+# is indistinguishable from a sweep that passes — 2.10.2 caught two such fixtures.
+assert_eq(_CE_RUN, 10, "calc_bspline knot-scale sweep actually ran 10 scales");
+assert_eq(_CE_BAD, 0,
+  "calc_bspline: (2.0, 0.375) bit-exact at every knot scale from 2^0 to 2^-1000");
+
+# --- B. NARROW INTERIOR SPAN — kills the span-RELATIVE repair, which A lets pass.
+# ⭐ A guard of the form `denom < eps * (t_max - t_min)` is scale-free and sails
+# through sweep A unchanged, because there every span IS the total span. Only a
+# knot vector with one fine interior span inside a unit total separates them.
+var _ce_nb_cps = alloc(3 * 8);
+store64(_ce_nb_cps + 0,  hvec3_new(0, 0, 0));
+store64(_ce_nb_cps + 8,  hvec3_new(f64_from(8), f64_from(4), 0));
+store64(_ce_nb_cps + 16, hvec3_new(f64_from(16), 0, 0));
+var _ce_nb_kn = _f64arr_alloc(5);
+_f64arr_set(_ce_nb_kn, 0, 0);
+_f64arr_set(_ce_nb_kn, 1, 0);
+_f64arr_set(_ce_nb_kn, 2, _ce_p2(0 - 40));
+_f64arr_set(_ce_nb_kn, 3, F64_ONE);
+_f64arr_set(_ce_nb_kn, 4, F64_ONE);
+var _ce_nb = calc_bspline(1, _ce_nb_cps, 3, _ce_nb_kn, 5, _ce_p2(0 - 41));
+assert(_ce_nb != 0, "calc_bspline narrow-span fixture returns a point");
+assert_eq(HVec3_x(_ce_nb), 0x4010000000000000,
+  "calc_bspline: a fine interior span inside a unit knot vector still interpolates");
+assert_eq(HVec3_y(_ce_nb), 0x4000000000000000,
+  "calc_bspline: narrow-span y is the exact midpoint, not the fabricated P1");
+
+# --- C. ANTI-DELETION CONTROL. Sweeps A and B never drive denom to zero, so both
+# pass with the guard deleted entirely. This fixture forces knots[2] == knots[3].
+var _ce_z_cps = alloc(3 * 8);
+store64(_ce_z_cps + 0,  hvec3_new(F64_ONE, 0, 0));
+store64(_ce_z_cps + 8,  hvec3_new(f64_from(5), 0, 0));
+store64(_ce_z_cps + 16, hvec3_new(f64_from(9), 0, 0));
+var _ce_z_kn = _f64arr_alloc(5);
+_f64arr_set(_ce_z_kn, 0, 0);
+_f64arr_set(_ce_z_kn, 1, 0);
+_f64arr_set(_ce_z_kn, 2, F64_ONE);
+_f64arr_set(_ce_z_kn, 3, F64_ONE);
+_f64arr_set(_ce_z_kn, 4, F64_ONE);
+var _ce_z = calc_bspline(1, _ce_z_cps, 3, _ce_z_kn, 5, F64_ONE);
+assert(_ce_z != 0, "calc_bspline zero-span control returns a point");
+assert_eq(HVec3_x(_ce_z), 0x4022000000000000,
+  "calc_bspline: an exactly-zero knot span still takes the skip, not 0/0");
+
+# --- D. calc_nurbs inherits the same de Boor guard: sweep it at all weights = 1.
+var _CE_NR_RUN = 0;
+var _CE_NR_BAD = 0;
+_ce_i = 0;
+while (_ce_i < 10) {
+    var _ce_ns = _ce_p2(_f64arr_get(_ce_exps, _ce_i));
+    var _ce_nw = _f64arr_alloc(4);
+    var _ce_wj = 0;
+    while (_ce_wj < 4) { _f64arr_set(_ce_nw, _ce_wj, F64_ONE); _ce_wj = _ce_wj + 1; }
+    var _ce_nres = calc_nurbs(3, _ce_cps4(), _ce_nw, 4, _ce_knots8(_ce_ns), 8,
+      f64_mul(_ce_ns, F64_HALF));
+    _CE_NR_RUN = _CE_NR_RUN + 1;
+    if (_ce_nres == 0) {
+        _CE_NR_BAD = _CE_NR_BAD + 1;
+    } else {
+        if (HVec3_x(_ce_nres) != 0x4000000000000000) { _CE_NR_BAD = _CE_NR_BAD + 1; }
+    }
+    _ce_i = _ce_i + 1;
+}
+assert_eq(_CE_NR_RUN, 10, "calc_nurbs knot-scale sweep actually ran 10 scales");
+assert_eq(_CE_NR_BAD, 0,
+  "calc_nurbs: x is bit-exactly 2.0 at every knot scale from 2^0 to 2^-1000");
+
+# --- E. THE WEIGHT GAUGE IS UNOBSERVABLE. w and c*w describe the SAME curve, so
+# the perspective-divide guard must not have an opinion about c. This sweep runs
+# in BOTH directions — 2^+1000 down to 2^-1000, ~600 decimal decades — and the
+# maximum intermediate is 4*2^1000 = 2^1002, so nothing overflows or goes subnormal.
+var _CE_W_RUN = 0;
+var _CE_W_BAD = 0;
+var _ce_wexps = _f64arr_alloc(12);
+_f64arr_set(_ce_wexps, 0, 1000);     _f64arr_set(_ce_wexps, 1, 60);
+_f64arr_set(_ce_wexps, 2, 10);       _f64arr_set(_ce_wexps, 3, 0);
+_f64arr_set(_ce_wexps, 4, 0 - 10);   _f64arr_set(_ce_wexps, 5, 0 - 20);
+_f64arr_set(_ce_wexps, 6, 0 - 30);   _f64arr_set(_ce_wexps, 7, 0 - 40);
+_f64arr_set(_ce_wexps, 8, 0 - 50);   _f64arr_set(_ce_wexps, 9, 0 - 60);
+_f64arr_set(_ce_wexps, 10, 0 - 200); _f64arr_set(_ce_wexps, 11, 0 - 1000);
+_ce_i = 0;
+while (_ce_i < 12) {
+    var _ce_c = _ce_p2(_f64arr_get(_ce_wexps, _ce_i));
+    var _ce_gw = _f64arr_alloc(4);
+    var _ce_gj = 0;
+    while (_ce_gj < 4) { _f64arr_set(_ce_gw, _ce_gj, _ce_c); _ce_gj = _ce_gj + 1; }
+    var _ce_gkn = _ce_knots8(F64_ONE);
+    var _ce_g = calc_nurbs(3, _ce_cps4(), _ce_gw, 4, _ce_gkn, 8, F64_HALF);
+    _CE_W_RUN = _CE_W_RUN + 1;
+    if (_ce_g == 0) {
+        _CE_W_BAD = _CE_W_BAD + 1;
+    } else {
+        if (HVec3_x(_ce_g) != 0x4000000000000000) { _CE_W_BAD = _CE_W_BAD + 1; }
+    }
+    _ce_i = _ce_i + 1;
+}
+assert_eq(_CE_W_RUN, 12, "calc_nurbs weight-gauge sweep actually ran 12 gauges");
+assert_eq(_CE_W_BAD, 0,
+  "calc_nurbs: the weight gauge is unobservable, x is 2.0 from 2^+1000 to 2^-1000");
+
+# --- F. calc_hermite_tcb: THREE queries per scale, because they fail differently.
+# ⚠ The on-key query alone is NOT enough and this is measured: at t = key 1 the
+# value 5.0 coincides with what the collapsed u = 0 path returns, so repairing the
+# end-key clamp alone passes it while the segment interior is still wrong. The
+# interior query at t = 1.5s is what forces the sibling seg_len guard to be fixed.
+# [measured: per-candidate rebuild of the hermite sweep, 2026-09-09]
+var _CE_H_RUN = 0;
+var _CE_H_BAD = 0;
+var _ce_hexps = _f64arr_alloc(9);
+_f64arr_set(_ce_hexps, 0, 0);       _f64arr_set(_ce_hexps, 1, 0 - 10);
+_f64arr_set(_ce_hexps, 2, 0 - 20);  _f64arr_set(_ce_hexps, 3, 0 - 30);
+_f64arr_set(_ce_hexps, 4, 0 - 40);  _f64arr_set(_ce_hexps, 5, 0 - 50);
+_f64arr_set(_ce_hexps, 6, 0 - 60);  _f64arr_set(_ce_hexps, 7, 0 - 200);
+_f64arr_set(_ce_hexps, 8, 0 - 1000);
+_ce_i = 0;
+while (_ce_i < 9) {
+    var _ce_hs = _ce_p2(_f64arr_get(_ce_hexps, _ce_i));
+    var _ce_ht = _f64arr_alloc(3);
+    _f64arr_set(_ce_ht, 0, 0);
+    _f64arr_set(_ce_ht, 1, _ce_hs);
+    _f64arr_set(_ce_ht, 2, f64_mul(_ce_hs, F64_TWO));
+    var _ce_hv = _f64arr_alloc(3);
+    _f64arr_set(_ce_hv, 0, 0);
+    _f64arr_set(_ce_hv, 1, f64_from(5));
+    _f64arr_set(_ce_hv, 2, f64_from(10));
+    _CE_H_RUN = _CE_H_RUN + 1;
+    # (A) ON KEY 1 — the end-key clamp must not claim this is the LAST key.
+    if (calc_hermite_tcb(_ce_ht, _ce_hv, 3, 0, 0, 0, _ce_hs)
+      != 0x4014000000000000) { _CE_H_BAD = _CE_H_BAD + 1; }
+    # (B) SEGMENT INTERIOR — u must be a real fraction, not collapsed to 0.
+    if (calc_hermite_tcb(_ce_ht, _ce_hv, 3, 0, 0, 0,
+        f64_add(_ce_hs, f64_mul(_ce_hs, F64_HALF))) != 0x401F400000000000) {
+        _CE_H_BAD = _CE_H_BAD + 1;
+    }
+    # (C) ON THE LAST KEY — the clamp must still fire. This is the assertion that
+    # rules DELETION out: with the guard gone it returns 5.0 here from 2^-40 down.
+    if (calc_hermite_tcb(_ce_ht, _ce_hv, 3, 0, 0, 0, f64_mul(_ce_hs, F64_TWO))
+      != 0x4024000000000000) { _CE_H_BAD = _CE_H_BAD + 1; }
+    _ce_i = _ce_i + 1;
+}
+assert_eq(_CE_H_RUN, 9, "calc_hermite_tcb sweep actually ran 9 key-time scales");
+assert_eq(_CE_H_BAD, 0,
+  "calc_hermite_tcb: on-key 5.0, interior 7.8125, end 10.0 at every key-time scale");
+
+# --- G. OVERFLOW CONTROL, scale-independent. The end-key clamp is not protecting a
+# division — it is protecting h10*m0 from 0*Inf when a tangent overflows. Deleting
+# it returns NaN here, which is why the repair is exact equality and not removal.
+var _ce_ot = _f64arr_alloc(3);
+_f64arr_set(_ce_ot, 0, 0);
+_f64arr_set(_ce_ot, 1, F64_ONE);
+_f64arr_set(_ce_ot, 2, F64_TWO);
+var _ce_ov = _f64arr_alloc(3);
+_f64arr_set(_ce_ov, 0, 0);
+_f64arr_set(_ce_ov, 1, f64_neg(0x7FE0000000000000));
+_f64arr_set(_ce_ov, 2, 0x7FE0000000000000);
+assert_eq(calc_hermite_tcb(_ce_ot, _ce_ov, 3, 0, 0, 0, F64_TWO), 0x7FE0000000000000,
+  "calc_hermite_tcb: an overflowing tangent at the end key returns the key, not NaN");
+
+# --- H. calc_monotone_cubic: the x axis is a UNIT CHOICE, swept BOTH ways.
+# ⚠ The growing side stops at 2^+60 on purpose. A SEPARATE guard at line 707
+# compares |delta| — a SLOPE, y per x — against an absolute 1e-30, and it starts
+# zeroing tangents past s = 2^+99.7: measured 2.25 at 2^+90, 2.0 at 2^+100 and 2.5
+# at 2^+110. That guard is the same class and is NOT repaired here; it is recorded
+# on the roadmap rather than folded in silently.
+# [measured: growing-side scan, first deviation at 2^+100]
+var _CE_M_RUN = 0;
+var _CE_M_BAD = 0;
+var _ce_mexps = _f64arr_alloc(12);
+_f64arr_set(_ce_mexps, 0, 60);      _f64arr_set(_ce_mexps, 1, 30);
+_f64arr_set(_ce_mexps, 2, 10);      _f64arr_set(_ce_mexps, 3, 0);
+_f64arr_set(_ce_mexps, 4, 0 - 10);  _f64arr_set(_ce_mexps, 5, 0 - 20);
+_f64arr_set(_ce_mexps, 6, 0 - 30);  _f64arr_set(_ce_mexps, 7, 0 - 40);
+_f64arr_set(_ce_mexps, 8, 0 - 50);  _f64arr_set(_ce_mexps, 9, 0 - 60);
+_f64arr_set(_ce_mexps, 10, 0 - 200); _f64arr_set(_ce_mexps, 11, 0 - 1000);
+_ce_i = 0;
+while (_ce_i < 12) {
+    var _ce_ms = _ce_p2(_f64arr_get(_ce_mexps, _ce_i));
+    var _ce_mx = _f64arr_alloc(4);
+    _f64arr_set(_ce_mx, 0, 0);
+    _f64arr_set(_ce_mx, 1, _ce_ms);
+    _f64arr_set(_ce_mx, 2, f64_mul(_ce_ms, F64_TWO));
+    _f64arr_set(_ce_mx, 3, f64_mul(_ce_ms, f64_from(3)));
+    var _ce_my = _f64arr_alloc(4);
+    _f64arr_set(_ce_my, 0, 0);
+    _f64arr_set(_ce_my, 1, F64_ONE);
+    _f64arr_set(_ce_my, 2, f64_from(4));
+    _f64arr_set(_ce_my, 3, f64_from(9));
+    _CE_M_RUN = _CE_M_RUN + 1;
+    if (calc_monotone_cubic(_ce_mx, _ce_my, 4,
+        f64_add(_ce_ms, f64_mul(_ce_ms, F64_HALF))) != 0x4002000000000000) {
+        _CE_M_BAD = _CE_M_BAD + 1;
+    }
+    _ce_i = _ce_i + 1;
+}
+assert_eq(_CE_M_RUN, 12, "calc_monotone_cubic sweep actually ran 12 x-axis scales");
+assert_eq(_CE_M_BAD, 0,
+  "calc_monotone_cubic: 2.25 bit-exact from x-scale 2^+60 down to 2^-1000");
+
+# --- I. The controls the repair must KEEP passing. The guard says "not sorted",
+# so it must still reject genuinely unsorted, duplicated and NaN abscissae —
+# otherwise the fix is just a deletion wearing a comment.
+var _ce_uy = _f64arr_alloc(4);
+_f64arr_set(_ce_uy, 0, 0);
+_f64arr_set(_ce_uy, 1, F64_ONE);
+_f64arr_set(_ce_uy, 2, f64_from(4));
+_f64arr_set(_ce_uy, 3, f64_from(9));
+
+# ⚠ (a) The obvious control — a fully DESCENDING grid — is VACUOUS and was
+# measured to be: with xs = [0,-1,-2,-3] the range gate x0 <= x <= xn rejects every
+# query before the loop is entered, so it returns 0 with any guard at all,
+# including none. A grid that only dips in the MIDDLE stays in range and reaches it.
+# [measured: 0 of 129 sampled queries reach the loop on a descending grid]
+var _ce_ux = _f64arr_alloc(4);
+_f64arr_set(_ce_ux, 0, 0);
+_f64arr_set(_ce_ux, 1, F64_TWO);
+_f64arr_set(_ce_ux, 2, F64_ONE);
+_f64arr_set(_ce_ux, 3, f64_from(3));
+assert_eq(calc_monotone_cubic(_ce_ux, _ce_uy, 4, F64_HALF), 0,
+  "calc_monotone_cubic: a mid-grid inversion is still rejected");
+
+var _ce_dx = _f64arr_alloc(4);
+_f64arr_set(_ce_dx, 0, 0);
+_f64arr_set(_ce_dx, 1, F64_ONE);
+_f64arr_set(_ce_dx, 2, F64_ONE);
+_f64arr_set(_ce_dx, 3, F64_TWO);
+assert_eq(calc_monotone_cubic(_ce_dx, _ce_uy, 4, F64_HALF), 0,
+  "calc_monotone_cubic: a duplicated abscissa is still rejected (zero width)");
+
+# ⭐ (b) NaN. This is why the repair is `f64_gt(hi, 0) == 0` and not a smaller
+# threshold: `f64_lt(NaN, anything)` is 0, so the old shape — and an F64_TINY
+# version of it — lets a NaN abscissa straight through and returns NaN. A
+# not-greater test is false for NaN and rejects it.
+var _ce_nx = _f64arr_alloc(4);
+_f64arr_set(_ce_nx, 0, 0);
+_f64arr_set(_ce_nx, 1, 0x7FF8000000000000);
+_f64arr_set(_ce_nx, 2, F64_TWO);
+_f64arr_set(_ce_nx, 3, f64_from(3));
+assert_eq(calc_monotone_cubic(_ce_nx, _ce_uy, 4, F64_HALF), 0,
+  "calc_monotone_cubic: a NaN abscissa is rejected, not propagated");
+
+# ⭐ (c) SPAN-RELATIVE DISCRIMINATOR. A guard of the form `hi < eps*(xn - x0)` is
+# scale-free and passes sweep H untouched, because hi/(xn-x0) is 1/3 at every
+# scale there. Only a grid with ONE fine interval separates it from the sign test.
+var _ce_rx = _f64arr_alloc(4);
+_f64arr_set(_ce_rx, 0, 0);
+_f64arr_set(_ce_rx, 1, _ce_p2(0 - 40));
+_f64arr_set(_ce_rx, 2, F64_ONE);
+_f64arr_set(_ce_rx, 3, F64_TWO);
+var _ce_ry = _f64arr_alloc(4);
+_f64arr_set(_ce_ry, 0, 0);
+_f64arr_set(_ce_ry, 1, 0);
+_f64arr_set(_ce_ry, 2, F64_ONE);
+_f64arr_set(_ce_ry, 3, F64_TWO);
+assert(calc_monotone_cubic(_ce_rx, _ce_ry, 4,
+    f64_add(F64_ONE, F64_HALF)) != 0,
+  "calc_monotone_cubic: one fine interval far from the query is not a rejection");
+
+# ================================================================
+# 2.14.0 — the six geo entry points whose guards had a scale baked in
+# ================================================================
+# ⛔ EVERY ONE OF THESE FABRICATES RATHER THAN FAILS. `geo_ray_plane`,
+# `geo_ray_sphere`, `geo_ray_triangle` and `geo_ray_capsule` return 0, which this
+# module DEFINES as "miss"; `geo_closest_point_on_sphere` returns a point that
+# really is on the sphere but in a direction the caller never asked for; and
+# `geo_barycentric_coords` returns (1/3, 1/3, 1/3), which sums to 1 and lies
+# inside the triangle. None of them is an Inf or a NaN a caller could test for.
+#
+# ⚠ THE OBVIOUS ASSERTION IS THE VACUOUS ONE. Checking |cp - center| == radius
+# passes on the sphere fabrication — measured equal — so these assertions are on
+# DIRECTION and on the returned t, never on a magnitude the fallback shares.
+# [measured: independent verification of all six sites, 2026-09-09]
+
+test_group("geo 2.14.0: ray/geometry guards are scale-free");
+
+# --- J. THE SIX JETS. Each guarded `den` (or dk/fk) against an absolute 1e-12
+# while the thing that fails is `1 / den` on the next line, so an ordinary scene
+# in small units was reported as GRAZING — and `_geo_jet_miss()` is exactly what
+# a genuine tangency returns, so the caller cannot tell them apart.
+# ⚠ The direction magnitude is what these carry, so the ray must NOT be built
+# through geo_ray_new. ⭐ geo_jet_plane was not on the triage list; it is here
+# because its primal geo_ray_plane is repaired in this same release, and a jet
+# that rejects rays its own primal accepts is a NEW defect, not a leftover.
+var _GJ_RUN = 0;
+var _GJ_BAD = 0;
+var _gj_pl = geo_plane_from_point_normal(hvec3_new(0, 0, 0), hvec3_new(0, 0, F64_ONE));
+var _gj_sp = geo_sphere_new(hvec3_new(0, 0, 0), F64_ONE);
+var _gj_tr = geo_triangle_new(hvec3_new(f64_neg(F64_ONE), f64_neg(F64_ONE), 0),
+  hvec3_new(f64_from(3), f64_neg(F64_ONE), 0), hvec3_new(f64_neg(F64_ONE), f64_from(3), 0));
+var _gj_ab = geo_aabb_new(hvec3_new(f64_neg(F64_ONE), f64_neg(F64_ONE), f64_neg(F64_ONE)),
+  hvec3_new(F64_ONE, F64_ONE, F64_ONE));
+var _gj_cp = geo_capsule_new(hvec3_new(f64_neg(F64_ONE), 0, 0), hvec3_new(F64_ONE, 0, 0),
+  F64_HALF);
+var _gj_ob = geo_obb_new(hvec3_new(0, 0, 0),
+  hvec3_new(F64_ONE, F64_ONE, F64_ONE), hquat_identity());
+for (var _gj_k = 0; _gj_k < 240; _gj_k = _gj_k + 1) {
+    var _gj_r = _graw(0, 0, f64_from(5), 0, 0, f64_neg(_gp2(0 - _gj_k)));
+    _GJ_RUN = _GJ_RUN + 1;
+    # Every one of these is a head-on hit at every direction magnitude. A miss
+    # here is the guard fabricating a tangency.
+    if (geo_jet_hit(geo_jet_plane(_gj_r, _gj_pl)) != 1) { _GJ_BAD = _GJ_BAD + 1; }
+    if (geo_jet_hit(geo_jet_sphere(_gj_r, _gj_sp)) != 1) { _GJ_BAD = _GJ_BAD + 1; }
+    if (geo_jet_hit(geo_jet_triangle(_gj_r, _gj_tr)) != 1) { _GJ_BAD = _GJ_BAD + 1; }
+    if (geo_jet_hit(geo_jet_aabb(_gj_r, _gj_ab)) != 1) { _GJ_BAD = _GJ_BAD + 1; }
+    if (geo_jet_hit(geo_jet_capsule(_gj_r, _gj_cp)) != 1) { _GJ_BAD = _GJ_BAD + 1; }
+    # ⚠ obb was omitted from the first draft of this sweep and its mutant SURVIVED.
+    if (geo_jet_hit(geo_jet_obb(_gj_r, _gj_ob)) != 1) { _GJ_BAD = _GJ_BAD + 1; }
+}
+assert_eq(_GJ_RUN, 240, "the jet direction-magnitude sweep actually ran");
+assert_eq(_GJ_BAD, 0,
+  "geo jets: a head-on ray still hits at every direction magnitude to 2^-239");
+# ⭐ THE JET MUST AGREE WITH ITS OWN PRIMAL. This is the assertion that would have
+# caught the inconsistency the geo_ray_plane repair introduced into geo_jet_plane.
+var _GA_RUN = 0;
+var _GA_BAD = 0;
+for (var _ga_k = 0; _ga_k < 240; _ga_k = _ga_k + 1) {
+    var _ga_r = _graw(0, 0, f64_from(5), 0, 0, f64_neg(_gp2(0 - _ga_k)));
+    _GA_RUN = _GA_RUN + 1;
+    var _ga_pt = geo_ray_plane(_ga_r, _gj_pl);
+    var _ga_pj = geo_jet_plane(_ga_r, _gj_pl);
+    if ((_ga_pt != 0) != (geo_jet_hit(_ga_pj) == 1)) { _GA_BAD = _GA_BAD + 1; }
+    if (geo_jet_hit(_ga_pj) == 1) {
+        if (GeoJet_t(_ga_pj) != _ga_pt) { _GA_BAD = _GA_BAD + 1; }
+    }
+    var _ga_st = geo_ray_sphere(_ga_r, _gj_sp);
+    var _ga_sj = geo_jet_sphere(_ga_r, _gj_sp);
+    if ((_ga_st != 0) != (geo_jet_hit(_ga_sj) == 1)) { _GA_BAD = _GA_BAD + 1; }
+}
+assert_eq(_GA_RUN, 240, "the jet/primal agreement sweep actually ran");
+assert_eq(_GA_BAD, 0,
+  "geo jets: hit/miss and t agree with the primal at every direction magnitude");
+# ⭐ ANTI-DELETION: a genuinely grazing ray must still report a miss.
+assert_eq(geo_jet_hit(geo_jet_plane(_graw(0, 0, f64_from(5), F64_ONE, 0, 0), _gj_pl)), 0,
+  "geo_jet_plane: a ray parallel to the plane is still a miss");
+# ⛔ THAT ASSERTION IS VACUOUS FOR THE GUARD AND MUTATION PROVED IT: geo_jet_plane
+# calls geo_ray_plane FIRST and returns early on t == 0, so a parallel ray never
+# reaches the guard at all and deleting the guard still passes. The case that
+# does reach it is one the PRIMAL accepts and the jet must still reject: a ray
+# exactly TANGENT to the sphere. There den = dot(g, d) is exactly 0 while the
+# quadratic has a real (double) root, so 1/den is +Inf and the jet must report
+# the non-differentiable point rather than hand back infinite partials.
+assert_eq(geo_jet_hit(geo_jet_sphere(_graw(0, F64_ONE, f64_from(5), 0, 0,
+        f64_neg(F64_ONE)), _gj_sp)), 0,
+  "geo_jet_sphere: an exactly tangent ray is a miss, not an infinite gradient");
+assert(geo_ray_sphere(_graw(0, F64_ONE, f64_from(5), 0, 0, f64_neg(F64_ONE)),
+    _gj_sp) != 0,
+  "the tangency control is not vacuous: the PRIMAL does report a hit there");
+
+# ⭐ THE SUBNORMAL BAND, which is the only place a DBL_MIN threshold and a
+# finite-reciprocal test disagree. geo_jet_triangle's den is the same triple
+# product geo_ray_triangle guards, so legs of 2^-511 and 2^-512 put den at
+# exactly 2^-1023: subnormal, but 1/den = 2^1023 is finite and the gradient is
+# perfectly well defined. DBL_MIN would refuse it; the reciprocal test allows it.
+var _gjt_tri = geo_triangle_new(hvec3_new(0, 0, 0), hvec3_new(_gp2(0 - 511), 0, 0),
+  hvec3_new(0, _gp2(0 - 512), 0));
+var _gjt_ray = geo_ray_new(hvec3_new(_gp2(0 - 513), _gp2(0 - 514), F64_ONE),
+  hvec3_new(0, 0, f64_neg(F64_ONE)));
+assert_eq(geo_jet_hit(geo_jet_triangle(_gjt_ray, _gjt_tri)), 1,
+  "geo_jet_triangle: a subnormal den whose reciprocal is finite is still a hit");
+
+fn _gp2(e) { return (1023 + e) << 52; }
+
+# A ray whose direction is NOT normalised. geo_ray_new normalises, which would
+# erase the very quantity these guards get wrong, so build the struct directly.
+fn _graw(ox, oy, oz, dx, dy, dz) {
+    var r = alloc(sizeof(GeoRay));
+    GeoRay_set_origin(r, hvec3_new(ox, oy, oz));
+    GeoRay_set_direction(r, hvec3_new(dx, dy, dz));
+    return r;
+}
+
+# --- P. geo_ray_plane: `denom` = n·d carries |d|, so the answer must not depend
+# on how long the caller made the direction vector. Plane z = 0, ray from (0,0,5)
+# pointing down with |d| = 2^-k: the hit is at t = 5 * 2^k.
+var _GP_RUN = 0;
+var _GP_BAD = 0;
+var _gp_pl = geo_plane_from_point_normal(hvec3_new(0, 0, 0), hvec3_new(0, 0, F64_ONE));
+for (var _gp_k = 0; _gp_k < 300; _gp_k = _gp_k + 1) {
+    var _gp_d = _gp2(0 - _gp_k);
+    var _gp_r = _graw(0, 0, f64_from(5), 0, 0, f64_neg(_gp_d));
+    _GP_RUN = _GP_RUN + 1;
+    # t = 5 / 2^-k = 5 * 2^k, exact for every power of two.
+    if (geo_ray_plane(_gp_r, _gp_pl) != f64_mul(f64_from(5), _gp2(_gp_k))) {
+        _GP_BAD = _GP_BAD + 1;
+    }
+}
+assert_eq(_GP_RUN, 300, "geo_ray_plane direction-magnitude sweep actually ran");
+assert_eq(_GP_BAD, 0,
+  "geo_ray_plane: t = 5*2^k bit-exact for |d| from 2^0 down to 2^-299");
+# ⭐ ANTI-DELETION: a ray genuinely parallel to the plane must still miss.
+assert_eq(geo_ray_plane(_graw(0, 0, f64_from(5), F64_ONE, 0, 0), _gp_pl), 0,
+  "geo_ray_plane: a parallel ray is still a miss");
+
+# --- S. geo_ray_sphere / _geo_sphere_roots: `a` = d·d. Unit sphere at the origin,
+# ray from (0,0,5) inward with |d| = 2^-k: the near hit is at t = 4 * 2^k.
+var _GS_RUN = 0;
+var _GS_BAD = 0;
+var _gs_sph = geo_sphere_new(hvec3_new(0, 0, 0), F64_ONE);
+for (var _gs_k = 0; _gs_k < 300; _gs_k = _gs_k + 1) {
+    var _gs_d = _gp2(0 - _gs_k);
+    var _gs_r = _graw(0, 0, f64_from(5), 0, 0, f64_neg(_gs_d));
+    _GS_RUN = _GS_RUN + 1;
+    if (geo_ray_sphere(_gs_r, _gs_sph) != f64_mul(f64_from(4), _gp2(_gs_k))) {
+        _GS_BAD = _GS_BAD + 1;
+    }
+}
+assert_eq(_GS_RUN, 300, "geo_ray_sphere direction-magnitude sweep actually ran");
+assert_eq(_GS_BAD, 0,
+  "geo_ray_sphere: t = 4*2^k bit-exact for |d| from 2^0 down to 2^-299");
+assert_eq(geo_ray_sphere(_graw(0, 0, f64_from(5), 0, 0, F64_ONE), _gs_sph), 0,
+  "geo_ray_sphere: a ray pointing away is still a miss");
+
+# --- T. geo_ray_triangle. `a` is a scalar triple product, degree TWO in the edge
+# lengths for a unit direction, so it is the SMALL-TRIANGLE case that fails.
+# Legs 2^i and 2^j, ray dropped from unit height onto the point at u = v = 1/4:
+# t is exactly 1.0 at every scale. ⚠ The ray origin stays at height 1, not at the
+# triangle's scale — a scaled height makes the PROBE's own cube under/overflow
+# and manufactures failures that are not the library's.
+var _GT_RUN = 0;
+var _GT_BAD = 0;
+fn _gt_shot(i, j) {
+    var tri = geo_triangle_new(hvec3_new(0, 0, 0), hvec3_new(_gp2(i), 0, 0),
+      hvec3_new(0, _gp2(j), 0));
+    return geo_ray_triangle(geo_ray_new(hvec3_new(_gp2(i - 2), _gp2(j - 2), F64_ONE),
+        hvec3_new(0, 0, f64_neg(F64_ONE))), tri);
+}
+for (var _gt_k = 0; _gt_k < 500; _gt_k = _gt_k + 1) {
+    _GT_RUN = _GT_RUN + 1;
+    if (_gt_shot(0 - _gt_k, 0 - _gt_k) != 0x3FF0000000000000) { _GT_BAD = _GT_BAD + 1; }
+}
+assert_eq(_GT_RUN, 500, "geo_ray_triangle edge-scale sweep actually ran");
+assert_eq(_GT_BAD, 0,
+  "geo_ray_triangle: t = 1.0 bit-exact for legs from 2^0 down to 2^-499");
+# ⭐ THE SUBNORMAL BAND, where a DBL_MIN threshold and a finite-reciprocal test
+# stop agreeing. a = 2^(i+j) exactly, so these three pin the boundary:
+assert_eq(_gt_shot(0 - 511, 0 - 511), 0x3FF0000000000000,
+  "geo_ray_triangle: a = DBL_MIN exactly still hits (1/a is finite)");
+assert_eq(_gt_shot(0 - 511, 0 - 512), 0x3FF0000000000000,
+  "geo_ray_triangle: a = 2^-1023 is SUBNORMAL and 1/a is still finite, so it hits");
+assert_eq(_gt_shot(0 - 512, 0 - 512), 0,
+  "geo_ray_triangle: a = 2^-1024 overflows its reciprocal, so it must miss");
+# ⚠ A CORNER-ON RAY IS THE ONLY CASE THAT REACHES THE CONTRACT VIOLATION: s.h and
+# d.q are both exactly 0, so u and v are NaN and the [0,1] range tests cannot
+# reject an infinite f. Without this, `f64_gt(f64_abs(a), 0) == 0` survives.
+fn _gt_corner(i, j) {
+    var tri = geo_triangle_new(hvec3_new(0, 0, 0), hvec3_new(_gp2(i), 0, 0),
+      hvec3_new(0, _gp2(j), 0));
+    return geo_ray_triangle(geo_ray_new(hvec3_new(0, 0, F64_ONE),
+        hvec3_new(0, 0, f64_neg(F64_ONE))), tri);
+}
+assert_eq(_gt_corner(0 - 512, 0 - 512), 0,
+  "geo_ray_triangle: a corner-on ray with an overflowing 1/a returns 0, not +Inf");
+assert_eq(_gt_corner(0 - 400, 0 - 400), 0x3FF0000000000000,
+  "geo_ray_triangle: the corner-on control is a real hit at a workable scale");
+# NaN must be rejected, not propagated.
+assert_eq(geo_ray_triangle(geo_ray_new(hvec3_new(0, 0, F64_ONE),
+      hvec3_new(0, 0, f64_neg(F64_ONE))),
+    geo_triangle_new(hvec3_new(0, 0, 0), hvec3_new(0x7FF8000000000000, 0, 0),
+      hvec3_new(0, F64_ONE, 0))), 0,
+  "geo_ray_triangle: a NaN vertex is a miss, not a NaN t");
+
+# --- C. geo_closest_point_on_sphere. THREE axes, because they fail differently
+# and the third one is what forces the two-step normalise.
+var _GC_RUN = 0;
+var _GC_BAD = 0;
+# (1) uniform scale: same problem in different units.
+for (var _gc_k = 0 - 250; _gc_k < 150; _gc_k = _gc_k + 1) {
+    var _gc_s = geo_sphere_new(hvec3_new(0, 0, 0), _gp2(_gc_k));
+    var _gc_p = geo_closest_point_on_sphere(_gc_s, hvec3_new(0, _gp2(_gc_k - 10), 0));
+    _GC_RUN = _GC_RUN + 1;
+    if (HVec3_y(_gc_p) != _gp2(_gc_k)) { _GC_BAD = _GC_BAD + 1; }
+    if (HVec3_x(_gc_p) != 0) { _GC_BAD = _GC_BAD + 1; }
+}
+assert_eq(_GC_RUN, 400, "closest_point_on_sphere uniform-scale sweep actually ran");
+assert_eq(_GC_BAD, 0,
+  "geo_closest_point_on_sphere: the +y answer is exact at every sphere scale");
+# ⭐ (2) THE RATIO. Offset pinned tiny, radius swept up: `radius / len` overflows
+# to +Inf long before either operand does. This is the axis that motivates the
+# two-step form — a one-step DBL_MIN repair fails 77 of these.
+var _GR_RUN = 0;
+var _GR_BAD = 0;
+for (var _gr_i = 0; _gr_i < 600; _gr_i = _gr_i + 1) {
+    var _gr_s = geo_sphere_new(hvec3_new(0, 0, 0), _gp2(_gr_i));
+    var _gr_p = geo_closest_point_on_sphere(_gr_s, hvec3_new(0, _gp2(0 - 500), 0));
+    _GR_RUN = _GR_RUN + 1;
+    if (HVec3_y(_gr_p) != _gp2(_gr_i)) { _GR_BAD = _GR_BAD + 1; }
+}
+assert_eq(_GR_RUN, 600, "closest_point_on_sphere ratio sweep actually ran");
+assert_eq(_GR_BAD, 0,
+  "geo_closest_point_on_sphere: radius/len never overflows, radius 2^0..2^599");
+# (3) the offset FRACTION, radius pinned at 1: a relative guard passes axis 1 and
+# fails here, so this is what rules `len < radius * 1e-12` out.
+var _GF_RUN = 0;
+var _GF_BAD = 0;
+var _gf_s = geo_sphere_new(hvec3_new(0, 0, 0), F64_ONE);
+for (var _gf_j = 0 - 530; _gf_j < 0; _gf_j = _gf_j + 1) {
+    var _gf_p = geo_closest_point_on_sphere(_gf_s, hvec3_new(0, _gp2(_gf_j), 0));
+    _GF_RUN = _GF_RUN + 1;
+    if (HVec3_y(_gf_p) != 0x3FF0000000000000) { _GF_BAD = _GF_BAD + 1; }
+}
+assert_eq(_GF_RUN, 530, "closest_point_on_sphere offset-fraction sweep actually ran");
+assert_eq(_GF_BAD, 0,
+  "geo_closest_point_on_sphere: a query 2^-530 radii out still answers +y");
+# ⭐ ANTI-DELETION: the documented centre case must still take the fallback.
+assert_eq(HVec3_x(geo_closest_point_on_sphere(_gf_s, hvec3_new(0, 0, 0))),
+  0x3FF0000000000000,
+  "geo_closest_point_on_sphere: a point AT the centre still returns +x radius");
+
+# --- B. geo_barycentric_coords. `denom` is the Gram determinant, degree FOUR in
+# the triangle's units, and the fallback (1/3,1/3,1/3) is indistinguishable from
+# a real answer. Right triangle with legs s, query at u = v = 1/4.
+var _GB_RUN = 0;
+var _GB_BAD = 0;
+for (var _gb_k = 0; _gb_k < 250; _gb_k = _gb_k + 1) {
+    var _gb_s = _gp2(0 - _gb_k);
+    var _gb_tri = geo_triangle_new(hvec3_new(0, 0, 0), hvec3_new(_gb_s, 0, 0),
+      hvec3_new(0, _gb_s, 0));
+    var _gb_w = geo_barycentric_coords(_gb_tri,
+      hvec3_new(f64_mul(_gb_s, F64_HALF), f64_div(_gb_s, f64_from(4)), 0));
+    _GB_RUN = _GB_RUN + 1;
+    # u = 1/2, v = 1/4, w = 1 - u - v = 1/4, exact at every power-of-two scale.
+    if (HVec3_y(_gb_w) != 0x3FE0000000000000) { _GB_BAD = _GB_BAD + 1; }
+    if (HVec3_z(_gb_w) != 0x3FD0000000000000) { _GB_BAD = _GB_BAD + 1; }
+}
+# --- K. geo_ray_capsule's cylinder guard. `a` is the SQUARED perpendicular
+# component of the direction, so like _geo_sphere_roots it fails on the direction
+# magnitude, not on the scene. Capsule (0,0,0)-(1,0,0) radius 1/4, ray dropped
+# from (1/2, 2, 0) with |d| = 2^-k: the barrel hit is at t = 1.75 * 2^k.
+# ⚠ Added because the first mutation run left `_GEO_F64_EPS_SQ` ALIVE here —
+# nothing in the tree reached this guard with a short direction vector.
+var _GK_RUN = 0;
+var _GK_BAD = 0;
+var _gk_cap = geo_capsule_new(hvec3_new(0, 0, 0), hvec3_new(F64_ONE, 0, 0),
+  f64_div(F64_ONE, f64_from(4)));
+for (var _gk_k = 0; _gk_k < 200; _gk_k = _gk_k + 1) {
+    var _gk_r = _graw(F64_HALF, F64_TWO, 0, 0, f64_neg(_gp2(0 - _gk_k)), 0);
+    var _gk_t = geo_ray_capsule(_gk_r, _gk_cap);
+    _GK_RUN = _GK_RUN + 1;
+    # 1.75 * 2^k, exact: 7/4 is a dyadic rational and the scale is a power of two.
+    if (_gk_t != f64_mul(f64_div(f64_from(7), f64_from(4)), _gp2(_gk_k))) {
+        _GK_BAD = _GK_BAD + 1;
+    }
+}
+assert_eq(_GK_RUN, 200, "geo_ray_capsule direction-magnitude sweep actually ran");
+assert_eq(_GK_BAD, 0,
+  "geo_ray_capsule: barrel hit t = 1.75*2^k exact for |d| from 2^0 to 2^-199");
+assert_eq(geo_ray_capsule(_graw(F64_HALF, F64_TWO, 0, 0, F64_ONE, 0), _gk_cap), 0,
+  "geo_ray_capsule: a ray pointing away from the barrel is still a miss");
+
+assert_eq(_GB_RUN, 250, "barycentric triangle-scale sweep actually ran");
+assert_eq(_GB_BAD, 0,
+  "geo_barycentric_coords: (1/4, 1/2, 1/4) exact for legs 2^0 down to 2^-249");
+# ⭐ ANTI-DELETION: a genuinely degenerate triangle must still get the centroid.
+assert_eq(HVec3_x(geo_barycentric_coords(
+      geo_triangle_new(hvec3_new(0, 0, 0), hvec3_new(F64_ONE, 0, 0),
+        hvec3_new(F64_TWO, 0, 0)), hvec3_new(F64_HALF, 0, 0))), _GEO_F64_THIRD,
+  "geo_barycentric_coords: a colinear triangle still returns centroid weights");
+
 var r = assert_summary();
 # Clamp before exiting: assert_summary() returns the raw failure COUNT, and a wait
 # status is only 8 bits — an unclamped 256 / 512 / 768 failures would exit 0 and

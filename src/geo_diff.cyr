@@ -162,9 +162,25 @@ fn geo_jet_sphere(ray, sphere) {
     # genuinely non-differentiable there. Report the miss sentinel rather than a
     # gradient of +/-Inf -- the non-differentiable point is a property of the
     # geometry, not a failure of this routine.
-    if (f64_lt(f64_abs(den), EPSILON_F64) == 1) { return _geo_jet_miss(); }
-
+    # ⛔ ALL SIX JETS GUARDED THIS AGAINST AN ABSOLUTE 1e-12 while the thing that
+    # actually fails is `1 / den` on the very next line. `den` carries the ray
+    # direction's magnitude (and, for the triangle, twice the area), so the jets
+    # reported "grazing, non-differentiable" for perfectly ordinary geometry
+    # expressed in small units — and `_geo_jet_miss()` cannot be told from a real
+    # tangency by the caller.
+    # ⭐ Test the RECIPROCAL, not the operand: `f64_lt(|inv|, +Inf)` is 1 for every
+    # finite reciprocal and 0 for both +Inf and NaN, so one comparison covers
+    # den = 0, den too small to invert, and a NaN ray, with no scale to choose.
+    # ⚠ DBL_MIN would be one binade too conservative, for the same reason it was
+    # in geo_ray_triangle: 1/2^-1023 = 2^1023 is finite and must be allowed.
+    # ⚠ And the sixth site was NOT on the triage list — `geo_jet_plane` has the
+    # identical shape and was found by grepping for it rather than trusting the
+    # list. It matters more than the others: its primal `geo_ray_plane` is
+    # repaired in this same release, so leaving this one would have left the jet
+    # rejecting rays its own primal accepts.
+    # [measured: tests/modules.tcyr geo jet scale sweeps, 2026-09-09]
     var inv = f64_div(F64_ONE, den);
+    if (f64_lt(f64_abs(inv), _GEO_F64_POS_INF) == 0) { return _geo_jet_miss(); }
     var dt_do = hvec3_scale(g, f64_neg(inv));
 
     var j = alloc(sizeof(GeoJet));
@@ -201,9 +217,8 @@ fn geo_jet_plane(ray, plane) {
     var d = GeoRay_direction(ray);
     var n = GeoPlane_normal(plane);
     var den = hvec3_dot(n, d);
-    if (f64_lt(f64_abs(den), EPSILON_F64) == 1) { return _geo_jet_miss(); }
-
     var inv = f64_div(F64_ONE, den);
+    if (f64_lt(f64_abs(inv), _GEO_F64_POS_INF) == 0) { return _geo_jet_miss(); }
     var p = geo_ray_at(ray, t);
     var dt_do = hvec3_scale(n, f64_neg(inv));
 
@@ -254,9 +269,8 @@ fn geo_jet_triangle(ray, tri) {
     var e2 = hvec3_sub(GeoTriangle_v2(tri), v0);
     var n = hvec3_cross(e1, e2);
     var den = hvec3_dot(n, d);
-    if (f64_lt(f64_abs(den), EPSILON_F64) == 1) { return _geo_jet_miss(); }
-
     var inv = f64_div(F64_ONE, den);
+    if (f64_lt(f64_abs(inv), _GEO_F64_POS_INF) == 0) { return _geo_jet_miss(); }
     var w = hvec3_sub(geo_ray_at(ray, t), v0);
     var dt_do = hvec3_scale(n, f64_neg(inv));
 
@@ -319,9 +333,8 @@ fn geo_jet_aabb(ray, aabb) {
     # The core only assigns a face from a slab it did not skip, so |dk| is already
     # above EPSILON_F64. Re-checked rather than assumed: this reads `dk` back
     # through a different path than the one that set the face.
-    if (f64_lt(f64_abs(dk), EPSILON_F64) == 1) { return _geo_jet_miss(); }
-
     var inv = f64_div(F64_ONE, dk);
+    if (f64_lt(f64_abs(inv), _GEO_F64_POS_INF) == 0) { return _geo_jet_miss(); }
     var zero = hvec3_new(0, 0, 0);
     var dt_db = _geo_jet_axis(k, inv);
 
@@ -417,9 +430,8 @@ fn geo_jet_obb(ray, obb) {
     var k = geo_face_axis(face);
     var axis = _geo_jet_obb_axis(obb, k);
     var fk = hvec3_dot(axis, GeoRay_direction(ray));
-    if (f64_lt(f64_abs(fk), EPSILON_F64) == 1) { return _geo_jet_miss(); }
-
     var inv = f64_div(F64_ONE, fk);
+    if (f64_lt(f64_abs(inv), _GEO_F64_POS_INF) == 0) { return _geo_jet_miss(); }
     var dt_dc = hvec3_scale(axis, inv);
     var sg = f64_neg(inv);
     if (geo_face_is_max(face) == 1) { sg = inv; }
@@ -513,9 +525,8 @@ fn geo_jet_capsule(ray, capsule) {
     var den = hvec3_dot(g, d);
     # Grazing incidence: the ray is tangent to this piece and t is genuinely
     # non-differentiable. Same convention as geo_jet_sphere.
-    if (f64_lt(f64_abs(den), EPSILON_F64) == 1) { return _geo_jet_miss(); }
-
     var inv = f64_div(F64_ONE, den);
+    if (f64_lt(f64_abs(inv), _GEO_F64_POS_INF) == 0) { return _geo_jet_miss(); }
     var dt_do = hvec3_scale(g, f64_neg(inv));
     var back = hvec3_scale(g, inv);      # +g/den, the shared endpoint direction
 
