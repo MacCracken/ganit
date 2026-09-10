@@ -3390,6 +3390,7 @@ test_group("2.17.0 linalg_precision: the QR sweeps are block-ratio-free");
 var _SB_RUN = 0;
 var _SB_BAD = 0;
 var _SB_SILENT = 0;
+var _SB_OK = 0;
 for (var _sb_e = 2; _sb_e < 1001; _sb_e = _sb_e + 1) {
     var _sb_c = (1023 - _sb_e) << 52;
     var _sb_A = ganita_mat_new(4, 4);
@@ -3416,16 +3417,131 @@ for (var _sb_e = 2; _sb_e < 1001; _sb_e = _sb_e + 1) {
     # ⚠ RELATIVE, not bit-exact: the QR sweep is iterative and 3 of 999 ratios
     # differ in the last places on CORRECT code. 4 ulp is as tight as this can go.
     # [measured: bit-exact variant of this sweep run against the repaired tree]
-    if (f64_gt(f64_abs(f64_div(f64_sub(_sb_r, _sb_c), _sb_c)), 0x3CD0000000000000) == 1) {
+    # ⛔ AND THE NaN TEST IS LOAD-BEARING, NOT BELT-AND-BRACES. Below the floor
+    # this routine returns S = (0,0,0,0), so the ratio is 0/0 = NaN — and EVERY
+    # f64 comparison involving NaN returns 0, so the relative test alone SILENTLY
+    # PASSES it. The first version of this block had no NaN arm and therefore
+    # reported 0 failures across a band where 731 of 999 ratios return no answer
+    # at all. It is the same hole `_opt_armijo` documents in src/optimize.cyr.
+    # [measured: 999-ratio classification with the NaN arm added, 2026-09-10]
+    var _sb_good = 0;
+    if (f64_eq(_sb_r, _sb_r) == 1) {
+        if (f64_gt(f64_abs(f64_div(f64_sub(_sb_r, _sb_c), _sb_c)), 0x3CD0000000000000) == 0) {
+            _sb_good = 1;
+        }
+    }
+    if (_sb_good == 0) {
         _SB_BAD = _SB_BAD + 1;
         if (_sb_rc == HSB_ERR_NONE) { _SB_SILENT = _SB_SILENT + 1; }
     }
+    if (_sb_good == 1 && _sb_rc == HSB_ERR_NONE) { _SB_OK = _SB_OK + 1; }
 }
 assert_eq(_SB_RUN, 999, "the SVD block-ratio sweep actually ran 999 ratios");
-assert_eq(_SB_BAD, 0,
-  "svd_golub_kahan: the small block's singular values are c times the large block's, for c = 2^-2 .. 2^-1000");
+# ⭐ THE THREE-STAGE RECORD, because each stage answers a different question and
+# the middle one was reported wrongly at the time.
+#   2.16.0   256 correct (to 2^-257) | 269 loud | **474 SILENT WRONG** (from 2^-258)
+#   2.17.0   268 correct (to 2^-269) | 731 loud | 0 silent
+#   2.18.0   **999 correct, 0 loud, 0 silent**
+# ⛔ 2.17.0 reported that middle row as "472 of 999 lost -> 0", which reads as
+# *the routine now answers correctly*. It did not — it had converted a silent
+# wrong answer into a loud one, which is a real and valuable change but not that
+# one. The figure came from a probe that shared this block's own NaN hole.
+# ⭐ 2.18.0 closes it properly: the Wilkinson shift no longer forms degree-FOUR
+# quantities and is computed on power-of-two-scaled operands, so the floor at
+# 2^-268.5 (the fourth root of the subnormal floor) is gone entirely.
+# [measured: 999-ratio classification on all three trees, 2026-09-10]
 assert_eq(_SB_SILENT, 0,
-  "svd_golub_kahan: and none of them is a SILENT wrong answer (472 of 999 were)");
+  "svd_golub_kahan: NO ratio returns HSB_ERR_NONE with wrong singular values (474 of 999 did)");
+assert_eq(_SB_OK, 999,
+  "svd_golub_kahan: every one of 999 block ratios is answered correctly, to 2^-1000");
+
+# ⛔ AND THE FACTORS, WHICH ARE A SEPARATE QUESTION FROM THE VALUES — the roadmap
+# carried this as *"open-ended: a known defect with no known fix"* since 2.15.0.
+# `S` can be exactly right, `U` and `Vt` each perfectly orthogonal, and
+# `U*S*Vt` still not be `A`. Measured: the small block came back with the WRONG
+# SIGN — residual exactly twice the block — for **19 ratios, 2^-21 through
+# 2^-39**, worst 9.5e-7, and for **288 of 999** on the 2.16.0 tree.
+# ⭐ The cause was a pair of guards that disagreed: `_lp_bidiagonalize` applies a
+# left reflector and records it when `vtv >= F64_TINY`, and replayed it into `U`
+# only when `vtv > EPSILON_F64`, so every reflector in between went into `B` and
+# not into `U`. **2.15.0 created that band** by repairing one of the pair.
+# ⚠ This sweep is the one that would have caught it, and no existing assertion
+# could: the suite checked reconstruction only at unit scale, where both guards
+# agree.
+# [measured: 999-ratio reconstruction scan on all three trees, 2026-09-10]
+var _SR_RUN = 0;
+var _SR_BAD = 0;
+for (var _sr_e = 2; _sr_e < 1001; _sr_e = _sr_e + 1) {
+    var _sr_c = (1023 - _sr_e) << 52;
+    var _sr_A = ganita_mat_new(4, 4);
+    for (var _sr_i = 0; _sr_i < 4; _sr_i = _sr_i + 1) {
+        for (var _sr_j = 0; _sr_j < 4; _sr_j = _sr_j + 1) {
+            ganita_mat_set(_sr_A, _sr_i, _sr_j, 0);
+        }
+    }
+    ganita_mat_set(_sr_A, 0, 0, f64_from(3));
+    ganita_mat_set(_sr_A, 0, 1, f64_from(4));
+    ganita_mat_set(_sr_A, 1, 1, f64_from(3));
+    ganita_mat_set(_sr_A, 2, 2, f64_mul(f64_from(3), _sr_c));
+    ganita_mat_set(_sr_A, 2, 3, f64_mul(f64_from(4), _sr_c));
+    ganita_mat_set(_sr_A, 3, 3, f64_mul(f64_from(3), _sr_c));
+    var _sr_U = ganita_mat_new(4, 4);
+    var _sr_Vt = ganita_mat_new(4, 4);
+    var _sr_S = alloc(32);
+    for (var _sr_k = 0; _sr_k < 4; _sr_k = _sr_k + 1) { store64(_sr_S + _sr_k * 8, 0); }
+    svd_golub_kahan(_sr_A, _sr_U, _sr_S, _sr_Vt);
+    var _sr_num = f64_from(0);
+    var _sr_den = f64_from(0);
+    for (var _sr_i2 = 0; _sr_i2 < 4; _sr_i2 = _sr_i2 + 1) {
+        for (var _sr_j2 = 0; _sr_j2 < 4; _sr_j2 = _sr_j2 + 1) {
+            var _sr_acc = f64_from(0);
+            for (var _sr_k2 = 0; _sr_k2 < 4; _sr_k2 = _sr_k2 + 1) {
+                _sr_acc = f64_add(_sr_acc, f64_mul(f64_mul(
+                      ganita_mat_get(_sr_U, _sr_i2, _sr_k2), load64(_sr_S + _sr_k2 * 8)),
+                    ganita_mat_get(_sr_Vt, _sr_k2, _sr_j2)));
+            }
+            var _sr_a = ganita_mat_get(_sr_A, _sr_i2, _sr_j2);
+            var _sr_d = f64_sub(_sr_acc, _sr_a);
+            _sr_num = f64_add(_sr_num, f64_mul(_sr_d, _sr_d));
+            _sr_den = f64_add(_sr_den, f64_mul(_sr_a, _sr_a));
+        }
+    }
+    var _sr_rel = f64_div(f64_sqrt(_sr_num), f64_sqrt(_sr_den));
+    _SR_RUN = _SR_RUN + 1;
+    # ⚠ NaN arm first, for the same reason as the block above: a NaN relative
+    # error passes every comparison silently.
+    var _sr_ok = 0;
+    if (f64_eq(_sr_rel, _sr_rel) == 1) {
+        if (f64_gt(_sr_rel, 0x3D06849B86A12B9B) == 0) { _sr_ok = 1; }
+    }
+    if (_sr_ok == 0) { _SR_BAD = _SR_BAD + 1; }
+}
+assert_eq(_SR_RUN, 999, "the SVD reconstruction sweep actually ran 999 ratios");
+assert_eq(_SR_BAD, 0,
+  "svd_golub_kahan: ||A - U*S*Vt||_F / ||A||_F stays at machine epsilon for every block ratio");
+
+# ⚠ THREE MUTANTS SURVIVE THIS BLOCK AND ALL THREE ARE THE SAME STORY: they alter
+# how the Wilkinson shift's operands are SCALED, and every one of them only bites
+# once the sub-block's entries are themselves SUBNORMAL — where a different limit
+# stops the routine first, so no assertion here can reach them.
+#   (a) scaling by the max entry instead of its power-of-two floor,
+#   (b) multiplying by 1/s instead of dividing by s,
+#   (c) widening the shift's `denom == 0` test to F64_TINY.
+# ⛔ THE LIMIT THAT BINDS FIRST IS THE DEFLATION THRESHOLD, and it is the same
+# class one level down: `f64_lt(|superdiag|, EPSILON_F64 * (|d1| + |d2|))` forms
+# a PRODUCT, and for a block whose diagonals sit at 2^-1050 that product is
+# 1e-12 * 2^-1049, which flushes to exactly 0 — so the test becomes
+# `|superdiag| < 0`, never fires, and the block never deflates. Measured:
+# `svd_golub_kahan` on a sub-block at 2^-1050 returns HSB_ERR_NO_CONVERGENCE,
+# while `eigen_qr` on an all-subnormal matrix is exact to 2^-1070 because its
+# path reaches the repaired `_lp_pow2_floor` and never forms that product.
+# ⭐ (a) is additionally a genuine correctness equivalence whatever happens to
+# the deflation test: the scale only ever divides the operands of ONE Givens
+# rotation, and a rotation depends on the RATIO y:z, so an inexact scale gives
+# the identical rotation. The power of two is there because it is free, not
+# because it is load-bearing — unlike `cga_norm`, where it protects an exact
+# cancellation and its mutant dies.
+# [measured: subnormal-block probe at 2^-1030 / -1050 / -1065; 7-mutant run]
 
 # ⛔ AND A RANK-DEFICIENT SMALL BLOCK REACHES `_lp_split_zero_diag`, WHICH NO
 # FULL-RANK FIXTURE CAN. That routine only runs for a ZERO DIAGONAL entry inside
@@ -3547,6 +3663,41 @@ store64(_ES_vals + 8, 0);
 var _ES_vecs = ganita_mat_new(2, 2);
 assert_eq(eigen_qr(_ES_A, 2, 200, _ES_vals, _ES_vecs), HSB_ERR_NONE,
   "eigen_qr: an all-subnormal symmetric matrix at 2^-1038 converges (it stopped at 2^-1025)");
+
+# ⛔ 2.18.0 — AND THE RESIDUE WAS `_lp_pow2_floor`, EXACTLY AS 2.17.0 PREDICTED.
+# It masked the exponent field and returned 1.0 when that was zero — which is
+# every subnormal — so a matrix whose largest entry is below DBL_MIN ran the
+# whole decomposition UNBALANCED, the one input that needs balancing most.
+# With the mantissa arm added, `eigen_qr` is exact all the way to **2^-1070**,
+# four binades off the smallest subnormal there is.
+# ⚠ THE 2^-1038 ASSERTION ABOVE CANNOT SEE THIS and the mutation run says so:
+# 2.17.0's norm repairs alone already reached 2^-1039, so the fixture that pinned
+# the old boundary sits one binade INSIDE the repaired range and a mutant that
+# reverts `_lp_pow2_floor` survives it. The depth has to follow the repair.
+# [measured: 1061-magnitude sweep, 22 of 1061 failing -> 0, 2026-09-10]
+var _EP_A = ganita_mat_new(2, 2);
+ganita_mat_set(_EP_A, 0, 0, f64_mul(f64_from(3), 1 << 4));     # 3 * 2^-1070
+ganita_mat_set(_EP_A, 0, 1, f64_mul(f64_from(4), 1 << 4));
+ganita_mat_set(_EP_A, 1, 0, f64_mul(f64_from(4), 1 << 4));
+ganita_mat_set(_EP_A, 1, 1, f64_mul(f64_from(3), 1 << 4));
+var _EP_vals = alloc(16);
+store64(_EP_vals, 0);
+store64(_EP_vals + 8, 0);
+var _EP_vecs = ganita_mat_new(2, 2);
+assert_eq(eigen_qr(_EP_A, 2, 200, _EP_vals, _EP_vecs), HSB_ERR_NONE,
+  "eigen_qr: an all-subnormal matrix at 2^-1070 converges — _lp_pow2_floor balances it");
+# eigenvalues of k*[[3,4],[4,3]] are 7k and -k, exact at every k.
+var _EP_hi = f64_abs(load64(_EP_vals));
+var _EP_lo = f64_abs(load64(_EP_vals + 8));
+if (f64_gt(_EP_lo, _EP_hi) == 1) {
+    var _EP_t = _EP_hi;
+    _EP_hi = _EP_lo;
+    _EP_lo = _EP_t;
+}
+assert_eq(_EP_hi, f64_mul(f64_from(7), 1 << 4),
+  "eigen_qr: and its dominant eigenvalue is exactly 7k at 2^-1070");
+assert_eq(_EP_lo, 1 << 4,
+  "eigen_qr: and the other is exactly k");
 
 # ⚠ FOUR MUTANTS SURVIVE THIS BLOCK. Recorded with their reasons rather than
 # tidied away, because a survivor is either an equivalence or a gap and the

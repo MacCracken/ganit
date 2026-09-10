@@ -69,10 +69,23 @@ fn _lp_mat_max_abs(A) {
 # Round a positive scale DOWN to a power of two. Dividing and re-multiplying by
 # 2^e is EXACT, so balancing costs zero rounding and unit-scale results stay
 # bit-identical to what shipped before this change.
+# ⛔ 2.18.0 — THE `e == 0` ARM RETURNED 1.0, WHICH MEANS "DO NOT BALANCE", AND
+# THE EXPONENT FIELD IS ZERO FOR EVERY SUBNORMAL. So a matrix whose largest entry
+# is below DBL_MIN ran the whole decomposition UNBALANCED — precisely the input
+# that needs balancing most. Measured: `eigen_qr` on an all-subnormal symmetric
+# matrix failed from 2^-1025 down, and 2.17.0's norm repairs moved that only to
+# 2^-1039 because the residue was here, not in a norm.
+# ⭐ For a subnormal the floor is the mantissa's highest set bit, and that bit
+# pattern IS the subnormal 2^(p-1074). Only a true zero returns 1.0 now.
+# [measured: 1061-magnitude uniform sweep on eigen_qr, 2026-09-10]
 fn _lp_pow2_floor(s) {
     var e = s & 0x7FF0_0000_0000_0000;
-    if (e == 0) { return F64_ONE; }
-    return e;
+    if (e != 0) { return e; }
+    var m = s & 0x000F_FFFF_FFFF_FFFF;
+    if (m == 0) { return F64_ONE; }
+    var b = 1 << 51;
+    while (m & b == 0) { b = b >> 1; }
+    return b;
 }
 
 # Fresh copy of A with every entry divided by s (s > 0). Divide, never multiply
@@ -368,7 +381,26 @@ fn _lp_bidiagonalize(A, m, n, diag, superdiag, U_acc, Vt_acc) {
     k = n - 1;
     while (k >= 0) {
         var bvtv = load64(lv_tv + k * 8);
-        if (f64_gt(bvtv, EPSILON_F64) == 1) {
+        # ⛔ 2.18.0 — THIS GUARD AND THE ONE THAT STORED THE REFLECTOR DISAGREED,
+        # AND THAT IS THE WHOLE `A != U*S*Vt` DEFECT 2.15.0 FOUND AND COULD NOT
+        # EXPLAIN. The forward pass applies a reflector to W and records it when
+        # `vtv >= F64_TINY`; this replay put it into U only when
+        # `vtv > EPSILON_F64`. For any `vtv` in [DBL_MIN, 1e-12] the reflector is
+        # therefore IN B AND NOT IN U, so the factorisation is internally
+        # inconsistent — `B` is right, `S` is right, `U` and `Vt` are each
+        # perfectly orthogonal, and `U*S*Vt` is simply not `A`.
+        # ⚠ **2.15.0 CREATED THIS BAND.** Before it, both guards read
+        # `EPSILON_F64` and agreed; 2.15.0 repaired the storing guard to DBL_MIN —
+        # correctly, `2/vtv` overflows for a subnormal `vtv` — and left its twin
+        # forty lines away untouched. A guard repaired on one side of a pair is a
+        # new defect, not half a repair.
+        # ⭐ Measured on a 4x4 whose second block sits at ratio c: the small block
+        # is reconstructed with the WRONG SIGN — residual exactly 2x the block —
+        # for **19 ratios, 2^-21 through 2^-39**, worst 9.5e-7. The band ends at
+        # 2^-39 because below it the column norm itself drops under EPSILON_F64
+        # and the FORWARD pass skips too, so the two agree again by accident.
+        # [measured: 999-ratio reconstruction scan before and after, 2026-09-10]
+        if (f64_lt(bvtv, F64_TINY) == 0) {
             var blen = m - k;
             var btwo = f64_div(F64_TWO, bvtv);
             var bj = 0;
@@ -646,42 +678,96 @@ fn _lp_bidiag_qr(diag, superdiag, n, m, U_acc, Vt_acc, max_iter) {
             var d_end = load64(diag + p_hi * 8);
             var d_prev = load64(diag + (p_hi - 1) * 8);
             var f_end = load64(superdiag + (p_hi - 1) * 8);
+            var d_lo = load64(diag + p_lo * 8);
+            var f_lo = load64(superdiag + p_lo * 8);
+            var f_prev = f64_from(0);
+            if (p_hi - 1 > p_lo) { f_prev = load64(superdiag + (p_hi - 2) * 8); }
 
-            var a11 = f64_add(f64_mul(d_prev, d_prev),
-              # If p_hi-2 >= p_lo, add superdiag[p_hi-2]^2
-              f64_from(0));
-            if (p_hi - 1 > p_lo) {
-                var f_prev = load64(superdiag + (p_hi - 2) * 8);
-                a11 = f64_add(f64_mul(d_prev, d_prev), f64_mul(f_prev, f_prev));
-            } else {
-                a11 = f64_mul(d_prev, d_prev);
-            }
+            # ⭐ 2.18.0 — SCALE THE SHIFT BY A POWER OF TWO BEFORE SQUARING, and
+            # this is what actually reaches the bottom. `a11`/`a12`/`a22` are
+            # entries of B^T*B, so they are degree TWO however the shift is then
+            # rearranged: for a sub-block at ratio c they are ~c², which goes
+            # subnormal below c = 2^-511 and flushes below 2^-537. Rearranging
+            # alone therefore moves the floor from 2^-268.5 to 2^-537 and stops.
+            # ⚠ It also opened a SILENT band on the way: measured, the degree-two
+            # rearrangement alone answers 512 ratios but returns five FINITE WRONG
+            # singular values at 2^-514..2^-518, where the products are subnormal
+            # rather than zero. Trading 5 loud failures for 5 silent wrong answers
+            # is not an improvement, which is why the rearrangement does not ship
+            # on its own.
+            # ⭐ Dividing the six operands by an exact power of two costs nothing
+            # in accuracy and the shift is only ever used to form the FIRST Givens
+            # rotation, whose `cs`/`sn` depend on the RATIO y:z — so y and z are
+            # computed in the same scaled space and never converted back. Nothing
+            # downstream sees the scale at all.
+            # [measured: 999-ratio classification, rearrangement alone vs scaled]
+            var sh_m = f64_abs(d_end);
+            if (f64_gt(f64_abs(d_prev), sh_m) == 1) { sh_m = f64_abs(d_prev); }
+            if (f64_gt(f64_abs(f_end), sh_m) == 1) { sh_m = f64_abs(f_end); }
+            if (f64_gt(f64_abs(f_prev), sh_m) == 1) { sh_m = f64_abs(f_prev); }
+            if (f64_gt(f64_abs(d_lo), sh_m) == 1) { sh_m = f64_abs(d_lo); }
+            if (f64_gt(f64_abs(f_lo), sh_m) == 1) { sh_m = f64_abs(f_lo); }
+            var sh_s = F64_ONE;
+            if (f64_gt(sh_m, 0) == 1) { sh_s = _lp_pow2_floor(sh_m); }
+            # ⚠ Divide, never multiply by a reciprocal: a subnormal scale makes
+            # 1/s overflow to +Inf and every zero operand becomes 0 * Inf = NaN.
+            d_end = f64_div(d_end, sh_s);
+            d_prev = f64_div(d_prev, sh_s);
+            f_end = f64_div(f_end, sh_s);
+            f_prev = f64_div(f_prev, sh_s);
+            d_lo = f64_div(d_lo, sh_s);
+            f_lo = f64_div(f_lo, sh_s);
+
+            var a11 = f64_mul(d_prev, d_prev);
+            # If p_hi-2 >= p_lo, add superdiag[p_hi-2]^2 (f_prev is 0 otherwise)
+            a11 = f64_add(a11, f64_mul(f_prev, f_prev));
             var a12 = f64_mul(d_prev, f_end);
             var a22 = f64_add(f64_mul(d_end, d_end), f64_mul(f_end, f_end));
 
-            # Eigenvalues of [[a11, a12], [a12, a22]]
-            var tr = f64_add(a11, a22);
-            var det = f64_sub(f64_mul(a11, a22), f64_mul(a12, a12));
-            var disc = f64_sub(f64_mul(tr, tr), f64_mul(f64_from(4), det));
-            if (f64_lt(disc, f64_from(0)) == 1) { disc = f64_from(0); }
-            var sqrt_disc = f64_sqrt(disc);
-
-            var mu1 = f64_mul(F64_HALF, f64_add(tr, sqrt_disc));
-            var mu2 = f64_mul(F64_HALF, f64_sub(tr, sqrt_disc));
-
-            # Pick eigenvalue closer to a22 (= d[p_hi]^2 + f[p_hi-1]^2)
-            var mu = mu1;
-            if (f64_lt(f64_abs(f64_sub(mu2, a22)),
-                f64_abs(f64_sub(mu1, a22))) == 1) {
-                mu = mu2;
+            # ⛔ 2.18.0 — THIS FORMED DEGREE-FOUR QUANTITIES AND THAT SET THE
+            # WHOLE ROUTINE'S FLOOR. `a11`, `a12` and `a22` are already degree TWO
+            # in the bidiagonal entries (they are entries of B^T*B), so `tr*tr`,
+            # `a11*a22` and `a12*a12` are degree FOUR — and a degree-four quantity
+            # flushes to zero at the FOURTH root of the subnormal floor,
+            # 2^-537/2 = 2^-268.5. Measured on the 2.17.0 tree: `svd_golub_kahan`
+            # answers correctly down to a block ratio of **2^-269 and no further**,
+            # returning HSB_ERR_NO_CONVERGENCE for the 731 ratios below it. The
+            # boundary is not near 2^-268.5, it IS 2^-268.5.
+            # ⭐ The Wilkinson shift has a closed form that never leaves degree
+            # two: with `delta = (a11 - a22)/2`,
+            #     mu = a22 - a12 * (a12 / (delta + sign(delta)*hypot(delta, a12)))
+            # picks the eigenvalue CLOSER TO a22 directly, so the explicit
+            # discriminant and the two-root comparison both disappear. Same
+            # rearrangement the symmetric shift in `_lp_tridiag_qr` got in 2.17.0,
+            # and the same two reasons it is safe: `|a12| <= |denom|` so the inner
+            # quotient is bounded by 1, and `denom = sign(delta)*(|delta| + h)`
+            # cannot cancel.
+            # ⚠ THIS DOES NOT MAKE THE ROUTINE SCALE-FREE. `a11`/`a22` are still
+            # built from `d*d` and `f*f` one block above, so the floor moves from
+            # the fourth root to the SQUARE root of the subnormal floor — 2^-268.5
+            # to 2^-537 — and no further. Going below that needs the entries
+            # themselves never to be squared, which is a different algorithm
+            # (dqds / Demmel-Kahan) and not this change.
+            # [measured: 999-ratio block-ratio classification before and after]
+            var delta = f64_mul(F64_HALF, f64_sub(a11, a22));
+            var h = ganita_f64_hypot(delta, a12);
+            var sgn = _lp_sign(delta);
+            var denom = f64_add(delta, f64_mul(sgn, h));
+            var mu = a22;
+            # The only input with no shift is an exactly zero denominator, which
+            # needs delta == 0 and a12 == 0 — a block that has already deflated.
+            if (f64_eq(denom, 0) == 0) {
+                mu = f64_sub(a22, f64_mul(a12, f64_div(a12, denom)));
             }
 
             # Golub-Kahan implicit QR step (chase the bulge)
             # Initial: apply Givens to first column of B^T*B - mu*I
-            var y = f64_sub(f64_mul(load64(diag + p_lo * 8),
-                load64(diag + p_lo * 8)), mu);
-            var z = f64_mul(load64(diag + p_lo * 8),
-              load64(superdiag + p_lo * 8));
+            # ⚠ IN THE SHIFT'S SCALED SPACE, deliberately. `mu` is scaled by
+            # sh_s², so `d_lo` and `f_lo` must be too — and they already are. The
+            # pair is only used to build one Givens rotation, which depends on
+            # y:z and not on their common scale, so nothing is converted back.
+            var y = f64_sub(f64_mul(d_lo, d_lo), mu);
+            var z = f64_mul(d_lo, f_lo);
 
             var k = p_lo;
             while (k < p_hi) {

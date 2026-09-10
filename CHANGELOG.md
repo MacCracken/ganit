@@ -2,6 +2,28 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- ⛔ **CORRECTION TO 2.17.0's `svd_golub_kahan` CLAIM, found by re-measuring it with a working
+  instrument.** That release said the routine "lost the small block for **472 of 999** ratios, all
+  silent" and that the count is "**0** now". The second half implied the routine answers correctly
+  there. **It does not.** Below the floor it returns `S = (0,0,0,0)`, so the block-ratio check
+  computes `0/0 = NaN` — and every f64 comparison involving NaN returns 0, so the relative test
+  **silently passed** every one of them. The assertion and the probe that produced the figure shared
+  the same hole, which is why they agreed.
+  **Re-measured with a NaN arm, classifying every ratio:**
+  | tree | correct | loud `rc != NONE` | silent wrong |
+  |---|---|---|---|
+  | 2.16.0 | 256 (to 2^-257) | 269 | **474** (from 2^-258) |
+  | 2.17.0 | 268 (to 2^-269) | **731** | **0** |
+  ⭐ **The real win stands and is worth as much**: 474 silent wrong answers became 0, which is
+  exactly what `linalg_precision.cyr:716`'s own comment predicted — *"expect the failure to get
+  LOUDER, not to disappear… trading a silent wrong answer for a loud rc is strictly better"*. ⚠ What
+  was wrong was the summary, not the repair: the correct range moved only **2^-257 → 2^-269**, twelve
+  binades, because the remaining floor is the Wilkinson shift forming `B^T*B` explicitly — a
+  degree-TWO quantity, hence half of 2^-537. **A relative comparison is not a correctness test until
+  it rejects NaN.**
+
 ## [2.17.0] - 2026-09-10 — the norm tier, and the class that was five times wider than its list
 
 Every `sqrt(x² + y² + …)` in the tree squares before summing, so a component below **2^-537** has a
@@ -82,7 +104,10 @@ against 89.4%). **Check what the machine was doing before believing the delta.**
   the one-line fix takes 489 of 2001 to 488.
 - **linalg_precision** — both arms of `_lp_split_zero_diag`, both bidiagonal bulge rotations, the
   tridiagonal rotation, and the symmetric Wilkinson shift. `svd_golub_kahan` lost the small block for
-  **472 of 999** ratios, **all of them silent**; `eigen_qr` for **463 of 998**.
+  **472 of 999** ratios, **all of them silent**; `eigen_qr` for **463 of 998**. ⚠ **The
+  `svd_golub_kahan` half of this line is corrected in [Unreleased]**: the true figure is 474 silent
+  wrong answers going to 0, and the band they occupied is now a loud `HSB_ERR_NO_CONVERGENCE` rather
+  than a correct answer. The `eigen_qr` figure is unaffected — it was verified without the NaN hole.
 - **calc_ext** — `calc_monotone_cubic`'s Fritsch-Carlson projection overflowed at hypot ≥ 2^512,
   flattening the segment: **488 of 941** secant ratios wrong by 20%, and still monotone, so the
   function's own oracle passed.
