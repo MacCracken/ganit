@@ -2,27 +2,91 @@
 
 ## [Unreleased]
 
+## [2.18.0] - 2026-09-10 — the SVD factors, and the release that began by correcting the last one
+
+2.15.0 filed `‖A − U S Vt‖_F` as **"open-ended: a known defect with no known fix"** and it stood on the
+roadmap for three releases. **The fix is one line, and 2.15.0 had created the defect itself.**
+Suites **3920 → 3937**.
+
+⛔ **BUT THE FIRST THING THIS RELEASE DID WAS DISCOVER THAT ONE OF 2.17.0's HEADLINE FIGURES WAS
+WRONG.** That release reported `svd_golub_kahan` going from "472 of 999 ratios lost, all silent" to
+"0", which reads as *the routine now answers correctly there*. It did not: below the floor it returns
+`S = (0,0,0,0)`, the block-ratio check computes `0/0 = NaN`, and **every f64 comparison involving NaN
+returns 0** — so the relative test silently passed every one of them. The assertion and the probe that
+produced the figure shared the same hole, which is exactly why they agreed. **A relative comparison is
+not a correctness test until it rejects NaN.** Re-measured with a NaN arm, and then closed:
+
+| | correct | loud `rc != NONE` | silent wrong |
+|---|---|---|---|
+| 2.16.0 | 256 (to 2^-257) | 269 | **474** |
+| 2.17.0 | 268 (to 2^-269) | 731 | 0 |
+| **2.18.0** | **999 (to 2^-1000)** | **0** | **0** |
+
+⛔ **THE FACTOR DEFECT WAS A PAIR OF GUARDS THAT DISAGREED.** `_lp_bidiagonalize` **applies** a left
+Householder reflector and records it when `vtv >= F64_TINY`, and **replayed it into `U`** only when
+`vtv > EPSILON_F64`. Every reflector in between went into `B` and not into `U` — so `S` was exact,
+`U` and `Vt` were each perfectly orthogonal, and `U*S*Vt` simply was not `A`: the small block came
+back with the **wrong sign**, residual exactly twice the block, for 19 ratios and **288 of 999** on
+the 2.16.0 tree. **2.15.0 created that band** by repairing one guard of the pair and leaving its twin
+forty lines away. **A guard repaired on one side of a pair is a new defect, not half a repair.**
+
+⭐ **A repair that moves no number is pointing at a second defect.** Repairing the Givens radius in
+`_lp_tridiag_qr` changed nothing measurable — 463 of 998 block ratios lost before and after — because
+the loss was the Wilkinson shift forming `e2*e2`, which flushes, collapsing `mu` to `d2`; and an
+unshifted step on a symmetric block with equal diagonals is a **fixed point**. ⚠ The 2026-09-09 census
+had classified that line **SAFE_UNREACHABLE** — correctly about the `f64_sqrt`, wrongly about the
+function.
+
+⛔ **AND THE EPA SEED TRADE, CARRIED SINCE 2.9.3, IS DECLINED ON A MEASUREMENT THAT INVERTS ITS OWN
+PREMISE.** Its price was never the cost — it is the **accuracy**. Against the exact closed form
+`ra + rb − |c1 − c2|`, `gjk_epa_3d` is **1.41e-16 mean / 5.57e-16 worst**; with the strictness
+upgrade **1.70e-14 / 2.03e-11**, thirty-six thousand times worse. ⭐ The mechanism was already written
+in the source: `_epa_polish`'s own comment says the depth is `min` over probed directions of `h_M(n)`
+and every `h_M(n) >= ` the true MTV, so the polish "can only lower an upper bound" — **certifying is
+an early-out that skips it**. The filing assumed certifying was the better state; it is the worse one.
+
 ### Fixed
 
-- ⛔ **CORRECTION TO 2.17.0's `svd_golub_kahan` CLAIM, found by re-measuring it with a working
-  instrument.** That release said the routine "lost the small block for **472 of 999** ratios, all
-  silent" and that the count is "**0** now". The second half implied the routine answers correctly
-  there. **It does not.** Below the floor it returns `S = (0,0,0,0)`, so the block-ratio check
-  computes `0/0 = NaN` — and every f64 comparison involving NaN returns 0, so the relative test
-  **silently passed** every one of them. The assertion and the probe that produced the figure shared
-  the same hole, which is why they agreed.
-  **Re-measured with a NaN arm, classifying every ratio:**
-  | tree | correct | loud `rc != NONE` | silent wrong |
-  |---|---|---|---|
-  | 2.16.0 | 256 (to 2^-257) | 269 | **474** (from 2^-258) |
-  | 2.17.0 | 268 (to 2^-269) | **731** | **0** |
-  ⭐ **The real win stands and is worth as much**: 474 silent wrong answers became 0, which is
-  exactly what `linalg_precision.cyr:716`'s own comment predicted — *"expect the failure to get
-  LOUDER, not to disappear… trading a silent wrong answer for a loud rc is strictly better"*. ⚠ What
-  was wrong was the summary, not the repair: the correct range moved only **2^-257 → 2^-269**, twelve
-  binades, because the remaining floor is the Wilkinson shift forming `B^T*B` explicitly — a
-  degree-TWO quantity, hence half of 2^-537. **A relative comparison is not a correctness test until
-  it rejects NaN.**
+- **linalg_precision** — the `U` replay guard now matches the guard that stored the reflector.
+  `‖A − U S Vt‖_F / ‖A‖_F`: **288 of 999 ratios past 1e-14 → 0**, worst back to machine epsilon.
+- **linalg_precision** — the SVD Wilkinson shift no longer forms degree-FOUR quantities. `tr*tr`,
+  `a11*a22` and `a12*a12` put the floor at the **fourth** root of the subnormal floor, 2^-268.5, and
+  the measured boundary was 2^-269 exactly. The degree-two closed form plus power-of-two scaling of
+  its six operands takes it to **999 of 999**. ⚠ The rearrangement alone was not shippable: it
+  reached 512 ratios and opened a five-ratio **silent wrong** band. Trading 5 loud failures for 5
+  silent wrong answers is not an improvement.
+- **linalg_precision** — `_lp_pow2_floor` returned `F64_ONE` ("do not balance") for every subnormal,
+  so the one input that most needs balancing never got it. `eigen_qr` is now exact to **2^-1070**.
+- **linalg_precision** — an exactly zero off-diagonal was never deflated: `f64_lt(|off|, eps*(|a|+|b|))`
+  is `|off| < 0` once the product flushes, which is false for **every** `|off|` including zero.
+  **37 of 72 subnormal block ratios failing → 28.** ⛔ I filed this as "the product flushes, so divide
+  instead" and **that causal story was wrong** — the product form WITH the zero arm gives the identical
+  28, and the division's mutant survives every fixture. The zero arm is the whole repair; the division
+  was reverted rather than shipped as a rewrite with nothing behind it.
+- **geo_advanced** — `cga_norm_sq` built a whole 32-slot multivector to read one number out of it (the
+  scalar part comes from exactly the 32 **diagonal** blade pairs — verified) and its accumulation order
+  destroyed that number: a translator is a unit versor, `1 + t²/4 − t²/4`, and once `t²/4` passes 2^53
+  the leading 1 is rounded away. **993 of 2041 scales wrong, first failure at t = 2^28 → 2^538.**
+  ⭐ Neumaier, not Kahan: Kahan folds its correction into the next *addend*, where with `sum = 1` and
+  addend `2^54` a correction of 1 is below the ulp and is lost.
+
+### Changed
+
+- **geo_advanced** — ⚠ **behaviour change on `cga_norm` for conformal points.** The old accumulation
+  returned exactly 0 for 1010 of 1101 positions, but that 0 was **rounding luck**: `cga_point` adds
+  `x²/2` to `±0.5`, and for small `x` that term rounds away, so the stored multivector really does
+  have `norm_sq = x²`. Exact zeros drop to 53. Judged against the point's own largest coefficient —
+  the right scale — nullity barely moves (**1010 → 970** within 1e-14) and the worst relative defect
+  is **identical either way, exactly 2^-26 at x = 2^-27**.
+
+### Performance
+
+- ⚠ **A measured cost, stated rather than hidden behind its own spread.** `svd_golub_kahan_12`
+  **+6.8%** and `eigen_qr_12` **+6.5%**, consistent across two runs — the mechanism is the shift's
+  new max-scan and six divides per sweep. Both sit inside their own historical spread (~41%), so the
+  trend filter will not flag them, but the direction is real and it is the price of 256 → 999 correct
+  block ratios. ⭐ The control holds: untouched rows moved **+0.30%** median across 72 benchmarks, and
+  `triangulate_600gon`'s +15.4% was a single-run outlier (1,544k → 1,782k → 1,595k ns).
 
 ## [2.17.0] - 2026-09-10 — the norm tier, and the class that was five times wider than its list
 
