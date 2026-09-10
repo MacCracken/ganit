@@ -7746,9 +7746,53 @@ fn cga_sandwich(x, versor) {
 # Scalar part (grade 0)
 fn cga_scalar_part(mv) { return load64(mv); }
 
+# ⛔ 2.18.0 — THIS BUILT A WHOLE 32-SLOT MULTIVECTOR TO READ ONE NUMBER OUT OF
+# IT, AND THE ACCUMULATION ORDER DESTROYED THAT NUMBER. `cga_norm_sq` is the
+# scalar part of `mv * reverse(mv)`, and the scalar part comes from exactly the
+# 32 DIAGONAL blade pairs — verified: of the 1024 pairs, 32 produce blade 0 and
+# every one of them has i == j. The other 992 iterations computed slots nobody
+# read.
+# ⛔ The real cost was correctness. A translator is a unit versor — `e_inf² = 0`,
+# so `T * rev(T) = 1` identically — and its scalar part accumulates
+# `1 + t²/4 - t²/4`. Once `t²/4` passes 2^53 the leading 1 is rounded away and
+# the answer comes back **0 instead of 1**: measured, `cga_norm(cga_translator(t,
+# 0, 0))` stops being 1 at **t = 2^28**, an entirely ordinary translation
+# distance. The same shape makes `cga_norm(cga_point(x, 0, 0))` — which must be
+# exactly 0, a conformal point being null — wrong from **x = 2^-27**.
+# ⚠ THIS IS NOT THE NORM CLASS AND 2.17.0's RESCALE CANNOT TOUCH IT. A
+# power-of-two rescale is exact, so it moves every term by the same factor and
+# the cancellation is unchanged — measured before and after, identical.
+# ⭐ NEUMAIER COMPENSATION, NOT KAHAN. Plain Kahan fails here and it is worth
+# recording why: its correction is folded into the next ADDEND, and with
+# `sum = 1`, addend `2^54`, the correction 1 is below the ulp of 2^54 and is
+# simply lost. Neumaier's variant picks the branch by which of the two is larger
+# and keeps the correction in a separate accumulator to the end, which is exactly
+# the case that arises here.
+# [measured: 2041-binade translator and 1101-binade point sweeps, 2026-09-10]
+fn _cga_scalar_of_geo(a, b) {
+    var sum = f64_from(0);
+    var comp = f64_from(0);
+    for (var si = 0; si < 32; si = si + 1) {
+        var packed = _cga_geo_blades(si, si);
+        var sign = load64(packed);
+        if (sign != 0) {
+            var contrib = f64_mul(load64(a + si * 8), load64(b + si * 8));
+            if (sign < 0) { contrib = f64_neg(contrib); }
+            var t = f64_add(sum, contrib);
+            if (f64_lt(f64_abs(contrib), f64_abs(sum)) == 1) {
+                comp = f64_add(comp, f64_add(f64_sub(sum, t), contrib));
+            } else {
+                comp = f64_add(comp, f64_add(f64_sub(contrib, t), sum));
+            }
+            sum = t;
+        }
+    }
+    return f64_add(sum, comp);
+}
+
 # Norm squared: scalar part of mv * reverse(mv)
 fn cga_norm_sq(mv) {
-    return cga_scalar_part(cga_geometric_product(mv, cga_mv_reverse(mv)));
+    return _cga_scalar_of_geo(mv, cga_mv_reverse(mv));
 }
 
 # Power-of-two floor of |s|, INCLUDING SUBNORMALS. `linalg_precision.cyr`'s

@@ -425,8 +425,34 @@ sections. It has been declared out of scope twice, which is a stronger claim tha
       ⚠ Only the `+Inf` leg: `s > 9` is guaranteed one line above, so the subnormal half of the
       class does not exist there and an `F64_TINY` leg would be dead code.
 
-- [ ] **[2.18.0]** **`cga_norm` on versors and points is CATASTROPHIC CANCELLATION, not this
-      class — measured, and the 2.17.0 repair does not move it.** `cga_norm(cga_translator(t,0,0))`
+- [x] ✅ **DONE — Neumaier compensation, and the first failure moves 2^28 -> 2^538.** `cga_norm_sq`
+      is the scalar part of `mv * rev(mv)`, and the scalar part comes from exactly the 32 DIAGONAL
+      blade pairs — verified: of the 1024 pairs, 32 give blade 0 and every one has `i == j`. So it
+      stopped building a whole multivector to read one number out of it, and accumulates with
+      NEUMAIER compensation. **993 of 2041 translator scales wrong -> 482, first failure 2^28 ->
+      2^538.**
+      ⭐ **Kahan is not enough and the mutant proves it**: Kahan folds its correction into the next
+      ADDEND, and with `sum = 1`, addend `2^54`, the correction 1 is below the ulp of 2^54 and is
+      lost. Neumaier branches on which operand is larger and keeps the correction to the end.
+      ⚠ **The residue past 2^538 is inherent**: rescaling by `s` makes the scalar term `1/s`, whose
+      square underflows once `s > 2^537`. A translator at 2^539 has coefficients spanning 538
+      binades and their SQUARES span 2^1076 — wider than the double range, so no single scale keeps
+      both ends.
+      ⛔ **AND IT IS A BEHAVIOUR CHANGE ON CONFORMAL POINTS, recorded rather than buried.** The old
+      accumulation returned exactly 0 for 1010 of 1101 point positions — but that 0 was ROUNDING
+      LUCK: `cga_point` adds `x²/2` to `±0.5`, and for small x that term rounds away entirely, so
+      the multivector it stores has `norm_sq = x²`. The compensated sum reports that truth and exact
+      zeros drop to 53. ⭐ Judged against the point's own largest coefficient — the unit-weight `e_o`
+      part, which is the right scale — nullity is essentially unchanged (**1010 -> 970** within
+      1e-14) and the WORST relative defect is identical either way, **exactly 2^-26 at x = 2^-27**,
+      where `x²/2` falls below half an ulp of 0.5. Original text follows.
+      ~~**`cga_norm` on versors and points is CATASTROPHIC CANCELLATION, not this class.**~~
+
+- [ ] **[2.19.0]** **`cga_point` cannot represent a small point as exactly null**, and that is the
+      residue above rather than an arithmetic fault. It stores `x²/2 ± 1/2` in the ep/em basis, and
+      for `x` below ~2^-26.5 the `x²/2` term is under half an ulp of 0.5 and is gone. Storing the
+      `e_inf`/`e_o` coefficients directly instead would hold it — an internal basis change for the
+      whole module, so it is a design decision, not a repair. `cga_norm(cga_translator(t,0,0))`
       must be exactly 1 (a translator is a unit versor, `e_inf² = 0`) and stops being so at
       **t = 2^28** — an entirely ordinary translation distance. `cga_norm(cga_point(x,0,0))` must
       be exactly 0 and stops at **x = 2^-27**. Both are the accumulation ORDER inside
@@ -486,7 +512,13 @@ sections. It has been declared out of scope twice, which is a stronger claim tha
       `eigen_qr`'s first failing magnitude from 2^-1025 to 2^-1039 and **22 of 1061 magnitudes
       still fail**; the residue is this, not a norm site. Separate defect, separate fix.
 
-- [ ] **[2.18.0]** **The SVD Wilkinson shift forms B^T*B explicitly.** `_lp_bidiag_qr` builds
+- [x] ✅ **DONE in 2.18.0 — and it did NOT need the algorithm change this row predicted.** The row
+      below says an implicit (dqds / Demmel-Kahan) shift is required. It is not: the Wilkinson shift
+      has a degree-TWO closed form, and with the six operands scaled by a power of two first the
+      floor is gone entirely — **999 of 999 block ratios correct, down to 2^-1000**. ⚠ The row was
+      also wrong about where the floor was: it says "dies below 2^-537", and the measured boundary
+      is **2^-269**, because `tr*tr`/`a11*a22`/`a12*a12` are degree FOUR, not two. Original text
+      follows. ~~**The SVD Wilkinson shift forms B^T*B explicitly.**~~ `_lp_bidiag_qr` builds
       `a11`/`a12`/`a22` from `d*d` and `f*f`, so its shift dies below 2^-537 the same way the
       symmetric one did — but unlike the symmetric case there is no two-line algebraic
       rearrangement: it needs an implicit (scaled) shift, which is an **algorithm change**. The

@@ -12409,6 +12409,76 @@ assert_eq(cga_norm(cga_mv_scale(_cn_np, (1023 - 900) << 52)), 0,
 assert_eq(cga_norm(cga_mv_scale(_cn_np, (1023 + 700) << 52)), 0,
   "cga_norm: and at 2^700, where the rescue runs on the overflow side");
 
+# ⛔ 2.18.0 — AND `cga_norm_sq` DESTROYED ITS OWN ANSWER BY THE ORDER IT ADDED IN.
+# A translator is a UNIT versor — `e_inf² = 0`, so `T * rev(T) = 1` identically —
+# and its scalar part accumulates `1 + t²/4 - t²/4`. Once `t²/4` passes 2^53 the
+# leading 1 is rounded away and the answer comes back **0 instead of 1**:
+# measured, `cga_norm(cga_translator(t,0,0))` stopped being 1 at **t = 2^28**, an
+# entirely ordinary translation distance, and 993 of 2041 scales were wrong.
+# ⚠ NOT the norm class, and 2.17.0's power-of-two rescale provably cannot help —
+# it is exact, so it moves every term by the same factor and the cancellation is
+# untouched. Measured identical before and after that repair.
+# ⭐ NEUMAIER, NOT KAHAN, and the distinction is measurable: Kahan folds its
+# correction into the next ADDEND, and with `sum = 1` and addend `2^54` the
+# correction 1 is below the ulp of 2^54 and is simply lost. Neumaier picks its
+# branch by which operand is larger and keeps the correction to the end.
+# ⭐ The scalar part also needs only the 32 DIAGONAL blade pairs — verified: of
+# the 1024 pairs exactly 32 produce blade 0 and every one has i == j — so this
+# stopped building a whole multivector to read one number out of it.
+# ⚠ **First failure moves 2^28 -> 2^538, and the residue is inherent.** Beyond
+# that the rescue's own arithmetic runs out: scaling by `s` makes the scalar term
+# `1/s`, whose square `1/s²` underflows once `s > 2^537`. A translator at 2^539
+# has coefficients spanning 538 binades and their SQUARES span 2^1076, which is
+# wider than the double range — no single scale keeps both ends.
+# [measured: 2041-binade translator sweep before and after, 2026-09-10]
+var _CT_RUN = 0;
+var _CT_BAD = 0;
+for (var _ct_e = 0 - 1020; _ct_e <= 538; _ct_e = _ct_e + 1) {
+    var _ct_t = cga_translator((1023 + _ct_e) << 52, 0, 0);
+    _CT_RUN = _CT_RUN + 1;
+    if (cga_norm(_ct_t) != F64_ONE) { _CT_BAD = _CT_BAD + 1; }
+}
+assert_eq(_CT_RUN, 1559, "the translator sweep actually ran 1559 scales");
+assert_eq(_CT_BAD, 0,
+  "cga_norm: a translator is a UNIT versor at every distance from 2^-1020 to 2^538");
+
+# ⚠ AND THE HONEST CONSEQUENCE FOR CONFORMAL POINTS, recorded rather than hidden,
+# because this is a BEHAVIOUR CHANGE on a public function. A point is null, and
+# the old accumulation returned exactly 0 for 1010 of 1101 positions — but that 0
+# was ROUNDING LUCK, not a property of the stored multivector: `cga_point` adds
+# `x²/2` to `±0.5`, and for small x that term rounds away entirely, so the point
+# it actually stores has `norm_sq = x²`. The compensated sum reports that truth,
+# and exact zeros drop 1010 -> 53.
+# ⭐ Judged against the point's OWN scale — its largest coefficient, which is the
+# unit-weight e_o part, not x — nullity is essentially unchanged: **1010 -> 970**
+# within 1e-14, and the WORST relative nullity defect is identical either way
+# (5e-9, at x = 2^-27). The residue is `cga_point`'s representation, not this
+# function's arithmetic: the ep/em basis cannot hold `x²/2 ± 1/2` for small x.
+# [measured: 1101-position sweep, exact and relative, before and after]
+var _CP_RUN2 = 0;
+var _CP_BAD2 = 0;
+for (var _cp_e2 = 0 - 500; _cp_e2 <= 500; _cp_e2 = _cp_e2 + 1) {
+    var _cp_pt = cga_point((1023 + _cp_e2) << 52, 0, 0);
+    var _cp_mx = f64_from(0);
+    for (var _cp_q = 0; _cp_q < 32; _cp_q = _cp_q + 1) {
+        var _cp_a = f64_abs(cga_mv_get(_cp_pt, _cp_q));
+        if (f64_gt(_cp_a, _cp_mx) == 1) { _cp_mx = _cp_a; }
+    }
+    _CP_RUN2 = _CP_RUN2 + 1;
+    # ⭐ The bound is DERIVED, not chosen. `cga_point` stores `x²/2 ± 1/2`, and
+    # ulp(0.5) is 2^-53, so the whole `x²/2` term rounds away once it falls below
+    # half of that — at x ~ 2^-26.5. The residue is then the point's own `x`,
+    # i.e. `x / 0.5 = 2x` relative to its largest coefficient, and the worst case
+    # sits right at the crossover: measured **exactly 2^-26, at x = 2^-27**.
+    # [measured: 1001-position relative-nullity sweep, 2026-09-10]
+    if (f64_gt(f64_div(cga_norm(_cp_pt), _cp_mx), (1023 - 26) << 52) == 1) {
+        _CP_BAD2 = _CP_BAD2 + 1;
+    }
+}
+assert_eq(_CP_RUN2, 1001, "the conformal-point nullity sweep actually ran 1001 positions");
+assert_eq(_CP_BAD2, 0,
+  "cga_point: every point is null to 2^-26 of its own largest coefficient, from 2^-500 to 2^500");
+
 # ⭐ ANTI-DELETION: the null blades must still read exactly 0, which is what the
 # power-of-two choice protects. ⚠ And an all-zero multivector, and NaN.
 var _cn_z = cga_mv_zero();
