@@ -3367,6 +3367,221 @@ while (wi < 3) { tSum = f64_add(tSum, f64_mul(load64(tS + wi * 8), load64(tS + w
 assert(f64_approx_eq(tSum, f64_from(23), LOOSE_TOL_H), "svd 4x3 sum s^2 = trace(A^T A) = 23");
 _lp_check_svd(tA, 4, 3, tU, tS, tVt, "svd 4x3: A == U*S*Vt");
 
+test_group("2.17.0 linalg_precision: the QR sweeps are block-ratio-free");
+
+# ⚠ A UNIFORM SCALE PROVES NOTHING HERE AND THE CENSUS SAID SO BEFORE THE FIRST
+# LINE WAS WRITTEN. `svd_golub_kahan` and `eigen_qr` balance by an EXACT power of
+# two, so `c*A` is bit-identically invariant on the defective tree. The
+# discriminating variable is the RATIO BETWEEN SUB-BLOCKS, and both fixtures below
+# are block-diagonal with the second block scaled by `c`.
+# ⭐ Neither fixture carries a hand-computed singular value or eigenvalue. The SVD
+# one asserts `s3/s1 == c` — the second block IS `c` times the first, so its
+# singular values are exactly `c` times the first's — and the eigen one asserts
+# `7c`. A fixture built from the structure cannot be wrong in the fourth digit,
+# which is how 2.15.0 lost 800 of 1200 checks.
+# [measured: docs/audit/2026-09-09-epsilon-census.md]
+
+# ⛔ `svd_golub_kahan` LOST THE SMALL BLOCK ENTIRELY FOR 472 OF 999 RATIOS, AND
+# ALL 472 WERE SILENT — `rc = HSB_ERR_NONE`, wrong singular values, no signal.
+# The Givens radii in `_lp_split_zero_diag` (both arms of its chase) and in the
+# bidiagonal bulge chase (both rotations) squared before summing.
+# [measured: 999-ratio sweep before and after, 2026-09-10]
+# [measured: 11-mutant run over linalg_precision.cyr, 2026-09-10]
+var _SB_RUN = 0;
+var _SB_BAD = 0;
+var _SB_SILENT = 0;
+for (var _sb_e = 2; _sb_e < 1001; _sb_e = _sb_e + 1) {
+    var _sb_c = (1023 - _sb_e) << 52;
+    var _sb_A = ganita_mat_new(4, 4);
+    for (var _sb_i = 0; _sb_i < 4; _sb_i = _sb_i + 1) {
+        for (var _sb_j = 0; _sb_j < 4; _sb_j = _sb_j + 1) {
+            ganita_mat_set(_sb_A, _sb_i, _sb_j, 0);
+        }
+    }
+    ganita_mat_set(_sb_A, 0, 0, f64_from(3));
+    ganita_mat_set(_sb_A, 0, 1, f64_from(4));
+    ganita_mat_set(_sb_A, 1, 1, f64_from(3));
+    ganita_mat_set(_sb_A, 2, 2, f64_mul(f64_from(3), _sb_c));
+    ganita_mat_set(_sb_A, 2, 3, f64_mul(f64_from(4), _sb_c));
+    ganita_mat_set(_sb_A, 3, 3, f64_mul(f64_from(3), _sb_c));
+    var _sb_U = ganita_mat_new(4, 4);
+    var _sb_Vt = ganita_mat_new(4, 4);
+    var _sb_S = alloc(32);
+    for (var _sb_k = 0; _sb_k < 4; _sb_k = _sb_k + 1) { store64(_sb_S + _sb_k * 8, 0); }
+    var _sb_rc = svd_golub_kahan(_sb_A, _sb_U, _sb_S, _sb_Vt);
+    _SB_RUN = _SB_RUN + 1;
+    # The singular values come back descending, so for c below s2/s1 the order is
+    # (s1, s2, c*s1, c*s2) and s3/s1 is exactly c.
+    var _sb_r = f64_div(load64(_sb_S + 16), load64(_sb_S));
+    # ⚠ RELATIVE, not bit-exact: the QR sweep is iterative and 3 of 999 ratios
+    # differ in the last places on CORRECT code. 4 ulp is as tight as this can go.
+    # [measured: bit-exact variant of this sweep run against the repaired tree]
+    if (f64_gt(f64_abs(f64_div(f64_sub(_sb_r, _sb_c), _sb_c)), 0x3CD0000000000000) == 1) {
+        _SB_BAD = _SB_BAD + 1;
+        if (_sb_rc == HSB_ERR_NONE) { _SB_SILENT = _SB_SILENT + 1; }
+    }
+}
+assert_eq(_SB_RUN, 999, "the SVD block-ratio sweep actually ran 999 ratios");
+assert_eq(_SB_BAD, 0,
+  "svd_golub_kahan: the small block's singular values are c times the large block's, for c = 2^-2 .. 2^-1000");
+assert_eq(_SB_SILENT, 0,
+  "svd_golub_kahan: and none of them is a SILENT wrong answer (472 of 999 were)");
+
+# ⛔ AND A RANK-DEFICIENT SMALL BLOCK REACHES `_lp_split_zero_diag`, WHICH NO
+# FULL-RANK FIXTURE CAN. That routine only runs for a ZERO DIAGONAL entry inside
+# an active block, and both arms of its chase had the same defect. Measured on
+# the 2.16.0 tree: the small block's singular value came back as `c` where the
+# truth is `c*sqrt(2)` — **29.3% low, with rc = HSB_ERR_NONE** — from c = 2^-539
+# down. ⚠ The sweep above ran 999 full-rank ratios and could not see it: the two
+# `_lp_split_zero_diag` mutants SURVIVED it, and this block is what kills them.
+# ⭐ Both arms are exercised: `kind = 0` puts the zero diagonal LAST in the block
+# (the upward chase) and `kind = 1` puts it FIRST (the rightward chase).
+# [measured: 999-ratio x 2-arm sweep before and after; 11-mutant run, 2026-09-10]
+var _SZ_RUN = 0;
+var _SZ_BAD = 0;
+var _SZ_SILENT = 0;
+for (var _sz_k = 0; _sz_k < 2; _sz_k = _sz_k + 1) {
+    for (var _sz_e = 2; _sz_e < 1001; _sz_e = _sz_e + 1) {
+        var _sz_c = (1023 - _sz_e) << 52;
+        var _sz_A = ganita_mat_new(4, 4);
+        for (var _sz_i = 0; _sz_i < 4; _sz_i = _sz_i + 1) {
+            for (var _sz_j = 0; _sz_j < 4; _sz_j = _sz_j + 1) {
+                ganita_mat_set(_sz_A, _sz_i, _sz_j, 0);
+            }
+        }
+        ganita_mat_set(_sz_A, 0, 0, F64_ONE);
+        ganita_mat_set(_sz_A, 1, 1, F64_ONE);
+        if (_sz_k == 0) {
+            ganita_mat_set(_sz_A, 2, 2, _sz_c);
+            ganita_mat_set(_sz_A, 2, 3, _sz_c);
+        } else {
+            ganita_mat_set(_sz_A, 2, 3, _sz_c);
+            ganita_mat_set(_sz_A, 3, 3, _sz_c);
+        }
+        var _sz_U = ganita_mat_new(4, 4);
+        var _sz_Vt = ganita_mat_new(4, 4);
+        var _sz_S = alloc(32);
+        for (var _sz_q = 0; _sz_q < 4; _sz_q = _sz_q + 1) { store64(_sz_S + _sz_q * 8, 0); }
+        var _sz_rc = svd_golub_kahan(_sz_A, _sz_U, _sz_S, _sz_Vt);
+        _SZ_RUN = _SZ_RUN + 1;
+        # the rank-1 block has singular values (c*sqrt(2), 0); with two unit
+        # singular values above it, that lands third.
+        if (load64(_sz_S + 16) != f64_mul(_sz_c, 0x3FF6A09E667F3BCD)) {
+            _SZ_BAD = _SZ_BAD + 1;
+            if (_sz_rc == HSB_ERR_NONE) { _SZ_SILENT = _SZ_SILENT + 1; }
+        }
+    }
+}
+assert_eq(_SZ_RUN, 1998, "the zero-diagonal split sweep ran 2 arms x 999 ratios");
+assert_eq(_SZ_BAD, 0,
+  "svd_golub_kahan: a rank-deficient block at ratio c has singular value c*sqrt(2), bit-exact");
+assert_eq(_SZ_SILENT, 0,
+  "svd_golub_kahan: and none of them is a SILENT 29.3%-low answer");
+
+# ⛔ `eigen_qr` LOST THE SMALL BLOCK FOR 463 OF 998 RATIOS — and with it the LARGE
+# block, because the whole call returned HSB_ERR_NO_CONVERGENCE.
+# ⭐ THE SITE THAT MATTERED WAS NOT ON THE CENSUS LIST. Repairing the Givens
+# radius in the bulge chase changed NOTHING measurable; the loss was the
+# Wilkinson shift forming `e2*e2`, which flushes, collapsing `mu` to `d2` — and
+# an unshifted step on a symmetric block with equal diagonals is a FIXED POINT,
+# so the iteration burns its whole budget making a rotation that swaps two equal
+# entries. **A repair that moves no number is pointing at a second defect.**
+# [measured: 998-ratio sweep before and after, 2026-09-10]
+var _EB_RUN = 0;
+var _EB_BAD = 0;
+for (var _eb_e = 3; _eb_e < 1001; _eb_e = _eb_e + 1) {
+    var _eb_c = (1023 - _eb_e) << 52;
+    var _eb_A = ganita_mat_new(4, 4);
+    for (var _eb_i = 0; _eb_i < 4; _eb_i = _eb_i + 1) {
+        for (var _eb_j = 0; _eb_j < 4; _eb_j = _eb_j + 1) {
+            ganita_mat_set(_eb_A, _eb_i, _eb_j, 0);
+        }
+    }
+    ganita_mat_set(_eb_A, 0, 0, f64_from(3));
+    ganita_mat_set(_eb_A, 0, 1, f64_from(4));
+    ganita_mat_set(_eb_A, 1, 0, f64_from(4));
+    ganita_mat_set(_eb_A, 1, 1, f64_from(3));
+    ganita_mat_set(_eb_A, 2, 2, f64_mul(f64_from(3), _eb_c));
+    ganita_mat_set(_eb_A, 2, 3, f64_mul(f64_from(4), _eb_c));
+    ganita_mat_set(_eb_A, 3, 2, f64_mul(f64_from(4), _eb_c));
+    ganita_mat_set(_eb_A, 3, 3, f64_mul(f64_from(3), _eb_c));
+    var _eb_vals = alloc(32);
+    for (var _eb_k = 0; _eb_k < 4; _eb_k = _eb_k + 1) { store64(_eb_vals + _eb_k * 8, 0); }
+    var _eb_vecs = ganita_mat_new(4, 4);
+    _EB_RUN = _EB_RUN + 1;
+    if (eigen_qr(_eb_A, 4, 400, _eb_vals, _eb_vecs) != HSB_ERR_NONE) {
+        _EB_BAD = _EB_BAD + 1;
+    }
+    # eigenvalues are {7, -1, 7c, -c}; the largest |lambda| below 1 is 7c, and the
+    # sweep starts at c = 2^-3 so that 7c < 1 holds throughout.
+    var _eb_best = 0;
+    for (var _eb_i2 = 0; _eb_i2 < 4; _eb_i2 = _eb_i2 + 1) {
+        var _eb_a = f64_abs(load64(_eb_vals + _eb_i2 * 8));
+        if (f64_lt(_eb_a, F64_ONE) == 1 && f64_gt(_eb_a, _eb_best) == 1) { _eb_best = _eb_a; }
+    }
+    var _eb_w = f64_mul(f64_from(7), _eb_c);
+    if (f64_gt(f64_abs(f64_sub(_eb_best, _eb_w)), f64_mul(_eb_w, EPSILON_F64)) == 1) {
+        _EB_BAD = _EB_BAD + 1;
+    }
+}
+assert_eq(_EB_RUN, 998, "the eigen block-ratio sweep actually ran 998 ratios");
+assert_eq(_EB_BAD, 0,
+  "eigen_qr: the small block's dominant eigenvalue is 7c, for c = 2^-3 .. 2^-1000");
+
+# ⚠ AND THE HONEST RESIDUE, RECORDED RATHER THAN HIDDEN. An ALL-SUBNORMAL matrix
+# is never balanced at all: `_lp_pow2_floor(s)` reads the exponent field, which is
+# 0 for every subnormal, and returns 1.0. So the whole routine runs unbalanced on
+# entries already below the flush floor. The repair moves the first failing
+# magnitude from 2^-1025 to 2^-1039 — 14 binades — and 22 of 1061 remain. That is
+# `_lp_pow2_floor`, not a norm site, and it is filed on the roadmap rather than
+# folded in here. This assertion pins the boundary the repair actually reached.
+# [measured: 1061-magnitude uniform sweep before and after, 2026-09-10]
+var _ES_A = ganita_mat_new(2, 2);
+ganita_mat_set(_ES_A, 0, 0, f64_mul(f64_from(3), 1 << 36));      # 3 * 2^-1038
+ganita_mat_set(_ES_A, 0, 1, f64_mul(f64_from(4), 1 << 36));
+ganita_mat_set(_ES_A, 1, 0, f64_mul(f64_from(4), 1 << 36));
+ganita_mat_set(_ES_A, 1, 1, f64_mul(f64_from(3), 1 << 36));
+var _ES_vals = alloc(16);
+store64(_ES_vals, 0);
+store64(_ES_vals + 8, 0);
+var _ES_vecs = ganita_mat_new(2, 2);
+assert_eq(eigen_qr(_ES_A, 2, 200, _ES_vals, _ES_vecs), HSB_ERR_NONE,
+  "eigen_qr: an all-subnormal symmetric matrix at 2^-1038 converges (it stopped at 2^-1025)");
+
+# ⚠ FOUR MUTANTS SURVIVE THIS BLOCK. Recorded with their reasons rather than
+# tidied away, because a survivor is either an equivalence or a gap and the
+# difference matters. [measured: 11-mutant run over linalg_precision.cyr]
+#
+# (a) NARROWING EITHER BULGE-CHASE TRIGGER from `< F64_TINY` to `== 0` survives,
+#     and this one is a GENUINE GAP, not an equivalence. The subnormal band IS
+#     reachable — a block at ratio c in [2^-537, 2^-511) puts the Givens sum
+#     there — but the QR sweep is SELF-CORRECTING: a single rotation up to 13%
+#     off is absorbed by later iterations and the eigenvalue still lands within
+#     4 ulp, which is as tight as these assertions can go (bit-exactness fails on
+#     3 of 999 ratios on CORRECT code, because the iteration is not bit-
+#     reproducible across scales). Discriminating it would need the rotation
+#     itself observed, and these are inline expressions, not helpers.
+#     [measured: 11-mutant run over linalg_precision.cyr, 2026-09-10]
+#
+# (b) REMOVING THE `+Inf` ARM survives, and that one IS an equivalence today:
+#     post-balancing every bidiagonal entry is bounded by ||A_bal||_F, so the sum
+#     cannot overflow. ⚠ It is kept anyway, for one compare, because that
+#     argument rests entirely on the balancing — and `_lp_pow2_floor` measurably
+#     SKIPS balancing for an all-subnormal matrix (it reads the exponent field,
+#     which is 0 for every subnormal, and returns 1.0). An unreachability
+#     argument that depends on a step which is sometimes skipped is not one to
+#     build on.
+#
+# (c) RESTORING THE `|delta| < EPSILON_F64` SIGN FORCING in the Wilkinson shift
+#     survives, because the regime where the two signs differ materially needs an
+#     `e2` so small that the deflation test — which is RELATIVE — has already
+#     zeroed it. It is removed anyway, and the reason is a coupling worth stating:
+#     the `denom == 0` guard is only sufficient because `|e2/denom| <= 1`, and
+#     that holds only for the TRUE sign, where `denom = sign(delta)*(|delta| + h)`
+#     cannot cancel. With the sign forced, `denom` can be far smaller than `e2`,
+#     `e2/denom` can overflow, and the two-step product stops being bounded. The
+#     guard and the sign are one change, not two.
+
 var r = assert_summary();
 # Clamp before exiting: assert_summary() returns the raw failure COUNT, and a wait
 # status is only 8 bits — an unclamped 256 / 512 / 768 failures would exit 0 and

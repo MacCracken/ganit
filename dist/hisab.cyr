@@ -19038,7 +19038,18 @@ fn _lp_split_zero_diag(diag, superdiag, n, m, U_acc, Vt_acc, p_lo, p_hi) {
         var j = hit + 1;
         while (j <= p_hi) {
             var dj = load64(diag + j * 8);
-            var r = f64_sqrt(f64_add(f64_mul(dj, dj), f64_mul(carry, carry)));
+            # ⛔ 2.17.0 — THE GIVENS RADIUS SQUARED BEFORE SUMMING. Both legs are
+            # degree ONE bidiagonal entries, so below 2^-537 both squares flush
+            # and `r` is exactly 0 — and the very next line breaks out of the
+            # chase, after :477 has ALREADY zeroed the superdiagonal entry. The
+            # mass is simply gone and `svd_golub_kahan` still returns
+            # HSB_ERR_NONE. ⚠ `tol` here is relative to the ACTIVE BLOCK, so for
+            # a block at 1e-200 the true radius is ~188 decades ABOVE tol and the
+            # break is flatly wrong.
+            var r_ss = f64_add(f64_mul(dj, dj), f64_mul(carry, carry));
+            var r = f64_sqrt(r_ss);
+            if (f64_lt(r_ss, F64_TINY) == 1) { r = ganita_f64_hypot(dj, carry); }
+            if (f64_eq(r_ss, F64_POS_INF) == 1) { r = ganita_f64_hypot(dj, carry); }
             if (f64_lt(r, tol) == 1) { break; }
             var cs = f64_div(dj, r);
             var sn = f64_div(carry, r);
@@ -19073,7 +19084,16 @@ fn _lp_split_zero_diag(diag, superdiag, n, m, U_acc, Vt_acc, p_lo, p_hi) {
     var c = p_hi - 1;
     while (c >= p_lo) {
         var dc = load64(diag + c * 8);
-        var r2 = f64_sqrt(f64_add(f64_mul(dc, dc), f64_mul(ccarry, ccarry)));
+        # ⛔ 2.17.0 — the OTHER arm of the same chase, taken when the negligible
+        # diagonal is the LAST in the block. ⚠ Repairing only the arm above
+        # leaves this one live on a fixture one line different: measured, the
+        # :481-only patch leaves 3 of 3 probe magnitudes byte-identical to the
+        # unpatched run.
+        # [measured: 2-arm zero-diagonal probe on the 2.16.0 tree, 2026-09-10]
+        var r2_ss = f64_add(f64_mul(dc, dc), f64_mul(ccarry, ccarry));
+        var r2 = f64_sqrt(r2_ss);
+        if (f64_lt(r2_ss, F64_TINY) == 1) { r2 = ganita_f64_hypot(dc, ccarry); }
+        if (f64_eq(r2_ss, F64_POS_INF) == 1) { r2 = ganita_f64_hypot(dc, ccarry); }
         if (f64_lt(r2, tol) == 1) { break; }
         var cs2 = f64_div(dc, r2);
         var sn2 = f64_div(f64_neg(ccarry), r2);
@@ -19226,12 +19246,27 @@ fn _lp_bidiag_qr(diag, superdiag, n, m, U_acc, Vt_acc, max_iter) {
             var k = p_lo;
             while (k < p_hi) {
                 # Right Givens rotation to zero z (acts on columns k, k+1)
-                var r = f64_sqrt(f64_add(f64_mul(y, y), f64_mul(z, z)));
+                # ⛔ 2.17.0 — AND THE CLAIM BELOW WAS FALSE IN EXACTLY ONE BAND,
+                # WHICH IS HOW THIS SITE HID. `|y| <= r` holds only while `r` is
+                # the true radius; when both squares flush, `r` is 0 while `y` is
+                # not, the invariant is violated, and the "only an exact zero
+                # fails" test fires on a perfectly ordinary rotation.
+                # ⚠ HONEST LIMIT, STATED SO THIS IS NOT READ AS A FULL REPAIR:
+                # `y` and `z` are themselves degree-TWO products formed at :639
+                # and :661-664, so this recovers bidiagonal entries in
+                # (2^-537, 2^-268.5] and NOTHING below — beneath 2^-537 the
+                # products have already arrived as exact zero and the sqrt is no
+                # longer where the information was lost. Reaching further needs
+                # an implicit (scaled) Wilkinson shift instead of forming B^T*B,
+                # which is an algorithm change and is on the roadmap.
+                var r_ss = f64_add(f64_mul(y, y), f64_mul(z, z));
+                var r = f64_sqrt(r_ss);
+                if (f64_lt(r_ss, F64_TINY) == 1) { r = ganita_f64_hypot(y, z); }
+                if (f64_eq(r_ss, F64_POS_INF) == 1) { r = ganita_f64_hypot(y, z); }
                 # ⭐ |y| <= r and |z| <= r by construction, so `y/r` and `z/r`
                 # are in [-1,1] and CANNOT overflow however small r is — the only
-                # input that fails is an exact zero. DBL_MIN is behaviour-neutral
-                # here (a subnormal r is unreachable) but over-strict by this
-                # project's own rule, so the test is the exact one.
+                # input that fails is an exact zero. That is TRUE now that `r` is
+                # the true radius; it was not before.
                 var cs = f64_div(y, r);
                 var sn = f64_div(f64_neg(z), r);
                 if (f64_gt(r, 0) == 0) {
@@ -19273,7 +19308,20 @@ fn _lp_bidiag_qr(diag, superdiag, n, m, U_acc, Vt_acc, max_iter) {
                 # Left Givens rotation to zero the bulge (acts on rows k, k+1)
                 y = load64(diag + k * 8);
                 z = bulge;
-                r = f64_sqrt(f64_add(f64_mul(y, y), f64_mul(z, z)));
+                # ⛔ 2.17.0 — same class, but degree ONE here (y is a diagonal
+                # entry, z the bulge), so this one reaches the full 2^-537 floor.
+                # ⚠ EXPECT THE FAILURE TO GET LOUDER RATHER THAN DISAPPEAR IN THE
+                # DEEPEST BAND, and do not read that as a regression: below
+                # 2^-537 the right rotation's operands have already flushed, so
+                # its rotation stays the identity, the sweep becomes a
+                # sign-normalising no-op and `svd_golub_kahan` returns
+                # HSB_ERR_NO_CONVERGENCE instead of a silent spurious zero.
+                # Trading a silent wrong answer for a loud rc is the correct
+                # outcome of repairing this line.
+                var l_ss = f64_add(f64_mul(y, y), f64_mul(z, z));
+                r = f64_sqrt(l_ss);
+                if (f64_lt(l_ss, F64_TINY) == 1) { r = ganita_f64_hypot(y, z); }
+                if (f64_eq(l_ss, F64_POS_INF) == 1) { r = ganita_f64_hypot(y, z); }
                 # ⭐ Same as the right rotation above: the quotients are bounded
                 # by 1, so only an exact zero fails.
                 cs = f64_div(y, r);
@@ -19686,24 +19734,44 @@ fn _lp_tridiag_qr(diag, offdiag, n, Q, max_iter) {
             var e2 = load64(offdiag + p_hi * 8);
 
             var delta = f64_mul(F64_HALF, f64_sub(d1, d2));
-            var e2sq = f64_mul(e2, e2);
 
             # mu = d2 - e2^2 / (delta + sign(delta) * sqrt(delta^2 + e2^2))
-            var denom_inner = f64_sqrt(f64_add(f64_mul(delta, delta), e2sq));
+            #
+            # ⛔ 2.17.0 — THIS FORMED `e2*e2` AND THAT IS WHERE THE SPECTRUM WENT.
+            # `e2` is a degree-ONE tridiagonal entry, so for a sub-block below
+            # 2^-537 the square flushed to exactly 0, `mu` collapsed to `d2`, and
+            # the shifted QR step became an UNSHIFTED one. On a symmetric block
+            # with equal diagonals that step is a FIXED POINT — the rotation
+            # swaps two equal entries and flips a sign forever — so `eigen_qr`
+            # burned its whole budget and returned HSB_ERR_NO_CONVERGENCE,
+            # losing the LARGE block's eigenvalues along with the small one.
+            # Measured on a 4x4 whose second block sits at ratio c: **463 of 998
+            # ratios lost, first at c = 2^-538.**
+            # ⚠ THE 2026-09-09 CENSUS CLASSIFIED THE `f64_sqrt` ON THIS LINE AS
+            # SAFE_UNREACHABLE AND IT WAS RIGHT ABOUT THE SQRT — rescaling that
+            # recovers nothing, because the value is gone one line earlier. What
+            # it missed is that `mu = d2` is not a harmless fallback. The site
+            # surfaced because repairing the Givens radius 60 lines below changed
+            # NOTHING measurable: a repair that moves no number is pointing at a
+            # second defect, which is the 2.12.0 lesson repeating.
+            # ⭐ NEVER FORM e2². The denominator has magnitude at least |e2|, so
+            # `e2/denom` is bounded by 1 and `e2 * (e2/denom)` is bounded by |e2|
+            # — both survive wherever `e2` itself does, and the identity is exact.
+            # ⭐ And the sign trick is now the textbook one: `denom` is
+            # `sign(delta) * (|delta| + hypot(delta, e2))`, which cannot cancel.
+            # The absolute `|delta| < EPSILON_F64` test that used to force the
+            # sign to +1 is GONE — it was an epsilon-class guard on a degree-one
+            # quantity, and `_lp_sign(0)` already returns +1, so the case it was
+            # written for was covered without it.
+            # [measured: 998-ratio block sweep on eigen_qr before and after]
+            var denom_inner = ganita_f64_hypot(delta, e2);
             var sgn_delta = _lp_sign(delta);
-            # Handle delta == 0: use sign +1
-            if (f64_lt(f64_abs(delta), EPSILON_F64) == 1) {
-                sgn_delta = F64_ONE;
-            }
             var denom = f64_add(delta, f64_mul(sgn_delta, denom_inner));
             var mu = d2;
-            # ⛔ `denom` is a MATRIX ENTRY (degree 1) against an absolute 1e-12,
-            # so on a small matrix the Wilkinson shift was silently dropped and
-            # the QR iteration fell back to an unshifted, far slower one.
-            # ⚠ DBL_MIN, not an exact zero: `e2sq/denom` has an unbounded
-            # numerator, so a subnormal denominator can overflow.
-            if (f64_lt(f64_abs(denom), F64_TINY) == 0) {
-                mu = f64_sub(d2, f64_div(e2sq, denom));
+            # The only input with no shift is an exactly zero denominator, which
+            # needs delta == 0 and e2 == 0 — a block that has already deflated.
+            if (f64_eq(denom, 0) == 0) {
+                mu = f64_sub(d2, f64_mul(e2, f64_div(e2, denom)));
             }
 
             # Implicit QR step: chase bulge from p_lo to p_hi
@@ -19713,12 +19781,27 @@ fn _lp_tridiag_qr(diag, offdiag, n, Q, max_iter) {
             var k = p_lo;
             while (k < p_hi) {
                 # Givens rotation to zero z
-                var r = f64_sqrt(f64_add(f64_mul(x, x), f64_mul(z, z)));
+                # ⛔ 2.17.0 — the eigen side of the same defect. Measured on a
+                # 4x4 whose second block sits at ratio c: `eigen_qr` loses the
+                # small block's eigenvalues entirely for **463 of 998 ratios**,
+                # first at c = 2^-538, returning HSB_ERR_NO_CONVERGENCE — so the
+                # caller loses the LARGE block's eigenvalues too, which were
+                # perfectly computable. ⚠ The `p_lo` scan here is RELATIVE, so a
+                # small sub-block is reachable without any exotic input; a
+                # uniform scale would be bit-exactly invariant and prove nothing.
+                # [measured: 998-ratio block sweep before and after, 2026-09-10]
+                var r_ss = f64_add(f64_mul(x, x), f64_mul(z, z));
+                var r = f64_sqrt(r_ss);
+                if (f64_lt(r_ss, F64_TINY) == 1) { r = ganita_f64_hypot(x, z); }
+                if (f64_eq(r_ss, F64_POS_INF) == 1) { r = ganita_f64_hypot(x, z); }
                 var cs = F64_ONE;
                 var sn = f64_from(0);
                 # ⭐ |x| <= r and |z| <= r, so the rotation is well defined for
                 # every non-zero r. A DBL_MIN floor would still fabricate the
                 # identity rotation over a band where the division succeeds.
+                # ⚠ That sentence was FALSE in the flush band until the lines
+                # above: `r` was 0 with `x` non-zero, so the guard fired on a
+                # well-defined rotation. The comment is what the code does now.
                 if (f64_gt(r, 0) == 1) {
                     cs = f64_div(x, r);
                     sn = f64_div(z, r);
