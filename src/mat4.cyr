@@ -147,10 +147,16 @@ fn m4_mul_vec4(m, v) {
 fn m4_transform_point(m, v) {
     var p = m4_mul_vec4(m, hvec4_from_vec3(v, F64_ONE));
     var pw = HVec4_w(p);
-    if (f64_lt(f64_abs(pw), EPSILON_F64) == 1) {
+    # ⛔ `pw` is the homogeneous w of M·(v,1) and carries the matrix's own scale,
+    # so an absolute 1e-12 skipped the perspective divide for whole classes of
+    # legitimate projections — and silently returned the UNDIVIDED clip-space
+    # coordinates as though they were the projected point, with no rc to say so.
+    # ⭐ The divide fails exactly when its reciprocal is not finite, which is the
+    # genuine w = 0 point-at-infinity case the fallback is for.
+    var inv_w = f64_div(F64_ONE, pw);
+    if (f64_lt(f64_abs(inv_w), F64_POS_INF) == 0) {
         return hvec3_new(HVec4_x(p), HVec4_y(p), HVec4_z(p));
     }
-    var inv_w = f64_div(F64_ONE, pw);
     return hvec3_new(f64_mul(HVec4_x(p), inv_w),
       f64_mul(HVec4_y(p), inv_w),
       f64_mul(HVec4_z(p), inv_w));
@@ -249,8 +255,12 @@ fn m4_inverse(m) {
     var det = f64_add(f64_sub(f64_add(f64_mul(s0, c5), f64_mul(s2, c3)), f64_mul(s1, c4)),
       f64_sub(f64_add(f64_mul(s5, c0), f64_mul(s3, c2)), f64_mul(s4, c1)));
 
-    if (f64_lt(f64_abs(det), EPSILON_F64) == 1) { return m4_identity(); }
+    # ⛔ Same class as m3_inverse, one degree worse: `det` is degree FOUR here, so
+    # det(k·M) = k⁴·det(M), and an absolute 1e-12 declared ordinary matrices
+    # singular and handed back `m4_identity()` — well-formed, unit-determinant,
+    # no error channel. Guard the reciprocal that actually follows.
     var inv_det = f64_div(F64_ONE, det);
+    if (f64_lt(f64_abs(inv_det), F64_POS_INF) == 0) { return m4_identity(); }
 
     var r = m4_new();
     m4_set(r, 0, 0, f64_mul(inv_det, f64_add(f64_sub(f64_mul(m11, c5), f64_mul(m12, c4)), f64_mul(m13, c3))));

@@ -339,7 +339,22 @@ fn sectional_curvature(riemann, metric, u, v, dim) {
     var vv = _dg_inner(metric, v, v, dim);
     var uv = _dg_inner(metric, u, v, dim);
     var denom = f64_sub(f64_mul(uu, vv), f64_mul(uv, uv));
-    if (f64_lt(f64_abs(denom), EPSILON_F64) == 1) { return 0; }  # degenerate plane
+    # ⛔ ONE LINE DOING TWO JOBS, AND FAILING BOTH. `denom` = |u∧v|² is degree
+    # FOUR in the vectors and degree TWO in the metric, so an absolute 1e-12 called
+    # ordinary planes degenerate — and it returned exactly 0.0, which is the value
+    # meaning FLAT SPACE, through a bare f64 with no error channel.
+    # ⭐ (1) DEGENERACY is a question about the ANGLE, so ask it as one: the ratio
+    # denom/(uu*vv) is sin²(angle), dimensionless and scale-free by construction,
+    # because both sides carry identical dimensions and cancel.
+    if (f64_lt(f64_abs(denom), f64_mul(EPSILON_F64, f64_abs(f64_mul(uu, vv)))) == 1) {
+        return 0;
+    }
+    # ⚠ (2) AND THE BACKSTOP IS LOAD-BEARING, not belt-and-braces. In LORENTZIAN
+    # signature a null vector makes uu = vv = uv = 0, so denom = 0 AND uu*vv = 0 —
+    # the relative test above asks `0 < 0`, which is false, and the division would
+    # be 0/0. This is a metric-signature case, not a rounding case.
+    # [measured: g = diag(-1,1), u = v = (1,1) — docs/audit/2026-09-09-epsilon-open.json]
+    if (f64_lt(f64_abs(denom), F64_TINY) == 1) { return 0; }
     return f64_div(num, denom);
 }
 

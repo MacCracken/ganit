@@ -1839,6 +1839,44 @@ var sc_us = alloc(16); store64(sc_us, F64_ONE); store64(sc_us + 8, F64_ONE);
 var sc_vs = alloc(16); store64(sc_vs, F64_ONE); store64(sc_vs + 8, f64_neg(F64_ONE));
 assert_eq(sectional_curvature(sc_rie, sc_id, sc_us, sc_vs, 2), f64_from(1), "sectional: plane-independent (skew) = 1");
 
+# ================================================================
+# 2.15.0 — sectional_curvature: the plane is a DIRECTION, not a size
+# ================================================================
+# ⛔ `denom` = |u∧v|² is degree FOUR in the vectors, and it was tested against an
+# absolute 1e-12 — so scaling the SAME plane's spanning vectors down made the
+# curvature of that plane change. And the fallback returned exactly 0.0, which is
+# the value meaning FLAT SPACE, through a bare f64 with no error channel.
+# ⭐ K(u,v) depends only on the PLANE, so it is invariant under u -> k*u, v -> k*v.
+# The shipped guard breaks at k^4 < 1e-12, i.e. k < 1e-3 — three decades in.
+var _SK_RUN = 0;
+var _SK_BAD = 0;
+for (var _sk_e = 0; _sk_e < 250; _sk_e = _sk_e + 1) {
+    var _sk_k = (1023 - _sk_e) << 52;                 # 2^-e
+    var _sk_u = alloc(16); store64(_sk_u, _sk_k); store64(_sk_u + 8, 0);
+    var _sk_v = alloc(16); store64(_sk_v, 0); store64(_sk_v + 8, _sk_k);
+    _SK_RUN = _SK_RUN + 1;
+    if (sectional_curvature(sc_rie, sc_id, _sk_u, _sk_v, 2) != 0x3FF0000000000000) {
+        _SK_BAD = _SK_BAD + 1;
+    }
+}
+# ⚠ 250 and not more: denom is k^4, so past ~2^-255 it goes subnormal and the
+# limitation becomes f64's, not this function's.
+assert_eq(_SK_RUN, 250, "the sectional_curvature scale sweep actually ran 250 scales");
+assert_eq(_SK_BAD, 0,
+  "sectional_curvature: K = 1 for the same plane at every spanning-vector scale");
+
+# ⭐ THE LORENTZIAN BACKSTOP, and it is load-bearing rather than belt-and-braces.
+# The degeneracy test is now RELATIVE — denom/(uu*vv) is sin^2(angle) — but in a
+# metric of signature (-,+) a NULL vector gives uu = vv = uv = 0, so denom = 0 AND
+# uu*vv = 0: the relative test asks `0 < 0`, which is false, and the division
+# would be 0/0. This is a signature case, not a rounding case.
+var _sk_g = alloc(32);
+store64(_sk_g, f64_neg(F64_ONE)); store64(_sk_g + 8, 0);
+store64(_sk_g + 16, 0); store64(_sk_g + 24, F64_ONE);
+var _sk_n = alloc(16); store64(_sk_n, F64_ONE); store64(_sk_n + 8, F64_ONE);
+assert_eq(sectional_curvature(sc_rie, _sk_g, _sk_n, _sk_n, 2), 0,
+  "sectional_curvature: a null vector in Lorentzian signature returns 0, not NaN");
+
 # Radius-2 sphere: same (1,3) Riemann, metric = diag(r²) = diag(4,4) → K = 1/r² = 1/4.
 var sc_g4 = alloc(32);
 store64(sc_g4, f64_from(4)); store64(sc_g4 + 8, 0); store64(sc_g4 + 16, 0); store64(sc_g4 + 24, f64_from(4));

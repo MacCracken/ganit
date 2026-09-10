@@ -1290,6 +1290,131 @@ assert(hvec3_length(hvec3_new((1023 - 537) << 52, 0, 0)) != 0,
 assert_eq(hvec3_length(hvec3_new((1023 - 538) << 52, 0, 0)), 0,
   "hvec3_length: one step smaller underflows to exactly 0, far above DBL_MIN");
 
+# ================================================================
+# 2.15.0 — m3_inverse / m4_inverse / m4_transform_point
+# ================================================================
+# ⛔ ALL THREE FABRICATED SOMETHING WELL-FORMED. `m3_inverse` and `m4_inverse`
+# returned the IDENTITY — full-rank, orthogonal, unit-determinant — through a bare
+# pointer with no rc, so a caller cannot tell "here is your inverse" from "I could
+# not compute one"; `m4_transform_point` silently returned the UNDIVIDED
+# clip-space coordinates as though they were the projected point. These are three
+# of the sites the 2026-08-11 audit named, and they are the reason a *degree*
+# matters: `det(k·M)` is k³·det(M) for a 3x3 and k⁴·det(M) for a 4x4, so the same
+# absolute 1e-12 bites at completely different scales in the two functions.
+#
+# ⭐ Each forms an explicit reciprocal on the very next line, so the exact guard is
+# that reciprocal — finite for every determinant whose inverse exists, subnormal
+# included, and false for NaN, which `f64_lt` let straight through.
+# [measured: mutation-proven, sweeps below; shipped 1e-12 dies at k = 2^-14 (3x3)]
+
+test_group("mat 2.15.0: inverse and perspective divide are scale-covariant");
+
+# M1 = [[1,0,0],[0,1,0],[1,1,1]] (col,row indexing), det = 1, and
+# M1^-1 = [[1,0,0],[0,1,0],[-1,-1,1]]. Scaling by k gives det = k^3 and
+# (k*M1)^-1 = (1/k)*M1^-1 — every entry a power of two, so BIT-EXACT.
+var _MI_RUN = 0;
+var _MI_BAD = 0;
+for (var _mi_e = 0; _mi_e < 340; _mi_e = _mi_e + 1) {
+    var _mi_k = (1023 - _mi_e) << 52;            # 2^-e
+    var _mi_ik = (1023 + _mi_e) << 52;           # 2^+e = 1/k
+    var _mi_m = m3_new();
+    m3_set(_mi_m, 0, 0, _mi_k); m3_set(_mi_m, 1, 1, _mi_k); m3_set(_mi_m, 2, 2, _mi_k);
+    m3_set(_mi_m, 0, 2, _mi_k); m3_set(_mi_m, 1, 2, _mi_k);
+    var _mi_r = m3_inverse(_mi_m);
+    _MI_RUN = _MI_RUN + 1;
+    if (m3_get(_mi_r, 0, 0) != _mi_ik) { _MI_BAD = _MI_BAD + 1; }
+    if (m3_get(_mi_r, 2, 2) != _mi_ik) { _MI_BAD = _MI_BAD + 1; }
+    if (m3_get(_mi_r, 0, 2) != f64_neg(_mi_ik)) { _MI_BAD = _MI_BAD + 1; }
+}
+# ⚠ 340 is where a POWER-OF-TWO sweep stops being informative, not where the
+# function stops working — a subnormal determinant is still perfectly invertible.
+# The band that separates the two candidate guards is reached directly below.
+assert_eq(_MI_RUN, 340, "the m3_inverse scale sweep actually ran 340 scales");
+assert_eq(_MI_BAD, 0,
+  "m3_inverse: (k*M)^-1 = (1/k)*M^-1 bit-exact for k from 2^0 down to 2^-339");
+
+# 4x4: det = k^4, so the honest floor is a quarter of 1022, not a third.
+var _M4_RUN = 0;
+var _M4_BAD = 0;
+for (var _m4_e = 0; _m4_e < 255; _m4_e = _m4_e + 1) {
+    var _m4_k = (1023 - _m4_e) << 52;
+    var _m4_ik = (1023 + _m4_e) << 52;
+    var _m4_m = m4_new();
+    m4_set(_m4_m, 0, 0, _m4_k); m4_set(_m4_m, 1, 1, _m4_k);
+    m4_set(_m4_m, 2, 2, _m4_k); m4_set(_m4_m, 3, 3, _m4_k);
+    m4_set(_m4_m, 0, 3, _m4_k); m4_set(_m4_m, 1, 3, _m4_k); m4_set(_m4_m, 2, 3, _m4_k);
+    var _m4_r = m4_inverse(_m4_m);
+    _M4_RUN = _M4_RUN + 1;
+    if (m4_get(_m4_r, 0, 0) != _m4_ik) { _M4_BAD = _M4_BAD + 1; }
+    if (m4_get(_m4_r, 3, 3) != _m4_ik) { _M4_BAD = _M4_BAD + 1; }
+    if (m4_get(_m4_r, 0, 3) != f64_neg(_m4_ik)) { _M4_BAD = _M4_BAD + 1; }
+}
+assert_eq(_M4_RUN, 255, "the m4_inverse scale sweep actually ran 255 scales");
+assert_eq(_M4_BAD, 0,
+  "m4_inverse: (k*M)^-1 = (1/k)*M^-1 bit-exact for k from 2^0 down to 2^-254");
+
+# m4_transform_point: for M = k*I the perspective divide by pw = k cancels the
+# scale exactly, so the answer is the INPUT POINT at every k. The shipped guard
+# skipped the divide below 1e-12 and returned k*v — off by 12 orders of magnitude.
+var _MT_RUN = 0;
+var _MT_BAD = 0;
+for (var _mt_e = 0; _mt_e < 500; _mt_e = _mt_e + 1) {
+    var _mt_k = (1023 - _mt_e) << 52;
+    var _mt_m = m4_new();
+    m4_set(_mt_m, 0, 0, _mt_k); m4_set(_mt_m, 1, 1, _mt_k);
+    m4_set(_mt_m, 2, 2, _mt_k); m4_set(_mt_m, 3, 3, _mt_k);
+    var _mt_p = m4_transform_point(_mt_m, hvec3_new(F64_TWO, f64_from(4), f64_from(8)));
+    _MT_RUN = _MT_RUN + 1;
+    if (HVec3_x(_mt_p) != 0x4000000000000000) { _MT_BAD = _MT_BAD + 1; }
+    if (HVec3_z(_mt_p) != 0x4020000000000000) { _MT_BAD = _MT_BAD + 1; }
+}
+assert_eq(_MT_RUN, 500, "the m4_transform_point scale sweep actually ran 500 scales");
+assert_eq(_MT_BAD, 0,
+  "m4_transform_point: M = k*I returns the point unchanged at every k to 2^-499");
+
+# ⭐ ANTI-DELETION. A genuinely singular matrix must still take its fallback, and
+# a w = 0 point at infinity must still skip the divide.
+var _ms_m = m3_new();
+m3_set(_ms_m, 0, 0, F64_ONE); m3_set(_ms_m, 1, 1, F64_ONE);
+assert_eq(m3_get(m3_inverse(_ms_m), 2, 2), 0x3FF0000000000000,
+  "m3_inverse: a singular matrix still returns the identity fallback");
+var _m4s = m4_new();
+m4_set(_m4s, 0, 0, F64_ONE);
+assert_eq(m4_get(m4_inverse(_m4s), 2, 2), 0x3FF0000000000000,
+  "m4_inverse: a singular matrix still returns the identity fallback");
+var _mtw = m4_new();
+m4_set(_mtw, 0, 0, F64_ONE); m4_set(_mtw, 1, 1, F64_ONE); m4_set(_mtw, 2, 2, F64_ONE);
+assert_eq(HVec3_x(m4_transform_point(_mtw, hvec3_new(F64_TWO, 0, 0))), 0x4000000000000000,
+  "m4_transform_point: w = 0 still returns the undivided coordinates");
+
+# ⭐ THE SUBNORMAL BAND — the only place `F64_TINY` and the finite-reciprocal test
+# disagree, and a decade sweep cannot reach it. With det = 2^-1023 the determinant
+# is SUBNORMAL, so a DBL_MIN guard declares the matrix singular and hands back the
+# identity — but 1/det = 2^1023 is finite and the inverse is exact. ⚠ The power-of-
+# two sweeps above cannot land here: det is k^3 and k^4 there, so it steps straight
+# over the one binade that matters. Measured — without these three, `F64_TINY`
+# survived all nine mutants of this block.
+# [measured: 9-mutant run over mat3.cyr/mat4.cyr, 3 survivors before this]
+var _mb_tiny = 0x0008000000000000;               # 2^-1023, one binade below DBL_MIN
+var _mb_huge = (1023 + 1023) << 52;              # 2^+1023, its exact reciprocal
+var _mb_m3 = m3_new();
+m3_set(_mb_m3, 0, 0, _mb_tiny); m3_set(_mb_m3, 1, 1, F64_ONE); m3_set(_mb_m3, 2, 2, F64_ONE);
+assert_eq(m3_get(m3_inverse(_mb_m3), 0, 0), _mb_huge,
+  "m3_inverse: a subnormal determinant is still invertible, exactly");
+var _mb_m4 = m4_new();
+m4_set(_mb_m4, 0, 0, _mb_tiny); m4_set(_mb_m4, 1, 1, F64_ONE);
+m4_set(_mb_m4, 2, 2, F64_ONE); m4_set(_mb_m4, 3, 3, F64_ONE);
+assert_eq(m4_get(m4_inverse(_mb_m4), 0, 0), _mb_huge,
+  "m4_inverse: a subnormal determinant is still invertible, exactly");
+# For the perspective divide the quantity is LINEAR, so scale every diagonal entry
+# together: p = 2^-1023 * v and pw = 2^-1023 cancel exactly back to v.
+var _mb_mt = m4_new();
+m4_set(_mb_mt, 0, 0, _mb_tiny); m4_set(_mb_mt, 1, 1, _mb_tiny);
+m4_set(_mb_mt, 2, 2, _mb_tiny); m4_set(_mb_mt, 3, 3, _mb_tiny);
+assert_eq(HVec3_x(m4_transform_point(_mb_mt, hvec3_new(F64_TWO, 0, 0))),
+  0x4000000000000000,
+  "m4_transform_point: a subnormal w still divides, it is not a point at infinity");
+
 assert_eq(hisab_is_err(0), 0, "hisab_is_err(0) is false");
 assert_eq(hisab_is_err(0 - 5), 1, "hisab_is_err(negative) is true");
 assert(f64_lt(f64_abs(f64_tan(0)), LOOSE_TOL) == 1, "f64_tan(0) = 0");

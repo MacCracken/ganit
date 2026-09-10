@@ -120,8 +120,18 @@ fn m3_determinant(m) {
 #must_use
 fn m3_inverse(m) {
     var det = m3_determinant(m);
-    if (f64_lt(f64_abs(det), EPSILON_F64) == 1) { return m3_identity(); }
+    # ⛔ `det` is a degree-THREE form in the matrix entries — det(k·M) = k³·det(M)
+    # — and this compared it against an absolute 1e-12, so a well-conditioned
+    # matrix in small units was declared singular. The fallback makes it worse:
+    # `m3_identity()` is full-rank, orthogonal and unit-determinant, returned
+    # through a bare pointer with no rc, so the caller cannot tell "here is your
+    # inverse" from "I could not compute one". ⚠ m3_normal_matrix inherits it.
+    # ⭐ The operation is the RECIPROCAL on the next line, so test that: it is
+    # finite for every det whose inverse exists — subnormal included — and the
+    # comparison also rejects a NaN determinant, which `f64_lt` let through.
+    # [measured: tests/modules.tcyr matrix-scale sweep, 2026-09-10]
     var inv_det = f64_div(F64_ONE, det);
+    if (f64_lt(f64_abs(inv_det), F64_POS_INF) == 0) { return m3_identity(); }
     var m00 = m3_get(m, 0, 0); var m01 = m3_get(m, 0, 1); var m02 = m3_get(m, 0, 2);
     var m10 = m3_get(m, 1, 0); var m11 = m3_get(m, 1, 1); var m12 = m3_get(m, 1, 2);
     var m20 = m3_get(m, 2, 0); var m21 = m3_get(m, 2, 1); var m22 = m3_get(m, 2, 2);

@@ -118,7 +118,14 @@ fn hisab_lerp(a, b, t) {
 
 fn hisab_inverse_lerp(a, b, value) {
     var denom = f64_sub(b, a);
-    if (f64_lt(f64_abs(denom), EPSILON_F64) == 1) { return 0; }
+    # ⛔ `denom` is the WIDTH of the caller's interval, in the caller's own units —
+    # metres, seconds, kelvin, pixels — tested against an absolute 1e-12. And the
+    # fallback is indistinguishable from success: 0.0 is also the correct answer
+    # for `value == a`, so a caller cannot tell a refusal from a result.
+    # ⚠ The division is by `denom` directly with an unbounded numerator, so the
+    # reciprocal test used elsewhere in this release does not apply — the guard is
+    # DBL_MIN, the point below which the division itself is undefined.
+    if (f64_lt(f64_abs(denom), F64_TINY) == 1) { return 0; }
     return f64_div(f64_sub(value, a), denom);
 }
 
@@ -166,8 +173,12 @@ fn m4_flip_handedness_z(m) {
 fn world_to_screen(point, mvp, vw, vh) {
     var clip = m4_mul_vec4(mvp, hvec4_from_vec3(point, F64_ONE));
     var cw = HVec4_w(clip);
-    if (f64_lt(f64_abs(cw), EPSILON_F64) == 1) { return hvec3_zero(); }  # Point at camera
+    # ⛔ `cw` is the homogeneous scale of the clip vector and carries the MVP's own
+    # scale, so an absolute 1e-12 refused ordinary projections — and returned
+    # `hvec3_zero()`, which is a perfectly legitimate screen position (left edge,
+    # top edge, near plane). Guard the reciprocal that is formed on the next line.
     var inv_w = f64_div(F64_ONE, cw);
+    if (f64_lt(f64_abs(inv_w), F64_POS_INF) == 0) { return hvec3_zero(); }  # at camera
     var nx = f64_mul(HVec4_x(clip), inv_w);
     var ny = f64_mul(HVec4_y(clip), inv_w);
     var nz = f64_mul(HVec4_z(clip), inv_w);

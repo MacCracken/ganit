@@ -1115,7 +1115,13 @@ fn num_tridiag_solve(a, b, c, d, n, out) {
 
     if (n == 1) {
         var b0 = load64(b);
-        if (f64_lt(f64_abs(b0), EPSILON_F64) == 1) {
+        # ⛔ A tridiagonal PIVOT, in the caller's matrix units, against an
+        # absolute 1e-12 — so a well-conditioned system expressed in small units
+        # was refused as singular. ⚠ Unlike most of this class it does not
+        # fabricate: it returns HSB_ERR_DIVISION_BY_ZERO and leaves `out`
+        # untouched, so the defect is a false REFUSAL of a solvable system.
+        # [measured: docs/audit/2026-09-09-epsilon-open.json]
+        if (f64_lt(f64_abs(b0), F64_TINY) == 1) {
             return HSB_ERR_DIVISION_BY_ZERO;
         }
         store64(out, f64_div(load64(d), b0));
@@ -1134,7 +1140,8 @@ fn num_tridiag_solve(a, b, c, d, n, out) {
 
     # Forward sweep
     var b0 = load64(b);
-    if (f64_lt(f64_abs(b0), EPSILON_F64) == 1) {
+    # ⛔ Same class, the forward sweep's leading pivot. See the n == 1 path above.
+    if (f64_lt(f64_abs(b0), F64_TINY) == 1) {
         return HSB_ERR_DIVISION_BY_ZERO;
     }
 
@@ -1154,7 +1161,10 @@ fn num_tridiag_solve(a, b, c, d, n, out) {
         # m = a_i / (b_i - a_i * c'[i-1])  ... wait, standard Thomas:
         # denom = b[i] - a[i] * c'[i-1]
         var denom = f64_sub(bi, f64_mul(ai, cpm1));
-        if (f64_lt(f64_abs(denom), EPSILON_F64) == 1) {
+        # ⛔ The Thomas-eliminated pivot. Same class again, and this one is inside
+        # the loop, so an absolute cut can refuse partway through a system it had
+        # already begun solving.
+        if (f64_lt(f64_abs(denom), F64_TINY) == 1) {
             return HSB_ERR_DIVISION_BY_ZERO;
         }
 

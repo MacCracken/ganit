@@ -54,8 +54,19 @@ tree), and the four `geo.cyr` squared-length guards. The same lesson as 2.12.0's
 ## Still open — 74 confirmed defects
 
 Not repaired, not refuted. Each has a verified `guarded_quantity`, a
-`correct_threshold` and a bracketing `scale_test` recorded in the run journal at
-`.claude/.../workflows/wf_1d8434cc-58d/journal.jsonl`.
+`correct_threshold` and a bracketing `scale_test`.
+
+⭐ **The full evidence is committed beside this file** as
+[`2026-09-09-epsilon-open.json`](2026-09-09-epsilon-open.json) — 74 entries, every field
+as the verifier wrote it. It was extracted from the run journal at
+`.claude/.../workflows/wf_1d8434cc-58d/journal.jsonl`, which lives outside the repo
+and is not durable; the census cost ~12.5M subagent tokens to produce and would
+have to be re-run from scratch if that journal were lost.
+
+⚠ **Re-locate each site by its quoted guard text, not by its line number.** The
+numbers are as of the 2.13.0/2.14.0 tree, several were already corrected by the
+verifier against stale triage output, and 2.14.0's own repairs shifted lines in
+`geo.cyr`, `calc_ext.cyr`, `geo_diff.cyr` and the three vector modules.
 
 | Module | Open | Functions |
 |---|---|---|

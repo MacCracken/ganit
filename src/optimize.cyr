@@ -309,7 +309,11 @@ fn opt_conjugate_gradient(f, grad, x0, n, tol, max_iter, out_x, out_fmin) {
         # Polak-Ribiere+ beta (strictly superior to Fletcher-Reeves)
         # beta = max(0, dot(g_new, g_new - g_old) / dot(g_old, g_old))
         var beta = _OPT_F64_ZERO;
-        if (f64_lt(EPSILON_F64, gg_old) == 1) {
+        # ⛔ `gg_old` = ||g_old||² carries the objective's units squared over the
+        # variables' squared, so an absolute 1e-12 silently zeroed beta — turning
+        # Polak-Ribiere back into steepest descent — for any problem scaled small.
+        # The only thing that fails is the division, at a zero denominator.
+        if (f64_lt(F64_TINY, gg_old) == 1) {
             # Compute g_new - g_old dot g_new
             var pr_dot = _OPT_F64_ZERO;
             var bi = 0;
@@ -439,7 +443,20 @@ fn opt_bfgs(f, grad, x0, n, tol, max_iter, out_x, out_fmin) {
         var sy = _opt_dot(s, y, n);
 
         # BFGS update of H_inv (skip if curvature condition fails)
-        if (f64_lt(EPSILON_F64, sy) == 1) {
+        # ⭐ THE CURVATURE TEST IS A COSINE, SO ASK IT AS ONE. `sy` = s·y has units
+        # [f], so an absolute 1e-12 rejected or accepted the same geometry
+        # depending on the objective's scale. ⚠ And the obvious repairs are BOTH
+        # insufficient, which is measured rather than argued: a bare sign test and
+        # a DBL_MIN test both accept a NEAR-ORTHOGONAL pair with sy = 1e-300 at
+        # ||s|| = ||y|| = 1 — catastrophic cancellation in the dot product, not
+        # smallness of scale — giving rho = 1e300 and a -inf that poisons q and
+        # hence x. Only the RATIO sees it.
+        # ⭐ sy/(||s||*||y||) is a normalised cosine, bounded in [-1,1] and
+        # dimensionless, which is precisely the case error.cyr reserves
+        # EPSILON_F64 for. The constant is unchanged; what changes is what it is
+        # compared against. [measured: docs/audit/2026-09-09-epsilon-open.json]
+        if (f64_lt(f64_mul(EPSILON_F64, f64_mul(_opt_norm(s, n), _opt_norm(y, n))),
+            sy) == 1) {
             var rho = f64_div(_OPT_F64_ONE, sy);
 
             # hy = H_inv * y
@@ -606,9 +623,13 @@ fn opt_lbfgs(f, grad, x0, n, m, tol, max_iter, out_x, out_fmin) {
             var s_newest = newest_base;
             var y_newest = newest_base + n * 8;
             var yy = _opt_dot(y_newest, y_newest, n);
-            if (f64_lt(EPSILON_F64, yy) == 1) {
-                var rho_newest = load64(newest_base + 2 * n * 8);
-                var gamma = f64_div(_OPT_F64_ONE, f64_mul(rho_newest, yy));
+            # ⛔ The guard tested `yy` while the DIVISION is by `rho_newest * yy`,
+            # so it was guarding the wrong quantity as well as at the wrong scale.
+            # Test what is actually divided.
+            var rho_newest = load64(newest_base + 2 * n * 8);
+            var gden = f64_mul(rho_newest, yy);
+            if (f64_lt(F64_TINY, gden) == 1) {
+                var gamma = f64_div(_OPT_F64_ONE, gden);
                 var vi = 0;
                 while (vi < n) {
                     var qv = load64(q + vi * 8);
@@ -672,7 +693,20 @@ fn opt_lbfgs(f, grad, x0, n, m, tol, max_iter, out_x, out_fmin) {
 
         var sy = _opt_dot(s_k, y_k, n);
 
-        if (f64_lt(EPSILON_F64, sy) == 1) {
+        # ⭐ THE CURVATURE TEST IS A COSINE, SO ASK IT AS ONE. `sy` = s·y has units
+        # [f], so an absolute 1e-12 rejected or accepted the same geometry
+        # depending on the objective's scale. ⚠ And the obvious repairs are BOTH
+        # insufficient, which is measured rather than argued: a bare sign test and
+        # a DBL_MIN test both accept a NEAR-ORTHOGONAL pair with sy = 1e-300 at
+        # ||s|| = ||y|| = 1 — catastrophic cancellation in the dot product, not
+        # smallness of scale — giving rho = 1e300 and a -inf that poisons q and
+        # hence x. Only the RATIO sees it.
+        # ⭐ sy/(||s||*||y||) is a normalised cosine, bounded in [-1,1] and
+        # dimensionless, which is precisely the case error.cyr reserves
+        # EPSILON_F64 for. The constant is unchanged; what changes is what it is
+        # compared against. [measured: docs/audit/2026-09-09-epsilon-open.json]
+        if (f64_lt(f64_mul(EPSILON_F64, f64_mul(_opt_norm(s_k, n), _opt_norm(y_k, n))),
+            sy) == 1) {
             var slot_wr = hist + head * slot_size;
             _opt_copy(slot_wr, s_k, n);
             _opt_copy(slot_wr + n * 8, y_k, n);

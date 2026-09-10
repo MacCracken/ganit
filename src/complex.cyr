@@ -52,17 +52,45 @@ fn cx_mul(a, b) {
 
 #must_use
 fn cx_div(a, b) {
+    # ⛔ THIS IS THE DEFECT `complex.cyr` HAS NAMED IN ITS OWN COMMENT SINCE 2.6.14
+    # AND KEPT DOING. 2.6.13 fixed the EXPONENT — squared modulus against a squared
+    # tolerance — and left the SCALE, so `cx_div` still flushed legitimate small
+    # divisors to exactly 0+0i, a value bit-identical to a real zero quotient with
+    # no error channel to distinguish them.
+    #
+    # ⭐ AND NO THRESHOLD FIXES IT. Measured over a 401-decade covariance sweep of
+    # `cx_div(k*a, k*b)`, which is degree 0 in k and must not move: 1e-12 fails 241
+    # decades, the shipped 1e-24 fails 235, sqrt(DBL_MIN) fails 170, DBL_MIN fails
+    # 93, and *removing the guard entirely* still fails 89 — because `br² + bi²`
+    # OVERFLOWS to +Inf above k = 1e154 and UNDERFLOWS to 0 below 1e-154, and no
+    # comparison against a number can repair a quantity that was destroyed before
+    # the comparison ran. **Judging a repair against 89 rather than 0 would have
+    # licensed leaving 89 decades broken.**
+    # [measured: docs/audit/2026-09-09-epsilon-open.json]
+    #
+    # ⭐ SMITH'S ALGORITHM IS 0/401. Divide through by the LARGER component first,
+    # so the intermediate is |smaller/larger| <= 1 and the squaring never happens:
+    # the whole dynamic range stays representable and the result is scale-covariant
+    # everywhere. The only input that still fails is b = 0 exactly, which is the
+    # documented pole and keeps its `cx_zero()` sentinel.
+    # Threshold candidates fail 241/235/170/93/89 decades; Smith's fails none.
+    # [measured: docs/audit/2026-09-09-epsilon-open.json]
     var br = HComplex_re(b); var bi = HComplex_im(b);
-    var d = f64_add(f64_mul(br, br), f64_mul(bi, bi));
-    # Compare the SQUARED modulus against the SQUARED tolerance. Through 2.6.13
-    # this tested `norm_sq < EPSILON_F64`, mixing a squared quantity with an
-    # unsquared one, which made the effective zero-divisor cutoff |z| < 1e-6
-    # instead of 1e-12 — legitimate small divisors were silently flushed to zero.
-    # cx_is_zero (below) always did this correctly, which is the tell.
-    if (f64_lt(d, f64_mul(EPSILON_F64, EPSILON_F64)) == 1) { return cx_zero(); }
     var ar = HComplex_re(a); var ai = HComplex_im(a);
-    return cx_new(f64_div(f64_add(f64_mul(ar, br), f64_mul(ai, bi)), d),
-      f64_div(f64_sub(f64_mul(ai, br), f64_mul(ar, bi)), d));
+    if (f64_lt(f64_abs(bi), f64_abs(br)) == 1) {
+        var rb = f64_div(bi, br);
+        var db = f64_add(br, f64_mul(bi, rb));
+        if (f64_eq(db, 0) == 1) { return cx_zero(); }
+        return cx_new(f64_div(f64_add(ar, f64_mul(ai, rb)), db),
+          f64_div(f64_sub(ai, f64_mul(ar, rb)), db));
+    }
+    # |bi| >= |br|, so bi == 0 implies br == 0 too: the genuine pole.
+    if (f64_eq(bi, 0) == 1) { return cx_zero(); }
+    var ri = f64_div(br, bi);
+    var di = f64_add(f64_mul(br, ri), bi);
+    if (f64_eq(di, 0) == 1) { return cx_zero(); }
+    return cx_new(f64_div(f64_add(f64_mul(ar, ri), ai), di),
+      f64_div(f64_sub(f64_mul(ai, ri), ar), di));
 }
 
 #must_use
@@ -89,10 +117,22 @@ fn cx_arg(a) { return ganita_f64_atan2(HComplex_im(a), HComplex_re(a)); }
 
 #must_use
 fn cx_inv(a) {
-    var d = cx_norm_sq(a);
-    # Squared modulus vs squared tolerance — see cx_div.
-    if (f64_lt(d, f64_mul(EPSILON_F64, EPSILON_F64)) == 1) { return cx_zero(); }
-    return cx_new(f64_div(HComplex_re(a), d), f64_neg(f64_div(HComplex_im(a), d)));
+    # ⭐ Smith's, specialised to a numerator of 1+0i — same reason as `cx_div`, and
+    # deliberately the same shape so the two cannot drift apart. `cx_norm_sq` was
+    # the whole problem here: it squares before anything else, so |a|² was already
+    # 0 or +Inf outside ~1e±154 and no threshold could see past it.
+    var ar = HComplex_re(a); var ai = HComplex_im(a);
+    if (f64_lt(f64_abs(ai), f64_abs(ar)) == 1) {
+        var rb = f64_div(ai, ar);
+        var db = f64_add(ar, f64_mul(ai, rb));
+        if (f64_eq(db, 0) == 1) { return cx_zero(); }
+        return cx_new(f64_div(F64_ONE, db), f64_neg(f64_div(rb, db)));
+    }
+    if (f64_eq(ai, 0) == 1) { return cx_zero(); }
+    var ri = f64_div(ar, ai);
+    var di = f64_add(f64_mul(ar, ri), ai);
+    if (f64_eq(di, 0) == 1) { return cx_zero(); }
+    return cx_new(f64_div(ri, di), f64_neg(f64_div(F64_ONE, di)));
 }
 
 #must_use
@@ -125,8 +165,17 @@ fn cx_sqrt(a) {
 
 #must_use
 fn cx_powf(a, n) {
-    # Squared modulus vs squared tolerance — see cx_div.
-    if (f64_lt(cx_norm_sq(a), f64_mul(EPSILON_F64, EPSILON_F64)) == 1) { return cx_zero(); }
+    # ⚠ A THRESHOLD IS RIGHT HERE, unlike cx_div/cx_inv, because what follows is
+    # `ganita_f64_pow(cx_abs(a), n)` and `cx_abs` is itself `sqrt(cx_norm_sq)` —
+    # the value is already gone once |a|² is subnormal, so guarding the squared
+    # quantity at DBL_MIN cuts exactly where cx_abs stops carrying information.
+    # ⛔ The tempting sharper form `norm_sq == 0 && n <= 0` is REFUTED, not
+    # deferred: it does not fire at n = 0, so ganita's `pow(x,0) = 1` reaches
+    # cx_from_polar and `cx_powf(0+0i, 0)` returns 1.0 — measured, it fails
+    # tests/abuse.tcyr's 0^0 assertion. Changing that is a decision about hisab's
+    # 0^0, not a free sharpening, and is not folded in here.
+    # [measured: docs/audit/2026-09-09-epsilon-open.json]
+    if (f64_lt(cx_norm_sq(a), F64_TINY) == 1) { return cx_zero(); }
     var r = ganita_f64_pow(cx_abs(a), n);
     var theta = f64_mul(cx_arg(a), n);
     return cx_from_polar(r, theta);

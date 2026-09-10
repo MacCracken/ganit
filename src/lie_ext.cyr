@@ -116,7 +116,17 @@ fn _m3_commutator(a, b) {
 fn so3_from_axis_angle(axis, angle) {
     var nx = HVec3_x(axis); var ny = HVec3_y(axis); var nz = HVec3_z(axis);
     var norm = f64_sqrt(f64_add(f64_add(f64_mul(nx, nx), f64_mul(ny, ny)), f64_mul(nz, nz)));
-    if (f64_lt(norm, EPSILON_F64) == 1) {
+    # ⛔ `norm` is the LENGTH of the caller's axis/vector in the caller's own units,
+    # against an absolute 1e-12 — and every fallback here is a structurally valid
+    # element (identity rotation, identity boost) returned with no rc, so a caller
+    # cannot tell it from a real answer. Measured on the sibling `so3_exp`: the
+    # general Rodrigues path is exact across the whole range, so the guard is the
+    # sole cause of ~296 decades of discarded rotation.
+    # ⚠ F64_TINY is exactly equivalent to `norm == 0` here, because `norm` is a
+    # sqrt of a sum of SQUARES: the smallest non-zero value it can produce is
+    # ~2^-537, some 146 decades above DBL_MIN, so nothing can land in between.
+    # [measured: docs/audit/2026-09-09-epsilon-open.json]
+    if (f64_lt(norm, F64_TINY) == 1) {
         return m3_identity();
     }
     var inv = f64_div(F64_ONE, norm);
@@ -197,7 +207,7 @@ fn so3_inverse(r) { return m3_transpose(r); }
 fn so3_exp(omega) {
     var ox = HVec3_x(omega); var oy = HVec3_y(omega); var oz = HVec3_z(omega);
     var theta = f64_sqrt(f64_add(f64_add(f64_mul(ox, ox), f64_mul(oy, oy)), f64_mul(oz, oz)));
-    if (f64_lt(theta, EPSILON_F64) == 1) {
+    if (f64_lt(theta, F64_TINY) == 1) {
         return m3_identity();
     }
     return so3_from_axis_angle(omega, theta);

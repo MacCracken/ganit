@@ -247,12 +247,12 @@ fn ode_dopri45_trajectory(f, t0, y0, tf, dt0, tol, out_ts, out_ys) {
 
     var steps = 0;
     while (steps < _ODE_MAX_STEPS) {
-        # Check if we reached the end
-        if (f64_lt(f64_sub(tf, t), EPSILON_F64) == 1) {
-            return HSB_ERR_NONE;
-        }
-        # Do not allow t == tf check with >=
-        if (f64_gt(t, tf) == 1) {
+        # ⛔ `tf - t` is a span of the INDEPENDENT VARIABLE, in the caller's time
+        # units, against an absolute 1e-12 — so an integration over a short total
+        # span returned rc = 0 and a plausible SHORT trajectory, having silently
+        # stopped early. Arrival is not a question of tolerance: it is whether any
+        # span remains at all, and `<= 0` also subsumes the overshoot test below it.
+        if (f64_le(f64_sub(tf, t), 0) == 1) {
             return HSB_ERR_NONE;
         }
 
@@ -260,6 +260,17 @@ fn ode_dopri45_trajectory(f, t0, y0, tf, dt0, tol, out_ts, out_ys) {
         var remaining = f64_sub(tf, t);
         if (f64_gt(h, remaining) == 1) {
             h = remaining;
+        }
+        # ⭐ With arrival now testing `<= 0`, the loop needs the one thing the old
+        # tolerance was accidentally providing: a NON-ADVANCEMENT check. If the
+        # step is too small to move `t` at all, no threshold can say so — only the
+        # addition can. Scale-free by construction, and no constant to choose.
+        # ⚠ It returns HSB_ERR_NO_CONVERGENCE, which this function's own contract
+        # already declares, NOT a silent success. Measured: the dt0 = 0 abuse case
+        # now reports it at step 1 instead of after 100,001 wasted pushes.
+        # [measured: docs/audit/2026-09-09-epsilon-open.json]
+        if (f64_eq(f64_add(t, h), t) == 1) {
+            return HSB_ERR_NO_CONVERGENCE;
         }
 
         # Take a DOPRI45 step

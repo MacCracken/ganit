@@ -76,7 +76,17 @@ fn su2_from_quat(q) {
     var qz = HQuat_z(q); var qw = HQuat_w(q);
     var norm = f64_sqrt(f64_add(f64_add(f64_mul(qw, qw), f64_mul(qx, qx)),
         f64_add(f64_mul(qy, qy), f64_mul(qz, qz))));
-    if (f64_lt(norm, EPSILON_F64) == 1) {
+    # ⛔ `norm` is the LENGTH of the caller's axis/vector in the caller's own units,
+    # against an absolute 1e-12 — and every fallback here is a structurally valid
+    # element (identity rotation, identity boost) returned with no rc, so a caller
+    # cannot tell it from a real answer. Measured on the sibling `so3_exp`: the
+    # general Rodrigues path is exact across the whole range, so the guard is the
+    # sole cause of ~296 decades of discarded rotation.
+    # ⚠ F64_TINY is exactly equivalent to `norm == 0` here, because `norm` is a
+    # sqrt of a sum of SQUARES: the smallest non-zero value it can produce is
+    # ~2^-537, some 146 decades above DBL_MIN, so nothing can land in between.
+    # [measured: docs/audit/2026-09-09-epsilon-open.json]
+    if (f64_lt(norm, F64_TINY) == 1) {
         return _su2_alloc(F64_ONE, 0, 0, 0);
     }
     var inv = f64_div(F64_ONE, norm);
@@ -97,7 +107,7 @@ fn su2_from_axis_angle(axis, angle) {
     # Normalize axis
     var ax = HVec3_x(axis); var ay = HVec3_y(axis); var az = HVec3_z(axis);
     var len = f64_sqrt(f64_add(f64_add(f64_mul(ax, ax), f64_mul(ay, ay)), f64_mul(az, az)));
-    if (f64_lt(len, EPSILON_F64) == 1) {
+    if (f64_lt(len, F64_TINY) == 1) {
         return _su2_alloc(F64_ONE, 0, 0, 0);
     }
     var inv = f64_div(F64_ONE, len);
@@ -148,7 +158,7 @@ fn su2_inv(s) {
 fn su2_exp(v) {
     var ox = HVec3_x(v); var oy = HVec3_y(v); var oz = HVec3_z(v);
     var norm = f64_sqrt(f64_add(f64_add(f64_mul(ox, ox), f64_mul(oy, oy)), f64_mul(oz, oz)));
-    if (f64_lt(norm, EPSILON_F64) == 1) {
+    if (f64_lt(norm, F64_TINY) == 1) {
         return su2_identity();
     }
     var half = f64_mul(norm, F64_HALF);
@@ -396,7 +406,7 @@ fn lorentz_boost_z(eta) {
 fn lorentz_boost(dir, eta) {
     var nx = HVec3_x(dir); var ny = HVec3_y(dir); var nz = HVec3_z(dir);
     var norm = f64_sqrt(f64_add(f64_add(f64_mul(nx, nx), f64_mul(ny, ny)), f64_mul(nz, nz)));
-    if (f64_lt(norm, EPSILON_F64) == 1) {
+    if (f64_lt(norm, F64_TINY) == 1) {
         return lorentz_identity();
     }
     var inv = f64_div(F64_ONE, norm);
@@ -437,7 +447,7 @@ fn lorentz_boost(dir, eta) {
 fn lorentz_rotate(axis, angle) {
     var nx = HVec3_x(axis); var ny = HVec3_y(axis); var nz = HVec3_z(axis);
     var norm = f64_sqrt(f64_add(f64_add(f64_mul(nx, nx), f64_mul(ny, ny)), f64_mul(nz, nz)));
-    if (f64_lt(norm, EPSILON_F64) == 1) {
+    if (f64_lt(norm, F64_TINY) == 1) {
         return lorentz_identity();
     }
     var inv = f64_div(F64_ONE, norm);

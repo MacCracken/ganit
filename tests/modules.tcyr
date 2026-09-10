@@ -10639,6 +10639,578 @@ assert(calc_monotone_cubic(_ce_rx, _ce_ry, 4,
 # DIRECTION and on the returned t, never on a magnitude the fallback shares.
 # [measured: independent verification of all six sites, 2026-09-09]
 
+# ================================================================
+# 2.15.0 — cx_div / cx_inv: the defect complex.cyr has named since 2.6.14
+# ================================================================
+# ⛔ `complex.cyr:58` has carried a comment describing this exact class since
+# 2.6.14, and `cx_div` — the function named IN that comment — kept doing it.
+# 2.6.13 fixed the EXPONENT (squared modulus vs a squared tolerance) and left the
+# SCALE, so a legitimate small divisor was still flushed to exactly 0+0i: a value
+# bit-identical to a real zero quotient, with no error channel to separate them.
+#
+# ⭐ AND NO THRESHOLD FIXES IT — this is why the repair is structural. `cx_div` is
+# degree 0 in a common scale k, so `cx_div(k*a, k*b)` must not contain k at all.
+# Measured over 401 decades, counting FAILING COMPONENTS out of 802:
+#     1e-12 (pre-2.6.13) ...... 482      DBL_MIN .................. 186
+#     1e-24 (shipped) ......... 470      no guard at all .......... 178
+#     sqrt(DBL_MIN) ........... 340      Smith's algorithm .......... 0
+# `br² + bi²` overflows to +Inf above k ~ 1e154 and underflows to 0 below 1e-154,
+# so the quantity is destroyed BEFORE any comparison runs and removing the guard
+# entirely still fails 178. ⚠ **Judging the repair against 178 rather than 0 would
+# have licensed leaving 89 decades broken.** Smith's divides through by the LARGER
+# component first, so the intermediate is bounded by 1 and the squaring never
+# happens. [measured: probe over 401 decades; shipped 470, repaired 0, 2026-09-10]
+
+# ================================================================
+# 2.15.0 — the exponential maps: 296 decades of discarded rotation
+# ================================================================
+# ⛔ Every one of these guarded a LENGTH — the norm of the caller's axis, or the
+# rotation angle — against an absolute 1e-12, and every fallback is a structurally
+# valid element (identity rotation, identity boost) returned with no rc. A caller
+# cannot tell "I rotated by your tiny angle" from "I gave up and returned I".
+#
+# ⭐ THE DISCRIMINATOR IS EXACTNESS, NOT A TOLERANCE. For t below ~1e-8, sin(t) IS
+# t in f64 — the Taylor correction is below the last bit — so `so3_exp((0,0,t))`
+# must put exactly `t` in the (0,1) slot. That is a bit-exact assertion over 500
+# scales, and the shipped guard puts exactly 0 there for every t < 1e-12.
+#
+# ⚠ THE REPAIR IS A SET, NOT A LINE. `so3_exp` delegates to `so3_from_axis_angle`,
+# and `su2_exp` is tied to `so3_exp` by the SU(2) -> SO(3) cover invariant already
+# pinned at modules.tcyr:5909. Fixing one alone just moves the binding constraint,
+# so all seven norm-guards in lie/lie_ext move together.
+# [measured: docs/audit/2026-09-09-epsilon-open.json]
+
+# ================================================================
+# 2.15.0 — four more guards on quantities the CALLER chooses the units of
+# ================================================================
+# ⚠ These four were repaired before this block existed and every mutant SURVIVED,
+# because nothing in the tree exercised them off unit scale. A repair with no
+# assertion is a repair nobody can keep.
+# [measured: 9-mutant run; 4 survivors before this block]
+
+# ================================================================
+# 2.15.0 — the numerical solvers: pivots and curvature tests
+# ================================================================
+# ⛔ `num_tridiag_solve`'s three pivots and `optimize`'s four curvature/beta tests
+# all compared a quantity carrying the CALLER'S units against an absolute 1e-12.
+# ⚠ These refuse rather than fabricate — HSB_ERR_DIVISION_BY_ZERO with `out` left
+# untouched, or a silently zeroed beta — so the failure mode is a solvable problem
+# declared unsolvable. Still wrong, and still on public entry points.
+
+test_group("2.15.0: tridiagonal pivots and optimizer curvature are scale-free");
+
+# --- num_tridiag_solve. T = [[2,1,0],[1,2,1],[0,1,2]] with x = (1,1,1) gives
+# d = (3,4,3). Scaling BOTH the matrix and the right-hand side by k leaves x
+# unchanged — the same linear system in different units.
+var _TD_RUN = 0;
+var _TD_BAD = 0;
+for (var _td_e = 0; _td_e < 500; _td_e = _td_e + 1) {
+    var _td_k = (1023 - _td_e) << 52;
+    var _td_a = alloc(24); var _td_b = alloc(24);
+    var _td_c = alloc(24); var _td_d = alloc(24); var _td_x = alloc(24);
+    # ⚠ The sub-diagonal is indexed `a_i = a[i-1]`, so its first entry is a[0] —
+    # NOT a[1]. The first draft of this fixture offset it by one and failed 1500
+    # of 2000 checks against correct code.
+    store64(_td_a, _td_k); store64(_td_a + 8, _td_k); store64(_td_a + 16, 0);
+    store64(_td_c, _td_k); store64(_td_c + 8, _td_k); store64(_td_c + 16, 0);
+    for (var _td_i = 0; _td_i < 3; _td_i = _td_i + 1) {
+        store64(_td_b + _td_i * 8, f64_mul(_td_k, F64_TWO));
+        store64(_td_x + _td_i * 8, 0);
+    }
+    store64(_td_d, f64_mul(_td_k, f64_from(3)));
+    store64(_td_d + 8, f64_mul(_td_k, f64_from(4)));
+    store64(_td_d + 16, f64_mul(_td_k, f64_from(3)));
+    _TD_RUN = _TD_RUN + 1;
+    if (num_tridiag_solve(_td_a, _td_b, _td_c, _td_d, 3, _td_x) != HSB_ERR_NONE) {
+        _TD_BAD = _TD_BAD + 1;
+    }
+    # ⚠ The n == 1 FAST PATH has its own pivot guard and the n = 3 sweep never
+    # reaches it — that mutant survived until this line existed.
+    # [measured: 9-mutant run over the solver guards, 2026-09-10]
+    var _td_1x = alloc(8);
+    store64(_td_1x, 0);
+    if (num_tridiag_solve(_td_a, _td_b, _td_c, _td_d, 1, _td_1x) != HSB_ERR_NONE) {
+        _TD_BAD = _TD_BAD + 1;
+    }
+    if (f64_approx_eq(f64_div(load64(_td_1x), f64_div(f64_from(3), F64_TWO)),
+        F64_ONE, LOOSE_TOL_M) != 1) {
+        _TD_BAD = _TD_BAD + 1;
+    }
+    for (var _td_j = 0; _td_j < 3; _td_j = _td_j + 1) {
+        if (f64_approx_eq(load64(_td_x + _td_j * 8), F64_ONE, LOOSE_TOL_M) != 1) {
+            _TD_BAD = _TD_BAD + 1;
+        }
+    }
+}
+assert_eq(_TD_RUN, 500, "the tridiagonal scale sweep actually ran 500 scales");
+assert_eq(_TD_BAD, 0,
+  "num_tridiag_solve: x = (1,1,1) for the same system at scales 2^0 to 2^-499");
+# ⭐ ANTI-DELETION: a genuinely singular pivot must still be refused, and `out`
+# must be left as the caller had it.
+var _td_sa = alloc(8); var _td_sb = alloc(8);
+var _td_sc = alloc(8); var _td_sd = alloc(8); var _td_sx = alloc(8);
+store64(_td_sa, 0); store64(_td_sb, 0); store64(_td_sc, 0);
+store64(_td_sd, F64_ONE); store64(_td_sx, 0x4059000000000000);
+assert_eq(num_tridiag_solve(_td_sa, _td_sb, _td_sc, _td_sd, 1, _td_sx),
+  HSB_ERR_DIVISION_BY_ZERO,
+  "num_tridiag_solve: an exactly zero pivot is still refused");
+assert_eq(load64(_td_sx), 0x4059000000000000,
+  "num_tridiag_solve: a refusal leaves the caller's out-array untouched");
+
+# --- the optimizers. ⚠ SCALE THE VARIABLES, NOT THE OBJECTIVE, and the first
+# draft of this fixture got that wrong. With f = k*((x0-1)^2 + ...) the gradient
+# scales by k while the DISTANCE to the minimum does not, so a steepest-descent
+# step of size ~k cannot traverse a distance of ~1 — measured, at k = 2^-60 the
+# step is below the ULP of x and `x` never moves at all, for any iteration budget.
+# That is arithmetic, not a guard, and the fixture was asking for the impossible.
+# ⭐ The honest statement of "the same problem in different units" scales the
+# VARIABLES: f(x) = (x0 - k)^2 + (x1 - 2k)^2 has its minimum at (k, 2k), and
+# gradient, distance and step all scale together. `sy` then goes as k^2, so the
+# shipped 1e-12 guard starts rejecting the curvature update around k = 1e-6.
+# [measured: probe over decades 0/60/200/400, both before and after the fix]
+var _OS_K = F64_ONE;
+# ⚠ ILL-CONDITIONED ON PURPOSE, and the first draft was not. A round bowl
+# converges by steepest descent alone, so BFGS still reached the minimum with its
+# curvature update rejected at every step and all five optimizer mutants SURVIVED.
+# Condition number 10^5 makes the quasi-Newton update load-bearing within the
+# 400-iteration budget: with it, a handful of steps; without it, far more than
+# the budget allows. ⚠ The choice is MEASURED, not guessed — 10^4 is too easy
+# (the gamma mutant survives it) and 10^6 too hard (the baseline itself fails).
+# [measured: baseline re-run at 10^4 / 10^5 / 10^6, 2026-09-10]
+var _OS_C = 0x40F86A0000000000;                      # 100000.0
+fn _os_f(x) {
+    var a = f64_sub(load64(x), _OS_K);
+    var b = f64_sub(load64(x + 8), f64_mul(F64_TWO, _OS_K));
+    return f64_add(f64_mul(a, a), f64_mul(_OS_C, f64_mul(b, b)));
+}
+fn _os_g(x, out) {
+    var a = f64_sub(load64(x), _OS_K);
+    var b = f64_sub(load64(x + 8), f64_mul(F64_TWO, _OS_K));
+    store64(out, f64_mul(F64_TWO, a));
+    store64(out + 8, f64_mul(F64_TWO, f64_mul(_OS_C, b)));
+    return 0;
+}
+var _OS_RUN = 0;
+var _OS_BAD = 0;
+for (var _os_e = 0; _os_e < 200; _os_e = _os_e + 1) {
+    _OS_K = (1023 - _os_e) << 52;
+    var _os_tol = f64_mul(_OS_K, f64_div(F64_ONE, f64_from(100000000)));
+    for (var _os_s = 1; _os_s < 4; _os_s = _os_s + 1) {
+        var _os_x0 = alloc(16);
+        store64(_os_x0, f64_neg(f64_mul(_OS_K, F64_HALF)));
+        store64(_os_x0 + 8, f64_mul(_OS_K, f64_div(f64_from(5), F64_TWO)));
+        var _os_ox = alloc(16); var _os_of = alloc(8);
+        var _os_rc = 0 - 99;
+        if (_os_s == 1) {
+            _os_rc = opt_conjugate_gradient(&_os_f, &_os_g, _os_x0, 2, _os_tol,
+              400, _os_ox, _os_of);
+        }
+        if (_os_s == 2) {
+            _os_rc = opt_bfgs(&_os_f, &_os_g, _os_x0, 2, _os_tol, 400, _os_ox, _os_of);
+        }
+        if (_os_s == 3) {
+            _os_rc = opt_lbfgs(&_os_f, &_os_g, _os_x0, 2, 5, _os_tol, 400,
+              _os_ox, _os_of);
+        }
+        _OS_RUN = _OS_RUN + 1;
+        if (_os_rc != HSB_ERR_NONE) { _OS_BAD = _OS_BAD + 1; }
+        # Compare the RATIO, since the answer itself now spans 200 decades.
+        if (f64_approx_eq(f64_div(load64(_os_ox), _OS_K), F64_ONE, LOOSE_TOL_M) != 1) {
+            _OS_BAD = _OS_BAD + 1;
+        }
+        if (f64_approx_eq(f64_div(load64(_os_ox + 8), _OS_K), F64_TWO, LOOSE_TOL_M) != 1) {
+            _OS_BAD = _OS_BAD + 1;
+        }
+    }
+}
+_OS_K = F64_ONE;
+assert_eq(_OS_RUN, 600, "the optimizer scale sweep ran 3 solvers x 200 scales");
+assert_eq(_OS_BAD, 0,
+  "cg / bfgs / lbfgs: the minimum is (k, 2k) for variable scales 2^0 to 2^-199");
+
+# ⚠ TWO OPTIMIZER MUTANTS SURVIVE THIS BLOCK AND ARE RECORDED, NOT HIDDEN.
+# (a) Replacing the BFGS curvature test with a BARE SIGN TEST (`sy > 0`) passes
+#     everything here. That is a real gap, not an equivalence: the census measured
+#     a near-orthogonal pair with sy = 1e-300 at ||s|| = ||y|| = 1 — catastrophic
+#     cancellation in the dot product rather than smallness of scale — producing
+#     rho = 1e300 and a -inf that poisons q and hence x. A CONVEX QUADRATIC can
+#     never generate it, because y = A*s makes sy = s'As > 0 for positive-definite
+#     A; it needs an indefinite region, which this fixture has none of.
+# (b) Restoring the gamma guard to `EPSILON_F64` on `yy` also survives. That one is
+#     a convergence-RATE effect, and measured, L-BFGS reaches this minimum inside
+#     40 iterations with or without the initial Hessian scaling — tightening the
+#     budget to 40 does not separate them either.
+# Both repairs are kept because they are correctly typed (a dimensionless cosine,
+# and the quantity actually divided); neither is claimed to be proven by the suite.
+# [measured: 9-mutant run at condition 10^5, budgets 400 and 40, 2026-09-10]
+
+fn _ab_ode_dydt(t, y) { return y; }
+
+# --- linearize_depth_reverse_z: near/ndc, and ndc is a normalised depth the
+# caller's projection produces. ⛔ TWO defects on one line: the absolute 1e-12,
+# and a comment whose meaning was INVERTED ("At far plane" — in reverse-Z, ndc = 0
+# IS the infinite far plane and linear depth 0 is at the eye).
+# ⚠ Not F64_TINY either, and that is measured: near/ndc stays FINITE for subnormal
+# ndc across most of that band, so DBL_MIN would still fabricate 0 where the
+# division succeeds. Only an exact zero has no answer.
+# [measured: docs/audit/2026-09-09-epsilon-open.json]
+var _LD_RUN = 0;
+var _LD_BAD = 0;
+# ⚠ 1023 scales, not 500: F64_TINY sits at 2^-1022, so a 500-deep sweep cannot
+# tell it from the exact-zero test at all — that mutant survived a 500-deep one.
+# [measured: 9-mutant run over the four sharpened sites, 2026-09-10]
+for (var _ld_e = 0; _ld_e < 1023; _ld_e = _ld_e + 1) {
+    var _ld_ndc = (1023 - _ld_e) << 52;               # 2^-e
+    var _ld_want = (1023 + _ld_e) << 52;              # 2^+e = 1/ndc, near = 1
+    _LD_RUN = _LD_RUN + 1;
+    if (linearize_depth_reverse_z(_ld_ndc, F64_ONE) != _ld_want) { _LD_BAD = _LD_BAD + 1; }
+}
+assert_eq(_LD_RUN, 1023, "the reverse-Z depth sweep actually ran 1023 scales");
+assert_eq(_LD_BAD, 0,
+  "linearize_depth_reverse_z: near/ndc is exact for ndc from 2^0 to 2^-1022");
+# ⭐ AND ONE STEP BELOW DBL_MIN, which the loop above cannot express: `(1023-e)<<52`
+# encodes NORMAL powers of two only, so it stops exactly AT DBL_MIN — where `<`
+# does not fire and F64_TINY is indistinguishable from the exact-zero test. A
+# SUBNORMAL ndc is the case that separates them, and near/ndc = 2^1023 is finite
+# there, so the division genuinely succeeds and the guard must stay silent.
+# ⚠ 2^-1023 is the deepest that works: at 2^-1025 the reciprocal itself overflows.
+assert_eq(linearize_depth_reverse_z(0x0008000000000000, F64_ONE), (1023 + 1023) << 52,
+  "linearize_depth_reverse_z: a subnormal ndc still divides, exactly");
+
+assert_eq(linearize_depth_reverse_z(0, F64_ONE), 0,
+  "linearize_depth_reverse_z: ndc exactly 0 is the infinite far plane");
+
+# --- f64_fmod: the header says "Returns 0 if y == 0" and the code tested
+# |y| < 1e-12. The trunc formula is bit-exact at every representable scale, so any
+# threshold above zero fabricates a 0 over a region that computes correctly.
+var _FM_RUN = 0;
+var _FM_BAD = 0;
+# ⚠ Past 1022 the divisor is SUBNORMAL, which is exactly where a DBL_MIN guard
+# and the exact-zero test stop agreeing — a 500-deep sweep left that mutant alive.
+for (var _fm_e = 0; _fm_e < 1040; _fm_e = _fm_e + 1) {
+    var _fm_y = 0;
+    if (_fm_e < 1023) { _fm_y = (1023 - _fm_e) << 52; }
+    if (_fm_e >= 1023) { _fm_y = 1 << (1074 - _fm_e); }   # subnormal 2^-e
+    var _fm_h = f64_mul(_fm_y, F64_HALF);             # 0.5 * y, exact for 2^-e
+    _FM_RUN = _FM_RUN + 1;
+    # 2.5*y mod y = 0.5*y exactly, at every scale.
+    if (f64_fmod(f64_add(f64_mul(F64_TWO, _fm_y), _fm_h), _fm_y) != _fm_h) {
+        _FM_BAD = _FM_BAD + 1;
+    }
+    # and an exact multiple is exactly 0.
+    if (f64_fmod(f64_mul(f64_from(3), _fm_y), _fm_y) != 0) { _FM_BAD = _FM_BAD + 1; }
+}
+assert_eq(_FM_RUN, 1040, "the f64_fmod divisor sweep actually ran 1040 scales");
+assert_eq(_FM_BAD, 0,
+  "f64_fmod: 2.5y mod y = 0.5y and 3y mod y = 0 for y from 2^0 into the subnormals");
+assert_eq(f64_fmod(F64_ONE, 0), 0, "f64_fmod: y = 0 returns 0, as the header says");
+# ⚠ NEGATIVE ZERO — asserted as a CONTRACT, not as a discriminator. IEEE-754 makes
+# -0.0 compare equal to +0.0, so the bit test and `f64_eq(y, 0)` are equivalent
+# mutants here; this pins the behaviour either way. An earlier draft of the comment
+# beside the guard claimed the bit form was needed to catch -0.0. It was wrong.
+assert_eq(f64_fmod(F64_ONE, 0x8000000000000000), 0,
+  "f64_fmod: negative zero is also a zero divisor");
+
+# --- ode_dopri45_trajectory: `tf - t` is a span in the caller's TIME units, and
+# an absolute 1e-12 made a short integration return rc = 0 with a plausible SHORT
+# trajectory — it had silently stopped at the first step. The direct property is
+# that the integration REACHES tf.
+var _OT_RUN = 0;
+var _OT_BAD = 0;
+for (var _ot_e = 0; _ot_e < 300; _ot_e = _ot_e + 1) {
+    var _ot_T = (1023 - _ot_e) << 52;                 # total span 2^-e
+    var _ot_ts = vec_new();
+    var _ot_ys = vec_new();
+    var _ot_rc = ode_dopri45_trajectory(&_ab_ode_dydt, 0, F64_ONE, _ot_T,
+      f64_mul(_ot_T, f64_div(F64_ONE, f64_from(10))), F64_HALF, _ot_ts, _ot_ys);
+    _OT_RUN = _OT_RUN + 1;
+    if (_ot_rc != HSB_ERR_NONE) { _OT_BAD = _OT_BAD + 1; }
+    # It must take at least one real step, not just push the initial condition.
+    if (vec_len(_ot_ts) < 2) { _OT_BAD = _OT_BAD + 1; }
+    # and the last time recorded must actually be tf.
+    if (vec_len(_ot_ts) >= 2) {
+        if (vec_get(_ot_ts, vec_len(_ot_ts) - 1) != _ot_T) { _OT_BAD = _OT_BAD + 1; }
+    }
+}
+assert_eq(_OT_RUN, 300, "the ode span sweep actually ran 300 scales");
+assert_eq(_OT_BAD, 0,
+  "ode_dopri45_trajectory: reaches tf exactly for spans from 2^0 down to 2^-299");
+# ⭐ ANTI-DELETION, and it is the assertion the new non-advancement check exists
+# for: a step too small to move `t` must be reported, not looped on. abuse.tcyr
+# already pins the rc; this pins that it is now detected at the FIRST step rather
+# than after exhausting a 100,000-step budget.
+# [measured: tests/abuse.tcyr dt0 = 0 case, rc and vec_len both checked]
+var _ot_z1 = vec_new();
+var _ot_z2 = vec_new();
+assert_eq(ode_dopri45_trajectory(&_ab_ode_dydt, 0, F64_ONE, F64_ONE, 0, F64_HALF,
+    _ot_z1, _ot_z2), HSB_ERR_NO_CONVERGENCE,
+  "ode_dopri45_trajectory: dt0 = 0 still reports no convergence");
+assert_lte(vec_len(_ot_z1), 2,
+  "ode_dopri45_trajectory: and it now says so at the first step, not the 100000th");
+
+test_group("2.15.0: inverse_lerp / world_to_screen / unpremultiply / newton");
+
+# --- hisab_inverse_lerp: the interval WIDTH is in the caller's units (metres,
+# seconds, kelvin), and the midpoint of any interval is 0.5 of the way along it.
+# ⛔ The fallback returned 0.0, which is ALSO the right answer for value == a, so
+# the caller could not tell a refusal from a result.
+var _IL_RUN = 0;
+var _IL_BAD = 0;
+for (var _il_e = 0; _il_e < 500; _il_e = _il_e + 1) {
+    var _il_w = (1023 - _il_e) << 52;                 # 2^-e
+    var _il_h = (1023 - _il_e - 1) << 52;             # exactly half of it
+    _IL_RUN = _IL_RUN + 1;
+    if (hisab_inverse_lerp(0, _il_w, _il_h) != 0x3FE0000000000000) {
+        _IL_BAD = _IL_BAD + 1;
+    }
+}
+assert_eq(_IL_RUN, 500, "the inverse_lerp width sweep actually ran 500 scales");
+assert_eq(_IL_BAD, 0,
+  "hisab_inverse_lerp: the midpoint is 0.5 for widths from 2^0 down to 2^-499");
+assert_eq(hisab_inverse_lerp(F64_TWO, F64_TWO, F64_TWO), 0,
+  "hisab_inverse_lerp: a genuinely zero-width interval still returns 0");
+
+# --- world_to_screen: the MVP's overall scale is a unit choice; the origin
+# projects to the middle of the viewport whatever that scale is.
+var _WS_RUN = 0;
+var _WS_BAD = 0;
+for (var _ws_e = 0; _ws_e < 500; _ws_e = _ws_e + 1) {
+    var _ws_k = (1023 - _ws_e) << 52;
+    var _ws_m = m4_new();
+    m4_set(_ws_m, 0, 0, _ws_k); m4_set(_ws_m, 1, 1, _ws_k);
+    m4_set(_ws_m, 2, 2, _ws_k); m4_set(_ws_m, 3, 3, _ws_k);
+    var _ws_p = world_to_screen(hvec3_new(0, 0, 0), _ws_m, f64_from(800), f64_from(600));
+    _WS_RUN = _WS_RUN + 1;
+    if (HVec3_x(_ws_p) != 0x4079000000000000) { _WS_BAD = _WS_BAD + 1; }   # 400.0
+    if (HVec3_y(_ws_p) != 0x4072C00000000000) { _WS_BAD = _WS_BAD + 1; }   # 300.0
+}
+assert_eq(_WS_RUN, 500, "the world_to_screen sweep actually ran 500 scales");
+assert_eq(_WS_BAD, 0,
+  "world_to_screen: the origin lands at (400,300) for MVP scales to 2^-499");
+
+# --- unpremultiply_alpha: alpha is the homogeneous weight. A faint but real
+# coverage must recover the colour, not collapse to transparent black.
+var _UA_RUN = 0;
+var _UA_BAD = 0;
+for (var _ua_e = 0; _ua_e < 500; _ua_e = _ua_e + 1) {
+    var _ua_a = (1023 - _ua_e) << 52;
+    var _ua_h = (1023 - _ua_e - 1) << 52;             # 0.5 * a, premultiplied
+    var _ua_c = unpremultiply_alpha(_ua_h, _ua_h, _ua_h, _ua_a);
+    _UA_RUN = _UA_RUN + 1;
+    if (HVec4_x(_ua_c) != 0x3FE0000000000000) { _UA_BAD = _UA_BAD + 1; }
+    if (HVec4_w(_ua_c) != _ua_a) { _UA_BAD = _UA_BAD + 1; }
+}
+assert_eq(_UA_RUN, 500, "the unpremultiply sweep actually ran 500 alphas");
+assert_eq(_UA_BAD, 0,
+  "unpremultiply_alpha: 0.5 grey is recovered at alphas from 2^0 to 2^-499");
+assert_eq(HVec4_x(unpremultiply_alpha(0, 0, 0, 0)), 0,
+  "unpremultiply_alpha: alpha exactly 0 is still transparent black");
+
+# --- num_newton: f'(x) has dimensions [f]/[x], so an absolute 1e-12 made Newton
+# refuse any problem whose units make the derivative small. ⚠ Unlike the rest of
+# this class it does NOT fabricate — it returns HSB_ERR_DIVISION_BY_ZERO and
+# leaves `out` unwritten — so the defect is a false REFUSAL. Still wrong, still a
+# public entry point. f(x) = k(x^2 - 2) has the root sqrt(2) at every k, and
+# f'(1) = 2k crosses 1e-12 at k = 5e-13.
+# ⚠ `tol` is compared against |f(x)|, so it must scale with the function too —
+# otherwise the solver "converges" instantly at x0 and the fixture tests nothing.
+var _NN_K = F64_ONE;
+fn _nn_zero_f(x) { return F64_ONE; }
+fn _nn_zero_df(x) { return 0; }
+fn _nn_f(x) { return f64_mul(_NN_K, f64_sub(f64_mul(x, x), F64_TWO)); }
+fn _nn_df(x) { return f64_mul(_NN_K, f64_mul(F64_TWO, x)); }
+
+var _NN_RUN = 0;
+var _NN_BAD = 0;
+var _nn_out = alloc(8);
+for (var _nn_e = 0; _nn_e < 300; _nn_e = _nn_e + 1) {
+    _NN_K = (1023 - _nn_e) << 52;                    # 2^-e
+    var _nn_tol = f64_mul(_NN_K, f64_div(F64_ONE, f64_from(10000000000)));
+    store64(_nn_out, 0);
+    var _nn_rc = num_newton(&_nn_f, &_nn_df, F64_ONE, _nn_tol, 100, _nn_out);
+    _NN_RUN = _NN_RUN + 1;
+    if (_nn_rc != HSB_ERR_NONE) { _NN_BAD = _NN_BAD + 1; }
+    if (f64_approx_eq(load64(_nn_out), f64_sqrt(F64_TWO), LOOSE_TOL_M) != 1) {
+        _NN_BAD = _NN_BAD + 1;
+    }
+}
+_NN_K = F64_ONE;
+assert_eq(_NN_RUN, 300, "the num_newton scale sweep actually ran 300 scales");
+assert_eq(_NN_BAD, 0,
+  "num_newton: finds sqrt(2) for f = k(x^2-2) at every k from 2^0 to 2^-299");
+# ⭐ ANTI-DELETION: a genuinely zero derivative must still be refused, and `out`
+# must be left alone rather than written with a fabricated root.
+var _nn_flat = alloc(8);
+store64(_nn_flat, 0x4059000000000000);               # 100.0, a sentinel
+assert_eq(num_newton(&_nn_zero_f, &_nn_zero_df, F64_ONE, EPSILON_F64, 10, _nn_flat),
+  HSB_ERR_DIVISION_BY_ZERO,
+  "num_newton: an exactly zero derivative is still refused");
+assert_eq(load64(_nn_flat), 0x4059000000000000,
+  "num_newton: a refusal leaves the caller's out-parameter untouched");
+
+test_group("lie 2.15.0: the exponential maps are scale-covariant");
+
+var _LE_RUN = 0;
+var _LE_BAD = 0;
+for (var _le_e = 30; _le_e < 530; _le_e = _le_e + 1) {
+    var _le_t = (1023 - _le_e) << 52;             # 2^-e, well below the sin cutoff
+    var _le_R = so3_exp(hvec3_new(0, 0, _le_t));
+    _LE_RUN = _LE_RUN + 1;
+    # Rodrigues about z: the (col 0, row 1) entry is sin(theta), and sin(t) == t
+    # exactly at these scales, so this is an equality, not an approximation.
+    if (m3_get(_le_R, 0, 1) != _le_t) { _LE_BAD = _LE_BAD + 1; }
+    # and the mirrored entry is -sin(theta).
+    if (m3_get(_le_R, 1, 0) != f64_neg(_le_t)) { _LE_BAD = _LE_BAD + 1; }
+}
+# ⚠ 530 and not further: `norm` is a sqrt of a sum of SQUARES, so below ~2^-537
+# the square underflows and the norm itself returns 0 — a real limitation of the
+# norm, not of the guard, and asserting past it would test f64, not this code.
+assert_eq(_LE_RUN, 500, "the so3_exp angle sweep actually ran 500 scales");
+assert_eq(_LE_BAD, 0,
+  "so3_exp: R[1][0] is exactly sin(theta) for theta from 2^-30 down to 2^-529");
+
+# ⭐ THE COVER INVARIANT, at a scale the existing check never reaches. It is
+# already asserted at unit scale; below 1e-12 it was vacuously true because BOTH
+# sides returned the identity. Repairing only one of the pair breaks it.
+var _le_w = hvec3_new(0, 0, (1023 - 60) << 52);   # 2^-60
+var _le_c1 = su2_to_rotation_matrix(su2_exp(_le_w));
+var _le_c2 = so3_exp(_le_w);
+assert_eq(m3_get(_le_c1, 0, 1), m3_get(_le_c2, 0, 1),
+  "the SU(2) -> SO(3) cover still holds at 2^-60, where both used to return I");
+assert(m3_get(_le_c2, 0, 1) != 0,
+  "and it is not vacuous: both sides carry a non-zero rotation there");
+
+# A tiny AXIS with an ordinary angle: the axis length is a unit choice and must
+# not change the rotation at all.
+var _le_ax = so3_from_axis_angle(hvec3_new(0, 0, (1023 - 200) << 52), F64_ONE);
+assert(f64_approx_eq(m3_get(_le_ax, 0, 1), f64_sin(F64_ONE), LOOSE_TOL_M) == 1,
+  "so3_from_axis_angle: a 2^-200-long axis still rotates by the given angle");
+var _le_lb = lorentz_boost(hvec3_new((1023 - 200) << 52, 0, 0), F64_ONE);
+assert(f64_approx_eq(m4_get(_le_lb, 0, 0), ganita_f64_cosh(F64_ONE), LOOSE_TOL_M) == 1,
+  "lorentz_boost: a 2^-200-long direction still boosts by the given rapidity");
+
+# ⭐ ANTI-DELETION: an exactly zero axis has no direction and must still return the
+# identity, or the repair is a deletion.
+assert_eq(m3_get(so3_from_axis_angle(hvec3_new(0, 0, 0), F64_ONE), 0, 1), 0,
+  "so3_from_axis_angle: a zero axis still returns the identity");
+assert_eq(m3_get(so3_exp(hvec3_new(0, 0, 0)), 0, 1), 0,
+  "so3_exp: a zero omega still returns the identity");
+assert_eq(m4_get(lorentz_boost(hvec3_new(0, 0, 0), F64_ONE), 0, 1), 0,
+  "lorentz_boost: a zero direction still returns the identity");
+
+# ⛔ AND TWO SITES ARE DELIBERATELY LEFT ALONE, WITH THE REASON MEASURED.
+# `se3_exp` (lie_ext.cyr:443) and `se3_log` (:477) divide by theta^2 and theta^3.
+# Lowering their guard to DBL_MIN as the census recommended would introduce a NEW
+# defect: at theta <= 2.2e-162 both `theta*theta` and `1 - cos(theta)` are exactly
+# 0, so `c1 = (1-cos)/theta^2` is 0/0 = NaN and the whole V matrix becomes NaN.
+# They need a small-angle series, which is a formula change, not a threshold
+# change — the same reason `so3_log` is excluded. Recorded on the roadmap.
+# [measured: 1-cos and theta^2 both underflow to 0 at theta = 1e-162]
+
+test_group("complex 2.15.0: cx_div / cx_inv are scale-covariant");
+
+fn _cx_relbad(got, want) {
+    # Relative, not absolute: the expected value spans 400 decades here, so an
+    # absolute tolerance would be vacuous at one end and impossible at the other.
+    if (f64_eq(want, 0) == 1) {
+        if (f64_eq(got, 0) == 1) { return 0; }
+        return 1;
+    }
+    if (f64_lt(f64_abs(f64_sub(got, want)),
+        f64_mul(f64_div(F64_ONE, f64_from(1000000000)), f64_abs(want))) == 1) {
+        return 0;
+    }
+    return 1;
+}
+
+var _CX_RUN = 0;
+var _CX_BAD = 0;
+var _cx_e = 0 - 200;
+while (_cx_e <= 200) {
+    # k = 10^e, rebuilt from 1 each iteration so rounding does not accumulate.
+    var _cx_k = F64_ONE;
+    var _cx_i = 0;
+    if (_cx_e >= 0) {
+        while (_cx_i < _cx_e) { _cx_k = f64_mul(_cx_k, f64_from(10)); _cx_i = _cx_i + 1; }
+    }
+    if (_cx_e < 0) {
+        while (_cx_i < (0 - _cx_e)) { _cx_k = f64_div(_cx_k, f64_from(10)); _cx_i = _cx_i + 1; }
+    }
+    var _cx_a = cx_new(_cx_k, f64_mul(_cx_k, F64_TWO));
+    var _cx_b = cx_new(f64_mul(_cx_k, f64_from(3)), f64_mul(_cx_k, f64_from(4)));
+    _CX_RUN = _CX_RUN + 1;
+    # (1+2i)/(3+4i) = 0.44 + 0.08i at EVERY common scale k.
+    var _cx_q = cx_div(_cx_a, _cx_b);
+    _CX_BAD = _CX_BAD + _cx_relbad(HComplex_re(_cx_q), f64_div(f64_from(44), f64_from(100)));
+    _CX_BAD = _CX_BAD + _cx_relbad(HComplex_im(_cx_q), f64_div(f64_from(8), f64_from(100)));
+    # 1/(k(3+4i)) = (3 - 4i)/(25k) — this one DOES carry k, linearly.
+    # [measured: docs/audit/2026-09-09-epsilon-open.json]
+    var _cx_v = cx_inv(_cx_b);
+    _CX_BAD = _CX_BAD + _cx_relbad(HComplex_re(_cx_v),
+      f64_div(f64_from(3), f64_mul(f64_from(25), _cx_k)));
+    _CX_BAD = _CX_BAD + _cx_relbad(HComplex_im(_cx_v),
+      f64_neg(f64_div(f64_from(4), f64_mul(f64_from(25), _cx_k))));
+    _cx_e = _cx_e + 1;
+}
+# ⚠ `cx_powf` needs its OWN sweep and the first draft of this block had none —
+# its mutant SURVIVED. Its guard is on |a|², but unlike cx_div it is NOT a
+# structural problem: what follows is `ganita_f64_pow(cx_abs(a), n)` and cx_abs is
+# itself `sqrt(cx_norm_sq)`, so the value is already gone once |a|² is subnormal.
+# A threshold is the right shape here; only the SCALE was wrong.
+# ⚠ Narrower range than the sweep above, and deliberately: this squares, so k²
+# must stay representable — at k = 1e±150 the result is ~1e±300, still normal.
+var _CP_RUN = 0;
+var _CP_BAD = 0;
+var _cp_e = 0 - 150;
+while (_cp_e <= 150) {
+    var _cp_k = F64_ONE;
+    var _cp_i = 0;
+    if (_cp_e >= 0) {
+        while (_cp_i < _cp_e) { _cp_k = f64_mul(_cp_k, f64_from(10)); _cp_i = _cp_i + 1; }
+    }
+    if (_cp_e < 0) {
+        while (_cp_i < (0 - _cp_e)) { _cp_k = f64_div(_cp_k, f64_from(10)); _cp_i = _cp_i + 1; }
+    }
+    # (k(3+4i))² = k²(-7 + 24i) at every scale.
+    var _cp_r = cx_powf(cx_new(f64_mul(_cp_k, f64_from(3)),
+        f64_mul(_cp_k, f64_from(4))), F64_TWO);
+    var _cp_k2 = f64_mul(_cp_k, _cp_k);
+    _CP_RUN = _CP_RUN + 1;
+    _CP_BAD = _CP_BAD + _cx_relbad(HComplex_re(_cp_r),
+      f64_mul(_cp_k2, f64_neg(f64_from(7))));
+    _CP_BAD = _CP_BAD + _cx_relbad(HComplex_im(_cp_r), f64_mul(_cp_k2, f64_from(24)));
+    _cp_e = _cp_e + 1;
+}
+assert_eq(_CP_RUN, 301, "the cx_powf scale sweep actually ran 301 decades");
+assert_eq(_CP_BAD, 0,
+  "cx_powf: (k(3+4i))^2 = k^2(-7+24i) at every scale from 1e-150 to 1e+150");
+
+assert_eq(_CX_RUN, 401, "the complex scale sweep actually ran 401 decades");
+assert_eq(_CX_BAD, 0,
+  "cx_div / cx_inv: exact at every common scale from 1e-200 to 1e+200");
+
+# ⭐ ANTI-DELETION. The pole is documented and must keep its sentinel, or the
+# repair is a deletion: both components of the divisor exactly zero.
+# ⚠ Bit-exact, not `cx_is_zero` — that takes a TOLERANCE, and a tolerance-based
+# check would pass on a near-zero fabrication, which is the very thing under test.
+var _cx_p0 = cx_div(cx_new(F64_ONE, F64_TWO), cx_new(0, 0));
+assert_eq(HComplex_re(_cx_p0), 0,
+  "cx_div: an exactly zero divisor still returns the zero sentinel (re)");
+assert_eq(HComplex_im(_cx_p0), 0,
+  "cx_div: an exactly zero divisor still returns the zero sentinel (im)");
+var _cx_p1 = cx_inv(cx_new(0, 0));
+assert_eq(HComplex_re(_cx_p1), 0,
+  "cx_inv: inverting exactly zero still returns the zero sentinel (re)");
+assert_eq(HComplex_im(_cx_p1), 0,
+  "cx_inv: inverting exactly zero still returns the zero sentinel (im)");
+# ⚠ And a purely-imaginary divisor exercises the OTHER branch of Smith's, which
+# an all-real fixture would never reach: (1+2i)/(2i) = 1 - 0.5i.
+var _cx_pi = cx_div(cx_new(F64_ONE, F64_TWO), cx_new(0, F64_TWO));
+assert_eq(HComplex_re(_cx_pi), 0x3FF0000000000000,
+  "cx_div: a purely imaginary divisor takes the second branch and gives re = 1");
+assert_eq(HComplex_im(_cx_pi), 0xBFE0000000000000,
+  "cx_div: a purely imaginary divisor gives im = -0.5");
+
 test_group("geo 2.14.0: ray/geometry guards are scale-free");
 
 # --- J. THE SIX JETS. Each guarded `den` (or dk/fk) against an absolute 1e-12

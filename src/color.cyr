@@ -49,8 +49,11 @@ fn premultiply_alpha(r, g, b, a) {
 }
 
 fn unpremultiply_alpha(r, g, b, a) {
-    if (f64_lt(f64_abs(a), EPSILON_F64) == 1) { return hvec4_zero(); }
+    # ⛔ `a` is the homogeneous weight of a premultiplied tuple, and an absolute
+    # 1e-12 discarded genuinely faint coverage as fully transparent black — losing
+    # the caller's alpha too, since the live path returns `a` in w.
     var inv_a = f64_div(F64_ONE, a);
+    if (f64_lt(f64_abs(inv_a), F64_POS_INF) == 0) { return hvec4_zero(); }
     return hvec4_new(f64_mul(r, inv_a), f64_mul(g, inv_a), f64_mul(b, inv_a), a);
 }
 
@@ -154,7 +157,16 @@ fn linearize_depth(ndc, near, far) {
 }
 
 fn linearize_depth_reverse_z(ndc, near) {
-    if (f64_lt(f64_abs(ndc), EPSILON_F64) == 1) { return 0; }  # At far plane
+    # ⛔ TWO DEFECTS ON ONE LINE. (1) `ndc` was tested against an absolute 1e-12
+    # and the fallback fabricated 0.0. ⚠ Not F64_TINY either, and that is measured
+    # rather than assumed: `near/ndc` stays FINITE for subnormal ndc across most of
+    # that band — 1/(DBL_MIN/2) is 8.988e307, a perfectly good number — so DBL_MIN
+    # would still fabricate 0 where the division succeeds. Only an exact zero has
+    # no answer, so that is the test. (2) The comment said "At far plane" and had
+    # the meaning INVERTED: this is a reverse-Z projection, so ndc = 0 is the
+    # infinite FAR plane and linear depth 0 is AT THE EYE.
+    # [measured: docs/audit/2026-09-09-epsilon-open.json]
+    if (f64_eq(ndc, 0) == 1) { return 0; }  # ndc = 0 is the infinite far plane
     return f64_div(near, ndc);
 }
 
