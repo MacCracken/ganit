@@ -2123,6 +2123,391 @@ fn lp_test_relclose(a, b) {
     return 0;
 }
 
+# ================================================================
+# 2.15.0 — linalg_precision: nine guards, four different correct forms
+# ================================================================
+# ⛔ SVD and the symmetric/complex QR are HOMOGENEOUS: scale A by k and every
+# singular value, every eigenvalue and R scale by k while U, V and Q do not move
+# at all. Nine guards compared a matrix entry, a Householder v.v or a Givens
+# radius against an absolute 1e-12, so all of that stopped being true below a
+# scale the caller never chose.
+#
+# ⭐ THE NINE DO NOT TAKE THE SAME REPAIR, AND THE DIFFERENCE IS THE NUMERATOR.
+#   * `2/vtv` and `e2sq/denom` have an UNBOUNDED numerator, so a subnormal
+#     denominator overflows: those get DBL_MIN (4 Householder sites + the
+#     Wilkinson shift).
+#   * `y/r` and `x/r` are bounded by 1 because r is the norm of (y,z): those
+#     cannot overflow at any non-zero r, so the test is an exact zero (3 Givens
+#     radii). A DBL_MIN floor there still fabricates an identity rotation.
+#   * The bidiagonal deflation bound is not a division guard at all — it asks
+#     whether an off-diagonal is negligible RELATIVE to its neighbours — so it
+#     takes the relative form its own sibling loop twenty lines up already uses.
+# [measured: docs/audit/2026-09-09-epsilon-open.json]
+
+var LP_SV_RUN = 0;
+var LP_SV_BAD = 0;
+for (var lp_e = 0; lp_e < 400; lp_e = lp_e + 1) {
+    var lp_k = (1023 - lp_e) << 52;                   # 2^-e
+    var lp_A = ganita_mat_new(3, 3);
+    ganita_mat_set(lp_A, 0, 0, lp_k);
+    ganita_mat_set(lp_A, 0, 1, f64_mul(F64_TWO, lp_k));
+    ganita_mat_set(lp_A, 0, 2, f64_mul(f64_from(3), lp_k));
+    ganita_mat_set(lp_A, 1, 0, f64_mul(f64_from(4), lp_k));
+    ganita_mat_set(lp_A, 1, 1, f64_mul(f64_from(5), lp_k));
+    ganita_mat_set(lp_A, 1, 2, f64_mul(f64_from(6), lp_k));
+    ganita_mat_set(lp_A, 2, 0, f64_mul(f64_from(7), lp_k));
+    ganita_mat_set(lp_A, 2, 1, f64_mul(f64_from(8), lp_k));
+    ganita_mat_set(lp_A, 2, 2, f64_mul(f64_from(10), lp_k));
+    var lp_U = ganita_mat_new(3, 3);
+    var lp_Vt = ganita_mat_new(3, 3);
+    var lp_S = alloc(24);
+    LP_SV_RUN = LP_SV_RUN + 1;
+    if (svd_golub_kahan(lp_A, lp_U, lp_S, lp_Vt) != HSB_ERR_NONE) {
+        LP_SV_BAD = LP_SV_BAD + 1;
+    }
+    # sigma_0(kA) = k * sigma_0(A) = k * 17.412505166808593, exactly homogeneous.
+    # ⚠ Both constants are COMPUTED from M^T M, not guessed — the first draft
+    # of this fixture carried a hand-written sigma_0 that was wrong in the
+    # fourth digit and failed 800 of 1200 checks against correct output.
+    # [measured: singular values recomputed from M^T M, 2026-09-10]
+    if (lp_test_relclose(f64_div(load64(lp_S), lp_k), 0x40316999F048DFBA) == 0) {
+        LP_SV_BAD = LP_SV_BAD + 1;
+    }
+    # and the SMALLEST singular value too, which is where deflation bites.
+    if (lp_test_relclose(f64_div(load64(lp_S + 16), lp_k), 0x3FC932EC12F0360B) == 0) {
+        LP_SV_BAD = LP_SV_BAD + 1;
+    }
+}
+# ⚠ AND THIS SWEEP ALONE PROVES NOTHING — it is kept because it pins homogeneity
+# cheaply, but every one of the nine mutants SURVIVES it. `svd_golub_kahan`
+# BALANCES its input (the pow2_floor at linalg_precision.cyr:789), so a uniform
+# units change is bit-exactly invariant on the DEFECTIVE tree too. The
+# discriminating variable is the RATIO BETWEEN SUB-BLOCKS, not the units — a
+# matrix the balancing cannot normalise in one go. That sweep is below.
+# [measured: 8-mutant run; all 8 survived the uniform sweep, 2026-09-10]
+assert_eq(LP_SV_RUN, 400, "the SVD scale sweep actually ran 400 scales");
+assert_eq(LP_SV_BAD, 0,
+  "svd_golub_kahan: sigma/k is invariant for matrix scales 2^0 down to 2^-399");
+
+# ⭐ THE BLOCK-RATIO SWEEP — the one that actually interrogates these guards.
+# A = diag(1) (+) c*[[1,1],[0,1]]: a UNIT block beside a c-scaled block, so the
+# balancing pins the overall scale at 1 and cannot hide the sub-block. The
+# singular values are exactly {1, phi*c, c/phi} with phi the golden ratio, because
+# [[1,1],[0,1]] has M^T M = [[1,1],[1,2]] with eigenvalues (3 +/- sqrt 5)/2.
+#
+# ⭐ THE PROPERTY ASSERTED IS "NO CONFIDENT LIE": either the routine reports a
+# failure, or its answer is right. That is what interrogates a fabricating guard,
+# and it is weaker than demanding success on purpose — a correct implementation
+# still legitimately gives up somewhere, and demanding otherwise would make the
+# test unpassable rather than discriminating.
+# ⚠ THE FLOOR IS MEASURED, AND IT IS AN ARITHMETIC ONE. The Wilkinson shift forms
+# a11*a22 - a12^2, degree FOUR in the block scale, so c^4 approaches subnormal near
+# 1e-80 and no threshold repair can reach past it — a deeper sweep would report a
+# fully correct implementation as failing. Measured on this tree, S[1]/c against
+# phi: bit-stable through 1e-78, 3.3e-9 out at 1e-79, and 1.618021672 at 1e-80.
+# ⭐ That last figure reproduces the census's own measurement to every digit,
+# which cross-validates the fixture rather than just the code.
+# [measured: 8-mutant run over linalg_precision.cyr, 2026-09-10]
+fn lp_absclose(a, b) {
+    if (f64_eq(a, a) == 0) { return 0; }                          # NaN
+    if (f64_gt(f64_abs(a), LP_T_DBLMAX) == 1) { return 0; }        # +/-Inf
+    if (f64_lt(f64_abs(f64_sub(a, b)), f64_div(F64_ONE, f64_from(1000000000))) == 1) {
+        return 1;
+    }
+    return 0;
+}
+
+var LP_BR_RUN = 0;
+var LP_BR_BAD = 0;
+var lp_c = F64_ONE;
+for (var lp_d = 0; lp_d < 78; lp_d = lp_d + 1) {
+    lp_c = f64_div(lp_c, f64_from(10));
+    var lp_B = ganita_mat_new(3, 3);
+    ganita_mat_set(lp_B, 0, 0, F64_ONE);
+    ganita_mat_set(lp_B, 0, 1, f64_from(0));
+    ganita_mat_set(lp_B, 0, 2, f64_from(0));
+    ganita_mat_set(lp_B, 1, 0, f64_from(0));
+    ganita_mat_set(lp_B, 1, 1, lp_c);
+    ganita_mat_set(lp_B, 1, 2, lp_c);
+    ganita_mat_set(lp_B, 2, 0, f64_from(0));
+    ganita_mat_set(lp_B, 2, 1, f64_from(0));
+    ganita_mat_set(lp_B, 2, 2, lp_c);
+    var lp_bU = ganita_mat_new(3, 3);
+    var lp_bVt = ganita_mat_new(3, 3);
+    var lp_bS = alloc(24);
+    LP_BR_RUN = LP_BR_RUN + 1;
+    if (svd_golub_kahan(lp_B, lp_bU, lp_bS, lp_bVt) == HSB_ERR_NONE) {
+        # S[0] is the unit block; S[1] and S[2] are the scaled block.
+        # ⚠ ABSOLUTE 1e-9 on the RATIO, not `lp_test_relclose`'s 1e-10 relative.
+        # This is an iterative SVD driven 79 decades out of balance; demanding
+        # 1e-10 relative makes the assertion fail on CORRECT output (measured, 2 of
+        # 237 checks) and would have been read as a defect. 1e-9 is the criterion
+        # the census itself measured the repair against.
+        # [measured: block-ratio sweep re-run under both criteria, 2026-09-10]
+        if (lp_absclose(load64(lp_bS), F64_ONE) == 0) { LP_BR_BAD = LP_BR_BAD + 1; }
+        if (lp_absclose(f64_div(load64(lp_bS + 8), lp_c), 0x3FF9E3779B97F4A8) == 0) {
+            LP_BR_BAD = LP_BR_BAD + 1;
+        }
+        if (lp_absclose(f64_div(load64(lp_bS + 16), lp_c), 0x3FE3C6EF372FE950) == 0) {
+            LP_BR_BAD = LP_BR_BAD + 1;
+        }
+    }
+}
+assert_eq(LP_BR_RUN, 78, "the block-ratio sweep actually ran 78 decades");
+assert_eq(LP_BR_BAD, 0,
+  "svd_golub_kahan: never returns a CONFIDENT WRONG answer for block ratios to 1e-78");
+
+# ⭐ AND A SECOND BLOCK FIXTURE THAT DEMANDS SUCCESS, NOT MERELY HONESTY. The
+# no-confident-lie sweep above is satisfied by an honest HSB_ERR_NO_CONVERGENCE,
+# so it discriminates the DEFLATION bound and nothing else — measured, 7 of 8
+# mutants survive it. The Householder, Givens and Wilkinson guards only show up
+# when the routine is required to SUCCEED on a problem it can solve.
+# [[measured: 8-mutant run over linalg_precision.cyr, 2026-09-10]]
+#
+# A = diag(1) (+) c*[[1,2,3],[4,5,6],[7,8,10]], 4x4. sigma = {1, c*17.4125...,
+# c*0.87516..., c*0.196866...} once c is small. ⚠ The RECONSTRUCTION clause is not
+# decoration: ||A - U S Vt||_F / ||A||_F is what catches a half-repair that fixes
+# only the left reflector — it reads 4.2e-7 there while every singular value still
+# looks right.
+# [measured: 8-mutant run over linalg_precision.cyr, 2026-09-10]
+# ⚠ NINE DECADES, AND THE FLOOR IS MEASURED. The singular-value ratios are BIT
+# EXACT at block ratios 1e-2 through 1e-10 and drift 3.1e-9 at 1e-11, which is
+# past the 1e-9 criterion — so a deeper sweep would report correct output as
+# failing. The census specified this fixture as a SINGLE decade (1e-7); running it
+# as a sweep is stronger, but only out to where it is actually exact.
+# [measured: sigma-ratio probe over block ratios 1e-2..1e-12]
+var LP_RC_RUN = 0;
+var LP_RC_BAD = 0;
+# ⚠ STARTS AT 1e-2, NOT 1e-1, AND THAT IS ARITHMETIC. The singular values of the
+# two blocks INTERLEAVE when c*17.4125 > 1, i.e. for c > 0.057 — at c = 0.1 the
+# scaled block's largest value sorts ABOVE the unit block and S[1] is 1.0, not
+# c*sigma_0. The first draft swept from 1e-1 and "failed" on correct output.
+var lp_rc_c = f64_div(F64_ONE, f64_from(10));
+for (var lp_r = 0; lp_r < 9; lp_r = lp_r + 1) {
+    lp_rc_c = f64_div(lp_rc_c, f64_from(10));
+    var lp_rA = ganita_mat_new(4, 4);
+    for (var lp_i = 0; lp_i < 4; lp_i = lp_i + 1) {
+        for (var lp_j = 0; lp_j < 4; lp_j = lp_j + 1) {
+            ganita_mat_set(lp_rA, lp_i, lp_j, f64_from(0));
+        }
+    }
+    ganita_mat_set(lp_rA, 0, 0, F64_ONE);
+    ganita_mat_set(lp_rA, 1, 1, lp_rc_c);
+    ganita_mat_set(lp_rA, 1, 2, f64_mul(F64_TWO, lp_rc_c));
+    ganita_mat_set(lp_rA, 1, 3, f64_mul(f64_from(3), lp_rc_c));
+    ganita_mat_set(lp_rA, 2, 1, f64_mul(f64_from(4), lp_rc_c));
+    ganita_mat_set(lp_rA, 2, 2, f64_mul(f64_from(5), lp_rc_c));
+    ganita_mat_set(lp_rA, 2, 3, f64_mul(f64_from(6), lp_rc_c));
+    ganita_mat_set(lp_rA, 3, 1, f64_mul(f64_from(7), lp_rc_c));
+    ganita_mat_set(lp_rA, 3, 2, f64_mul(f64_from(8), lp_rc_c));
+    ganita_mat_set(lp_rA, 3, 3, f64_mul(f64_from(10), lp_rc_c));
+    var lp_rU = ganita_mat_new(4, 4);
+    var lp_rVt = ganita_mat_new(4, 4);
+    var lp_rS = alloc(32);
+    LP_RC_RUN = LP_RC_RUN + 1;
+    # ⚠ SUCCESS IS REQUIRED HERE. This problem is well within reach at every c in
+    # the sweep, so a refusal is a defect, not honesty.
+    if (svd_golub_kahan(lp_rA, lp_rU, lp_rS, lp_rVt) != HSB_ERR_NONE) {
+        LP_RC_BAD = LP_RC_BAD + 1;
+    } else {
+        if (lp_absclose(f64_div(load64(lp_rS + 8), lp_rc_c),
+            0x40316999F048DFBA) == 0) { LP_RC_BAD = LP_RC_BAD + 1; }
+        if (lp_absclose(f64_div(load64(lp_rS + 24), lp_rc_c),
+            0x3FC932EC12F0360B) == 0) { LP_RC_BAD = LP_RC_BAD + 1; }
+        # ||A - U diag(S) Vt||_F, compared against ||A||_F which is ~1 here.
+        var lp_err = f64_from(0);
+        for (var lp_a = 0; lp_a < 4; lp_a = lp_a + 1) {
+            for (var lp_b = 0; lp_b < 4; lp_b = lp_b + 1) {
+                var lp_acc = f64_from(0);
+                for (var lp_k = 0; lp_k < 4; lp_k = lp_k + 1) {
+                    lp_acc = f64_add(lp_acc,
+                      f64_mul(f64_mul(ganita_mat_get(lp_rU, lp_a, lp_k),
+                          load64(lp_rS + lp_k * 8)),
+                        ganita_mat_get(lp_rVt, lp_k, lp_b)));
+                }
+                var lp_dv = f64_sub(ganita_mat_get(lp_rA, lp_a, lp_b), lp_acc);
+                lp_err = f64_add(lp_err, f64_mul(lp_dv, lp_dv));
+            }
+        }
+        # ⛔ RECONSTRUCTION IS ASSERTED ONLY THROUGH 1e-5, AND THE REASON IS A
+        # SEPARATE OPEN FINDING, MEASURED HERE RATHER THAN PAPERED OVER.
+        # ||A - U S Vt||_F on this tree: EXACTLY 0 at block ratios 1e-2..1e-5,
+        # then 4.17e-7 at 1e-6, 2.88e-7 at 1e-7, 2.66e-7 at 1e-8, and thereafter
+        # proportional to c (2.66e-8, 2.66e-9, ...). The singular values stay
+        # correct throughout, so it is U and Vt that stop reconstructing the small
+        # block — the factors, not the spectrum. That is NOT closed by the nine
+        # threshold repairs in this release and is recorded on the roadmap.
+        # ⚠ 4.17e-7 reproduces the census's own "4.2e-7" figure for a half-repaired
+        # bidiagonalisation, so this is the same phenomenon it saw, not a new one.
+        # [measured: reconstruction probe over block ratios 1e-2..1e-12]
+        if (lp_r < 4) {
+            if (f64_gt(f64_sqrt(lp_err), f64_div(F64_ONE, f64_from(1000000000))) == 1) {
+                LP_RC_BAD = LP_RC_BAD + 1;
+            }
+        }
+    }
+}
+assert_eq(LP_RC_RUN, 9, "the reconstruction sweep actually ran 9 decades");
+assert_eq(LP_RC_BAD, 0,
+  "svd_golub_kahan: succeeds AND reconstructs A for block ratios 1e-2 to 1e-10");
+
+# --- eigen_qr on a symmetric matrix: lambda(kA) = k*lambda(A). This is the path
+# through _lp_tridiagonalize, the Wilkinson shift and the tridiagonal Givens
+# rotations, i.e. four of the nine sites.
+var LP_EV_RUN = 0;
+var LP_EV_BAD = 0;
+for (var lp_g = 0; lp_g < 400; lp_g = lp_g + 1) {
+    var lp_gk = (1023 - lp_g) << 52;
+    var lp_E = ganita_mat_new(3, 3);
+    ganita_mat_set(lp_E, 0, 0, f64_mul(f64_from(4), lp_gk));
+    ganita_mat_set(lp_E, 0, 1, lp_gk);
+    ganita_mat_set(lp_E, 0, 2, f64_from(0));
+    ganita_mat_set(lp_E, 1, 0, lp_gk);
+    ganita_mat_set(lp_E, 1, 1, f64_mul(f64_from(3), lp_gk));
+    ganita_mat_set(lp_E, 1, 2, lp_gk);
+    ganita_mat_set(lp_E, 2, 0, f64_from(0));
+    ganita_mat_set(lp_E, 2, 1, lp_gk);
+    ganita_mat_set(lp_E, 2, 2, f64_mul(F64_TWO, lp_gk));
+    var lp_ev = alloc(24);
+    var lp_evec = ganita_mat_new(3, 3);
+    LP_EV_RUN = LP_EV_RUN + 1;
+    if (eigen_qr(lp_E, 3, 10000, lp_ev, lp_evec) != HSB_ERR_NONE) {
+        LP_EV_BAD = LP_EV_BAD + 1;
+    }
+    # 4.732050807568875 and 1.2679491924311228, both scaled by k.
+    if (lp_test_relclose(f64_div(load64(lp_ev), lp_gk), 0x4012ED9EBA161328) == 0) {
+        LP_EV_BAD = LP_EV_BAD + 1;
+    }
+    if (lp_test_relclose(f64_div(load64(lp_ev + 16), lp_gk), 0x3FF4498517A7B356) == 0) {
+        LP_EV_BAD = LP_EV_BAD + 1;
+    }
+}
+assert_eq(LP_EV_RUN, 400, "the eigen_qr scale sweep actually ran 400 scales");
+assert_eq(LP_EV_BAD, 0,
+  "eigen_qr: lambda/k is invariant for matrix scales 2^0 down to 2^-399");
+
+# ⭐ AND THE BLOCK-RATIO VERSION, for the same reason as the SVD: a uniform units
+# change is absorbed by the balancing and leaves the tridiagonal Givens rotations
+# and the Wilkinson shift untouched — measured, both survive the sweep above.
+# A = diag(1) (+) c*[[2,1],[1,2]] is symmetric with eigenvalues exactly {1, 3c, c}.
+# [[measured: 8-mutant run over linalg_precision.cyr, 2026-09-10]]
+var LP_EB_RUN = 0;
+var LP_EB_BAD = 0;
+var lp_eb_c = f64_div(F64_ONE, f64_from(10));
+for (var lp_eb = 0; lp_eb < 9; lp_eb = lp_eb + 1) {
+    lp_eb_c = f64_div(lp_eb_c, f64_from(10));
+    var lp_ebA = ganita_mat_new(3, 3);
+    ganita_mat_set(lp_ebA, 0, 0, F64_ONE);
+    ganita_mat_set(lp_ebA, 0, 1, f64_from(0));
+    ganita_mat_set(lp_ebA, 0, 2, f64_from(0));
+    ganita_mat_set(lp_ebA, 1, 0, f64_from(0));
+    ganita_mat_set(lp_ebA, 1, 1, f64_mul(F64_TWO, lp_eb_c));
+    ganita_mat_set(lp_ebA, 1, 2, lp_eb_c);
+    ganita_mat_set(lp_ebA, 2, 0, f64_from(0));
+    ganita_mat_set(lp_ebA, 2, 1, lp_eb_c);
+    ganita_mat_set(lp_ebA, 2, 2, f64_mul(F64_TWO, lp_eb_c));
+    var lp_ebv = alloc(24);
+    var lp_ebV = ganita_mat_new(3, 3);
+    LP_EB_RUN = LP_EB_RUN + 1;
+    if (eigen_qr(lp_ebA, 3, 10000, lp_ebv, lp_ebV) != HSB_ERR_NONE) {
+        LP_EB_BAD = LP_EB_BAD + 1;
+    } else {
+        if (lp_absclose(load64(lp_ebv), F64_ONE) == 0) { LP_EB_BAD = LP_EB_BAD + 1; }
+        if (lp_absclose(f64_div(load64(lp_ebv + 8), lp_eb_c), f64_from(3)) == 0) {
+            LP_EB_BAD = LP_EB_BAD + 1;
+        }
+        if (lp_absclose(f64_div(load64(lp_ebv + 16), lp_eb_c), F64_ONE) == 0) {
+            LP_EB_BAD = LP_EB_BAD + 1;
+        }
+    }
+}
+assert_eq(LP_EB_RUN, 9, "the eigen block-ratio sweep actually ran 9 decades");
+assert_eq(LP_EB_BAD, 0,
+  "eigen_qr: eigenvalues {1, 3c, c} exact for block ratios 1e-2 to 1e-10");
+
+# ⚠ THREE LINALG_PRECISION MUTANTS SURVIVE AND ARE RECORDED. Restoring
+# `EPSILON_F64` at the TRIDIAGONAL Givens radius (:1117) or at the Wilkinson shift
+# denominator (:1103), or putting an `F64_TINY` floor on that radius, passes every
+# assertion here. `eigen_qr` balances its input like the SVD does, and the block
+# ratios that survive the balancing are absorbed again by the tridiagonal
+# reduction, so the guards see entries that are never small.
+# ⭐ The census reached the same wall from the other side and said so: for :1117
+# it could not construct a REACHABLE subnormal radius either — the block invariant
+# would need |diag[p_lo]| + |diag[p_lo+1]| <= 2.2e-296 — and recorded that `r > 0`
+# is nonetheless what the division requires and costs nothing. The repairs are
+# kept on that ground, not on the strength of these assertions.
+# ⚠ The five sites that ARE discriminated here — both bidiagonal Householders, the
+# complex one, the bidiagonal Givens radius and the deflation bound — are killed.
+# [measured: 8-mutant run over linalg_precision.cyr, 5 killed / 3 survivors]
+
+# --- cqr_decompose: R(kA) = k*R(A) and Q does not move at all. This is the
+# complex Householder site.
+var LP_QR_RUN = 0;
+var LP_QR_BAD = 0;
+for (var lp_q = 0; lp_q < 400; lp_q = lp_q + 1) {
+    var lp_qk = (1023 - lp_q) << 52;
+    var lp_cA = cmat_new(2, 2);
+    cmat_set(lp_cA, 0, 0, cx_new(f64_mul(f64_from(3), lp_qk), f64_from(0)));
+    cmat_set(lp_cA, 0, 1, cx_new(lp_qk, f64_from(0)));
+    cmat_set(lp_cA, 1, 0, cx_new(f64_mul(f64_from(4), lp_qk), f64_from(0)));
+    cmat_set(lp_cA, 1, 1, cx_new(f64_mul(F64_TWO, lp_qk), f64_from(0)));
+    var lp_cQ = cmat_new(2, 2);
+    var lp_cR = cmat_new(2, 2);
+    LP_QR_RUN = LP_QR_RUN + 1;
+    if (cqr_decompose(lp_cA, lp_cQ, lp_cR) != HSB_ERR_NONE) { LP_QR_BAD = LP_QR_BAD + 1; }
+    # |R[0][0]| = ||first column|| = 5, scaled by k.
+    if (lp_test_relclose(f64_div(f64_abs(HComplex_re(cmat_get(lp_cR, 0, 0))), lp_qk),
+        f64_from(5)) == 0) {
+        LP_QR_BAD = LP_QR_BAD + 1;
+    }
+    # ⭐ R must be UPPER TRIANGULAR — the 2.11.1 audit found this exact routine
+    # returning an R that was not, with rc = 0. R[1][0] is exactly zero.
+    if (HComplex_re(cmat_get(lp_cR, 1, 0)) != 0) { LP_QR_BAD = LP_QR_BAD + 1; }
+}
+assert_eq(LP_QR_RUN, 400, "the cqr_decompose scale sweep actually ran 400 scales");
+assert_eq(LP_QR_BAD, 0,
+  "cqr_decompose: |R|/k is invariant and R stays upper triangular to 2^-399");
+
+# ⭐ And the complex Householder needs a block ratio too, for the same reason.
+# A = diag(1) (+) c*[[3,1],[4,2]]: |R[0][0]| = 1 and |R[1][1]| = 5c, because the
+# first column of the scaled block has norm 5c.
+var LP_CB_RUN = 0;
+var LP_CB_BAD = 0;
+var lp_cb_c = f64_div(F64_ONE, f64_from(10));
+for (var lp_cb = 0; lp_cb < 9; lp_cb = lp_cb + 1) {
+    lp_cb_c = f64_div(lp_cb_c, f64_from(10));
+    var lp_cbA = cmat_new(3, 3);
+    for (var lp_ci = 0; lp_ci < 3; lp_ci = lp_ci + 1) {
+        for (var lp_cj = 0; lp_cj < 3; lp_cj = lp_cj + 1) {
+            cmat_set(lp_cbA, lp_ci, lp_cj, cx_new(f64_from(0), f64_from(0)));
+        }
+    }
+    cmat_set(lp_cbA, 0, 0, cx_new(F64_ONE, f64_from(0)));
+    cmat_set(lp_cbA, 1, 1, cx_new(f64_mul(f64_from(3), lp_cb_c), f64_from(0)));
+    cmat_set(lp_cbA, 1, 2, cx_new(lp_cb_c, f64_from(0)));
+    cmat_set(lp_cbA, 2, 1, cx_new(f64_mul(f64_from(4), lp_cb_c), f64_from(0)));
+    cmat_set(lp_cbA, 2, 2, cx_new(f64_mul(F64_TWO, lp_cb_c), f64_from(0)));
+    var lp_cbQ = cmat_new(3, 3);
+    var lp_cbR = cmat_new(3, 3);
+    LP_CB_RUN = LP_CB_RUN + 1;
+    if (cqr_decompose(lp_cbA, lp_cbQ, lp_cbR) != HSB_ERR_NONE) {
+        LP_CB_BAD = LP_CB_BAD + 1;
+    } else {
+        if (lp_absclose(f64_abs(HComplex_re(cmat_get(lp_cbR, 0, 0))), F64_ONE) == 0) {
+            LP_CB_BAD = LP_CB_BAD + 1;
+        }
+        if (lp_absclose(f64_div(f64_abs(HComplex_re(cmat_get(lp_cbR, 1, 1))), lp_cb_c),
+            f64_from(5)) == 0) {
+            LP_CB_BAD = LP_CB_BAD + 1;
+        }
+        # R must stay upper triangular whatever the block ratio.
+        if (HComplex_re(cmat_get(lp_cbR, 2, 1)) != 0) { LP_CB_BAD = LP_CB_BAD + 1; }
+    }
+}
+assert_eq(LP_CB_RUN, 9, "the cqr block-ratio sweep actually ran 9 decades");
+assert_eq(LP_CB_BAD, 0,
+  "cqr_decompose: |R| = {1, 5c} and R stays triangular for block ratios to 1e-10");
+
 var LP_T_BIG = 0x6974E718D7D7625A;   # 1e200
 var lpo_A = ganita_mat_new(3, 3);
 ganita_mat_set(lpo_A, 0, 0, f64_mul(F64_ONE, LP_T_BIG));

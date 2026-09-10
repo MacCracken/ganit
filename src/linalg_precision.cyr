@@ -237,7 +237,15 @@ fn _lp_bidiagonalize(A, m, n, diag, superdiag, U_acc, Vt_acc) {
                 i = i + 1;
             }
 
-            if (f64_gt(vtv, EPSILON_F64) == 1) {
+            # ⛔ `vtv` is a Householder v·v — degree TWO in the matrix entries —
+            # against an absolute 1e-12, so a well-formed reflector on a small
+            # matrix was skipped and the factorisation silently came back wrong.
+            # ⭐ DBL_MIN here, and NOT `vtv > 0`, because the numerator is the
+            # CONSTANT 2: `2/vtv` overflows for a subnormal vtv even though the
+            # quotient of a bounded pair would not. Contrast the Givens radii
+            # below, where |y|/r <= 1 and an exact-zero test is the right one.
+            # [measured: docs/audit/2026-09-09-epsilon-open.json]
+            if (f64_lt(vtv, F64_TINY) == 0) {
                 var two_over_vtv = f64_div(F64_TWO, vtv);
 
                 # Apply H_l to W: W[k:m, k:n] -= (2/vTv) * v * (v^T * W[k:m, k:n])
@@ -298,7 +306,10 @@ fn _lp_bidiagonalize(A, m, n, diag, superdiag, U_acc, Vt_acc) {
                     i = i + 1;
                 }
 
-                if (f64_gt(vtv_r, EPSILON_F64) == 1) {
+                # ⛔ Same class, the RIGHT reflector. ⚠ And here `vtv_r > 0` is
+                # measurably NOT equivalent to DBL_MIN — a subnormal vtv_r makes
+                # 2/vtv_r overflow — so the constant is load-bearing, not stylistic.
+                if (f64_lt(vtv_r, F64_TINY) == 0) {
                     var two_over_vtv_r = f64_div(F64_TWO, vtv_r);
 
                     # Apply H_r to W: W[k:m, (k+1):n] -= (2/vTv) * (W * v) * v^T
@@ -576,8 +587,19 @@ fn _lp_bidiag_qr(diag, superdiag, n, m, U_acc, Vt_acc, max_iter) {
         # Recalculate: find the bottom block where superdiag is zero
         # Simpler approach: find p_lo and p_hi for the active unreduced block
         # p_hi: largest index where superdiag[p_hi-1] != 0
+        # ⛔ THIS ONE IS NOT A DIVISION GUARD, so DBL_MIN would be wrong for it:
+        # it asks whether an off-diagonal is NEGLIGIBLE RELATIVE TO its neighbours,
+        # which is a question about significant digits, not about representability.
+        # Against an absolute 1e-12 a small matrix never deflated at all.
+        # ⭐ The relative form is already computed by the sibling deflation loop
+        # twenty lines up, so this is consistency rather than a new rule — and the
+        # entry is zeroed when the test fires, exactly as that sibling does.
         while (p_hi > 0 &&
-          f64_lt(f64_abs(load64(superdiag + (p_hi - 1) * 8)), EPSILON_F64) == 1) {
+          f64_lt(f64_abs(load64(superdiag + (p_hi - 1) * 8)),
+            f64_mul(EPSILON_F64,
+              f64_add(f64_abs(load64(diag + (p_hi - 1) * 8)),
+                f64_abs(load64(diag + p_hi * 8))))) == 1) {
+            store64(superdiag + (p_hi - 1) * 8, f64_from(0));
             p_hi = p_hi - 1;
         }
         if (p_hi == 0) {
@@ -645,9 +667,14 @@ fn _lp_bidiag_qr(diag, superdiag, n, m, U_acc, Vt_acc, max_iter) {
             while (k < p_hi) {
                 # Right Givens rotation to zero z (acts on columns k, k+1)
                 var r = f64_sqrt(f64_add(f64_mul(y, y), f64_mul(z, z)));
+                # ⭐ |y| <= r and |z| <= r by construction, so `y/r` and `z/r`
+                # are in [-1,1] and CANNOT overflow however small r is — the only
+                # input that fails is an exact zero. DBL_MIN is behaviour-neutral
+                # here (a subnormal r is unreachable) but over-strict by this
+                # project's own rule, so the test is the exact one.
                 var cs = f64_div(y, r);
                 var sn = f64_div(f64_neg(z), r);
-                if (f64_lt(r, EPSILON_F64) == 1) {
+                if (f64_gt(r, 0) == 0) {
                     cs = F64_ONE;
                     sn = f64_from(0);
                 }
@@ -687,9 +714,11 @@ fn _lp_bidiag_qr(diag, superdiag, n, m, U_acc, Vt_acc, max_iter) {
                 y = load64(diag + k * 8);
                 z = bulge;
                 r = f64_sqrt(f64_add(f64_mul(y, y), f64_mul(z, z)));
+                # ⭐ Same as the right rotation above: the quotients are bounded
+                # by 1, so only an exact zero fails.
                 cs = f64_div(y, r);
                 sn = f64_div(f64_neg(z), r);
-                if (f64_lt(r, EPSILON_F64) == 1) {
+                if (f64_gt(r, 0) == 0) {
                     cs = F64_ONE;
                     sn = f64_from(0);
                 }
@@ -933,7 +962,15 @@ fn _lp_tridiagonalize(A, n, diag, offdiag, Q) {
                 i = i + 1;
             }
 
-            if (f64_gt(vtv, EPSILON_F64) == 1) {
+            # ⛔ `vtv` is a Householder v·v — degree TWO in the matrix entries —
+            # against an absolute 1e-12, so a well-formed reflector on a small
+            # matrix was skipped and the factorisation silently came back wrong.
+            # ⭐ DBL_MIN here, and NOT `vtv > 0`, because the numerator is the
+            # CONSTANT 2: `2/vtv` overflows for a subnormal vtv even though the
+            # quotient of a bounded pair would not. Contrast the Givens radii
+            # below, where |y|/r <= 1 and an exact-zero test is the right one.
+            # [measured: docs/audit/2026-09-09-epsilon-open.json]
+            if (f64_lt(vtv, F64_TINY) == 0) {
                 var two_over_vtv = f64_div(F64_TWO, vtv);
 
                 # Compute p = (2/vtv) * W[k+1:n, k+1:n] * v
@@ -1100,7 +1137,12 @@ fn _lp_tridiag_qr(diag, offdiag, n, Q, max_iter) {
             }
             var denom = f64_add(delta, f64_mul(sgn_delta, denom_inner));
             var mu = d2;
-            if (f64_gt(f64_abs(denom), EPSILON_F64) == 1) {
+            # ⛔ `denom` is a MATRIX ENTRY (degree 1) against an absolute 1e-12,
+            # so on a small matrix the Wilkinson shift was silently dropped and
+            # the QR iteration fell back to an unshifted, far slower one.
+            # ⚠ DBL_MIN, not an exact zero: `e2sq/denom` has an unbounded
+            # numerator, so a subnormal denominator can overflow.
+            if (f64_lt(f64_abs(denom), F64_TINY) == 0) {
                 mu = f64_sub(d2, f64_div(e2sq, denom));
             }
 
@@ -1114,7 +1156,10 @@ fn _lp_tridiag_qr(diag, offdiag, n, Q, max_iter) {
                 var r = f64_sqrt(f64_add(f64_mul(x, x), f64_mul(z, z)));
                 var cs = F64_ONE;
                 var sn = f64_from(0);
-                if (f64_gt(r, EPSILON_F64) == 1) {
+                # ⭐ |x| <= r and |z| <= r, so the rotation is well defined for
+                # every non-zero r. A DBL_MIN floor would still fabricate the
+                # identity rotation over a band where the division succeeds.
+                if (f64_gt(r, 0) == 1) {
                     cs = f64_div(x, r);
                     sn = f64_div(z, r);
                 }
@@ -1446,7 +1491,8 @@ fn cqr_decompose(A, out_Q, out_R) {
                 i = i + 1;
             }
 
-            if (f64_gt(vhv, EPSILON_F64) == 1) {
+            # ⛔ Same class in the complex QR: v^H v against an absolute 1e-12.
+            if (f64_lt(vhv, F64_TINY) == 0) {
                 var two_over_vhv = f64_div(F64_TWO, vhv);
 
                 # Apply H to out_R: R[k:m, k:n] -= (2/vHv) * v * (v^H * R[k:m, k:n])

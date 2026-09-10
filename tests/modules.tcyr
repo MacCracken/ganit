@@ -10697,6 +10697,155 @@ assert(calc_monotone_cubic(_ce_rx, _ce_ry, 4,
 # untouched, or a silently zeroed beta — so the failure mode is a solvable problem
 # declared unsolvable. Still wrong, and still on public entry points.
 
+# ================================================================
+# 2.15.0 — collision_core: a tolerance used as an ORDER and as a SIGN
+# ================================================================
+# ⛔ Three different misuses of one constant. (1) `sequential_impulse` tested a
+# sum of INVERSE MASSES — units 1/mass — so whether two bodies counted as "both
+# static" depended on kilograms vs tonnes. (2) `_col_xy_greater` is a SORT
+# COMPARATOR and an epsilon-equality is not transitive, so the relation was not a
+# total order at all; a sort driven by a non-order can drop or duplicate elements,
+# and the hull inherits that silently. (3) Four convexity tests asked whether
+# twice-the-signed-area exceeded 1e-12 instead of asking its SIGN, so a strictly
+# convex vertex of a small polygon was classified concave — a plausible DIAGNOSIS
+# rather than a plausible number, which is worse.
+# [measured: docs/audit/2026-09-09-epsilon-open.json]
+# ⭐ `_col_point_in_tri` in the same file has always used the exact sign test on
+# this same quantity, so the repair is consistency, not a new rule.
+
+test_group("collision_core 2.15.0: order, sign and inverse mass are scale-free");
+
+# --- triangulate_polygon / _col_ring_is_convex. A square is a square at every
+# size: 4 vertices, 2 triangles, 6 indices. Measured before the repair: at 2^-20
+# it returned an EMPTY triangulation.
+# [measured: docs/audit/2026-09-09-epsilon-open.json]
+var _CC_RUN = 0;
+var _CC_BAD = 0;
+for (var _cc_e = 0; _cc_e < 250; _cc_e = _cc_e + 1) {
+    var _cc_s = (1023 - _cc_e) << 52;
+    var _cc_q = vec_new();
+    vec_push(_cc_q, hvec2_new(0, 0));
+    vec_push(_cc_q, hvec2_new(_cc_s, 0));
+    vec_push(_cc_q, hvec2_new(_cc_s, _cc_s));
+    vec_push(_cc_q, hvec2_new(0, _cc_s));
+    _CC_RUN = _CC_RUN + 1;
+    if (vec_len(triangulate_polygon(_cc_q, 4)) != 6) { _CC_BAD = _CC_BAD + 1; }
+    # and the hull of the same four points is still all four of them.
+    if (vec_len(convex_hull_2d(_cc_q, 4)) != 4) { _CC_BAD = _CC_BAD + 1; }
+}
+assert_eq(_CC_RUN, 250, "the polygon scale sweep actually ran 250 scales");
+assert_eq(_CC_BAD, 0,
+  "triangulate_polygon / convex_hull_2d: a square is a square from 2^0 to 2^-249");
+# ⭐ ANTI-DELETION: a genuinely degenerate polygon must still produce nothing.
+var _cc_line = vec_new();
+vec_push(_cc_line, hvec2_new(0, 0));
+vec_push(_cc_line, hvec2_new(F64_ONE, 0));
+vec_push(_cc_line, hvec2_new(F64_TWO, 0));
+assert_eq(vec_len(triangulate_polygon(_cc_line, 3)), 0,
+  "triangulate_polygon: three colinear points still triangulate to nothing");
+
+# ⚠ AND A CONCAVE POLYGON, because a convex one does not reach the defect.
+# `_col_ring_is_convex` only decides which vertices BLOCK an ear, and a convex
+# quad blocks nothing whatever the predicate says — measured, that mutant survived
+# the square sweep. A reflex vertex is what makes the blocked set load-bearing.
+# [measured: 5-mutant run over collision_core.cyr, 2 survivors before this]
+var _CV_RUN = 0;
+var _CV_BAD = 0;
+for (var _cv_e = 0; _cv_e < 250; _cv_e = _cv_e + 1) {
+    var _cv_s = (1023 - _cv_e) << 52;
+    var _cv_p = vec_new();
+    vec_push(_cv_p, hvec2_new(0, 0));
+    vec_push(_cv_p, hvec2_new(f64_mul(F64_TWO, _cv_s), 0));
+    vec_push(_cv_p, hvec2_new(f64_mul(F64_TWO, _cv_s), f64_mul(F64_TWO, _cv_s)));
+    vec_push(_cv_p, hvec2_new(_cv_s, _cv_s));                 # the reflex vertex
+    vec_push(_cv_p, hvec2_new(0, f64_mul(F64_TWO, _cv_s)));
+    _CV_RUN = _CV_RUN + 1;
+    if (vec_len(triangulate_polygon(_cv_p, 5)) != 9) { _CV_BAD = _CV_BAD + 1; }
+}
+assert_eq(_CV_RUN, 250, "the concave polygon sweep actually ran 250 scales");
+assert_eq(_CV_BAD, 0,
+  "triangulate_polygon: a concave 5-gon gives 3 triangles from 2^0 to 2^-249");
+
+# ⚠ ONE COLLISION MUTANT SURVIVES AND IS RECORDED. Restoring `EPSILON_F64` in
+# `_col_ring_is_convex` alone passes everything here, and that is a genuine
+# behavioural equivalence rather than a test gap: the epsilon form can only ever
+# under-report convexity, which marks MORE vertices blocked, and an over-blocked
+# set is conservative — every containment check it adds is one that was already
+# going to pass. It can never mark a reflex vertex unblocked, because a reflex
+# vertex has cross < 0 and fails `cross > eps` for any non-negative eps.
+# ⭐ The EAR test is not conservative in that way and its mutant IS killed above;
+# the ring predicate is repaired so the two agree, and because `_col_point_in_tri`
+# in this same file has always used the exact sign test on this same quantity.
+
+# ⭐ THE COMPARATOR MUST BE A TOTAL ORDER, which a tolerance never is. Three
+# points spaced closer than 1e-12 in x: with an epsilon-equality, a > b and b > c
+# can both be false while a > c is true, and the sort built on it is undefined.
+# Exact comparison is transitive by construction.
+var _cc_t = vec_new();
+vec_push(_cc_t, hvec2_new(0, 0));
+vec_push(_cc_t, hvec2_new((1023 - 60) << 52, F64_ONE));
+# ⚠ NOT (2^-59, 2): that is COLINEAR with the first two (both segments have slope
+# 2^60), so a hull of 2 would be correct and the assertion would be testing the
+# fixture rather than the code. The first draft of this line made exactly that
+# mistake and "failed" against correct output.
+vec_push(_cc_t, hvec2_new((1023 - 59) << 52, 0));
+assert_eq(vec_len(convex_hull_2d(_cc_t, 3)), 3,
+  "convex_hull_2d: three points 2^-60 apart are three distinct hull vertices");
+# ⭐ AND THE CASE THAT ACTUALLY BREAKS A NON-TRANSITIVE COMPARATOR: a convex ring
+# whose ENTIRE x-extent fits inside one epsilon. Then every pair compares "equal"
+# in x under the old rule, the sort degenerates to y alone, and monotone chain is
+# fed an order that is not lexicographic at all. Eight points on a circle of
+# ⚠ THE RADIUS IS MEASURED, NOT PICKED. Non-transitivity needs ADJACENT pairs
+# inside one epsilon while DISTANT pairs are outside it — then a > b and b > c are
+# both false while a > c is true. At 2^-38 the ring spans several epsilons and the
+# old comparator loses points; at 2^-41 and below EVERY pair is within one epsilon,
+# the relation degenerates to an exact order on y alone, and the mutant survives.
+# [measured: baseline and mutant re-run at radii 2^-38 / 2^-41 / 2^-44]
+var _cc_r = vec_new();
+for (var _cc_i = 0; _cc_i < 16; _cc_i = _cc_i + 1) {
+    var _cc_th = f64_mul(f64_from(_cc_i),
+      f64_div(f64_mul(F64_TWO, F64_PI), f64_from(16)));
+    var _cc_rad = (1023 - 38) << 52;
+    vec_push(_cc_r, hvec2_new(f64_mul(_cc_rad, f64_cos(_cc_th)),
+        f64_mul(_cc_rad, f64_sin(_cc_th))));
+}
+assert_eq(vec_len(convex_hull_2d(_cc_r, 16)), 16,
+  "convex_hull_2d: sixteen points on a 2^-38 circle are all hull vertices");
+
+# --- sequential_impulse. lambda = (1+e)*pen / inv_mass, so with inv_mass = 2k and
+# pen = 0.5 the impulse is 0.25/k — it GROWS as the masses grow. The shipped guard
+# skipped the contact entirely below 1e-12 and left the output slot at +0.0,
+# indistinguishable from a real zero-impulse contact.
+var _CI_RUN = 0;
+var _CI_BAD = 0;
+for (var _ci_e = 0; _ci_e < 400; _ci_e = _ci_e + 1) {
+    var _ci_k = (1023 - _ci_e) << 52;
+    var _ci_c = contact_new(0, 1, hvec3_unit_y(), F64_HALF, 0, 0, _ci_k, _ci_k);
+    var _ci_cs = vec_new();
+    vec_push(_ci_cs, _ci_c);
+    var _ci_out = alloc(16);
+    store64(_ci_out, 0);
+    sequential_impulse(_ci_cs, 1, 10, _ci_out);
+    _CI_RUN = _CI_RUN + 1;
+    # 0.25 / k, i.e. 0.25 * 2^e — exact at every power of two.
+    if (f64_approx_eq(f64_div(load64(_ci_out), f64_div(F64_ONE, _ci_k)),
+        f64_div(F64_ONE, f64_from(4)), LOOSE_TOL_M) != 1) {
+        _CI_BAD = _CI_BAD + 1;
+    }
+}
+assert_eq(_CI_RUN, 400, "the sequential_impulse mass sweep actually ran 400 scales");
+assert_eq(_CI_BAD, 0,
+  "sequential_impulse: lambda = 0.25/k for inverse masses from 2^0 to 2^-399");
+# ⭐ ANTI-DELETION: two genuinely static bodies must still be skipped.
+var _ci_st = contact_new(0, 1, hvec3_unit_y(), F64_HALF, 0, 0, 0, 0);
+var _ci_scs = vec_new();
+vec_push(_ci_scs, _ci_st);
+var _ci_sout = alloc(16);
+store64(_ci_sout, 0);
+sequential_impulse(_ci_scs, 1, 10, _ci_sout);
+assert_eq(load64(_ci_sout), 0,
+  "sequential_impulse: two exactly static bodies are still skipped");
+
 test_group("2.15.0: tridiagonal pivots and optimizer curvature are scale-free");
 
 # --- num_tridiag_solve. T = [[2,1,0],[1,2,1],[0,1,2]] with x = (1,1,1) gives
