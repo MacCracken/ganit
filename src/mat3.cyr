@@ -202,7 +202,38 @@ fn m3_trace(m) {
     return f64_add(f64_add(m3_get(m, 0, 0), m3_get(m, 1, 1)), m3_get(m, 2, 2));
 }
 
+#must_use
+fn _m3_frob_scaled(m) {
+    var mx = f64_from(0);
+    var i = 0;
+    while (i < 9) {
+        var a = f64_abs(load64(m + i * 8));
+        if (f64_gt(a, mx) == 1) { mx = a; }
+        i = i + 1;
+    }
+    if (f64_gt(mx, 0) == 0) { return mx; }
+    # ⚠ Inf/Inf is NaN, so the infinity contract needs its own exit here.
+    if (f64_eq(mx, F64_POS_INF) == 1) { return mx; }
+    var sum = f64_from(0);
+    i = 0;
+    while (i < 9) {
+        var s = f64_div(load64(m + i * 8), mx);
+        sum = f64_add(sum, f64_mul(s, s));
+        i = i + 1;
+    }
+    return f64_mul(mx, f64_sqrt(sum));
+}
+
 # Frobenius norm
+# ⛔ 2.17.0 — THIS SQUARED BEFORE SUMMING and was wrong on **992 of 2041
+# binades**: `|k·I|` came back as exactly 0 for k below 2^-538 and as +Inf for k
+# at or above 2^512, where the answer `k·sqrt(3)` is perfectly representable.
+# ⚠ ONE ASSERTION GUARDED THIS FUNCTION — `m3_frobenius(I) = sqrt(3)` — at a
+# single scale of 1, so nearly half the input range was untested and the defect
+# was invisible however many times the suite ran.
+# ⭐ Fast path plus a scaled rescue, the same shape as `hvec3_length`; nine legs
+# has no stdlib hypot to delegate to, so the max-scale loop is written out.
+# [measured: 2041-binade two-sided sweep on k·I, 2026-09-10]
 #must_use
 fn m3_frobenius(m) {
     var sum = 0;
@@ -212,5 +243,7 @@ fn m3_frobenius(m) {
         sum = f64_add(sum, f64_mul(v, v));
         i = i + 1;
     }
+    if (f64_lt(sum, F64_TINY) == 1) { return _m3_frob_scaled(m); }
+    if (f64_eq(sum, F64_POS_INF) == 1) { return _m3_frob_scaled(m); }
     return f64_sqrt(sum);
 }

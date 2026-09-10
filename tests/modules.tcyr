@@ -10779,19 +10779,37 @@ assert_eq(_GA_BAD, 0,
 
 # --- cga_rotor / cga_plane: the axis and the normal are DIRECTIONS, so their
 # length is a unit choice and the result must not move at all.
+# ⛔ 2.17.0 — THIS SWEEP RAN 400 BINADES DOWNWARD AND THE ARITHMETIC FLOOR IS AT
+# 2^-538, so it stopped 138 binades short of the defect and had no upward half at
+# all. Both functions took their axis norm as a naive sum of squares, and the
+# 2.14.0 note beside `cga_rotor` — "an absolute 1e-12 turned a real rotation into
+# the identity rotor for a short axis vector, with no error channel" — described a
+# failure that was STILL LIVE, 500 binades lower. Measured on the 2.16.0 tree:
+# **995 of 2041 scales wrong for each, and 991 of the rotor's were the fabricated
+# identity.** Moving a threshold does not help when the quantity it tests has
+# already lost the value.
+# ⭐ Now 2041 scales, BOTH directions, and an OFF-AXIS axis: (3k, 4k, 12k) has a
+# norm of 13k, so the normalised axis has three non-zero components and a partial
+# repair cannot pass by leaving one of them alone.
+# [measured: 2041-binade two-sided sweep before and after, 2026-09-10]
 var _GR_RUN = 0;
 var _GR_BAD = 0;
-var _gr_ref = cga_rotor(0, 0, F64_ONE, F64_PI_2);
-var _gp_ref = cga_plane(0, 0, F64_ONE, F64_ONE);
-for (var _gr_e = 0; _gr_e < 400; _gr_e = _gr_e + 1) {
-    var _gr_k = (1023 - _gr_e) << 52;
-    var _gr_r = cga_rotor(0, 0, _gr_k, F64_PI_2);
+var _GR_IDENT = 0;
+var _gr_ref = cga_rotor(f64_from(3), f64_from(4), f64_from(12), F64_PI_2);
+var _gp_ref = cga_plane(f64_from(3), f64_from(4), f64_from(12), F64_ONE);
+for (var _gr_e = 0 - 1020; _gr_e <= 1020; _gr_e = _gr_e + 1) {
+    var _gr_k = (1023 + _gr_e) << 52;
+    var _gr_r = cga_rotor(f64_mul(f64_from(3), _gr_k), f64_mul(f64_from(4), _gr_k),
+      f64_mul(f64_from(12), _gr_k), F64_PI_2);
+    # the fabrication has a name: an identity rotor for a perfectly good axis.
+    if (cga_mv_get(_gr_r, 10) == 0) { _GR_IDENT = _GR_IDENT + 1; }
     # ⚠ `d` MUST SCALE WITH THE NORMAL. cga_plane divides d by |n| as well, so
     # (0,0,k,1) is the plane at distance 1/k — a genuinely different plane, not the
     # same one in other units. The first draft passed a fixed d and "failed" 798
     # checks against correct output: exactly 2 per scale, the two components that
     # carry d. [measured: 2 x 399 failing components, 2026-09-10]
-    var _gr_p = cga_plane(0, 0, _gr_k, _gr_k);
+    var _gr_p = cga_plane(f64_mul(f64_from(3), _gr_k), f64_mul(f64_from(4), _gr_k),
+      f64_mul(f64_from(12), _gr_k), _gr_k);
     _GR_RUN = _GR_RUN + 1;
     for (var _gr_i = 0; _gr_i < 32; _gr_i = _gr_i + 1) {
         if (cga_mv_get(_gr_r, _gr_i) != cga_mv_get(_gr_ref, _gr_i)) {
@@ -10802,15 +10820,42 @@ for (var _gr_e = 0; _gr_e < 400; _gr_e = _gr_e + 1) {
         }
     }
 }
-assert_eq(_GR_RUN, 400, "the rotor/plane axis sweep actually ran 400 scales");
+assert_eq(_GR_RUN, 2041, "the rotor/plane axis sweep actually ran 2041 scales");
 assert_eq(_GR_BAD, 0,
-  "cga_rotor / cga_plane: bit-identical for axis lengths 2^0 down to 2^-399");
+  "cga_rotor / cga_plane: bit-identical for axis lengths 2^-1020 to 2^1020");
+assert_eq(_GR_IDENT, 0,
+  "cga_rotor: never fabricates the identity rotor for a non-zero axis (did at 991 scales)");
 # ⭐ ANTI-DELETION: an exactly zero axis has no rotation and an exactly zero
 # normal has no plane.
 assert_eq(cga_mv_get(cga_rotor(0, 0, 0, F64_PI_2), 0), 0x3FF0000000000000,
   "cga_rotor: an exactly zero axis still returns the identity rotor");
 assert_eq(cga_mv_get(cga_plane(0, 0, 0, F64_ONE), 1), 0,
   "cga_plane: an exactly zero normal returns the zero multivector");
+# ⚠ AND THE TWO NaN CONTRACTS, WHICH DIFFER ON PURPOSE AND SO CANNOT SHARE A
+# GUARD SHAPE. `cga_plane` has always folded a NaN normal into the null
+# multivector (`f64_gt(NaN, 0)` is 0); `cga_rotor` has always propagated NaN.
+# 2.17.0's repair had to keep both, so the rotor's guard is `f64_eq(norm, 0)` and
+# the plane's stays `f64_gt(norm, 0) == 0`. Copying either shape onto the other
+# silently changes a shipped contract, which is why both are pinned here.
+# ⚠ AND A SUBNORMAL AXIS, WHICH SEPARATES `f64_div` FROM A RECIPROCAL AND WHICH
+# THE SWEEP ABOVE CANNOT PRODUCE — `(1023 + e) << 52` encodes only NORMAL powers
+# of two, so `norm` never falls below DBL_MIN there. `1 / 2^-1030` is +Inf, so a
+# multiply-by-reciprocal turns every zero component into `0 * Inf` = NaN while
+# dividing leaves it at 0. Both mutants SURVIVED the 2041-scale sweep and die on
+# these two assertions. [measured: 16-mutant run, 2026-09-10]
+var _gr_sub = 1 << 44;                            # 2^-1030, subnormal
+assert_eq(cga_mv_get(cga_rotor(_gr_sub, 0, 0, F64_PI_2), 6), 0,
+  "cga_rotor: a subnormal axis divides, it does not multiply by an infinite reciprocal");
+assert_eq(cga_mv_get(cga_plane(_gr_sub, 0, 0, 0), 2), 0,
+  "cga_plane: the same, on the component that would become 0 * Inf = NaN");
+assert_eq(cga_mv_get(cga_plane(_gr_sub, 0, 0, 0), 1), 0x3FF0000000000000,
+  "cga_plane: and the live component still normalises to 1");
+
+var _gr_nan = cga_mv_get(cga_rotor(0x7FF8000000000000, 0, 0, F64_PI_2), 10);
+assert_eq(f64_eq(_gr_nan, _gr_nan), 0,
+  "cga_rotor: a NaN axis propagates, it is not folded into the identity rotor");
+assert_eq(cga_mv_get(cga_plane(0x7FF8000000000000, 0, 0, F64_ONE), 1), 0,
+  "cga_plane: a NaN normal still folds to the null multivector, as it always has");
 
 # --- BVH SLAB TESTS. `GeoRay` does not require a unit direction — `_graw` builds
 # one directly and so does any caller that sets the field — so `|dx| < 1e-12`
@@ -12006,6 +12051,77 @@ assert_eq(cx_is_zero(cx_zero(), _gp2(0 - 1000)), 1,
   "cx_is_zero: exact zero is below even a 2^-1000 tolerance");
 
 test_group("geo 2.14.0: ray/geometry guards are scale-free");
+
+# --- 2.17.0: geo_triangle_unit_normal / geo_segment_direction. Both had an
+# EXACT guard by 2.10.2 and both still fabricated, because the quantity the exact
+# guard tested — `hvec3_length_sq` — squared before summing and reached zero
+# while the geometry was perfectly ordinary. An exact test on a destroyed value
+# is still wrong; the value has to survive to the test.
+# ⚠ A (3k, 4k, 0) SEGMENT, NOT AN AXIS-ALIGNED ONE. The first probe used a
+# segment along +x, where the fabricated `unit_x` fallback IS the right answer, so
+# it reported the entire low band clean. The diagonal is what discriminates, and
+# this is the second time in this release that a fixture returned the right answer
+# for the wrong reason. [measured: axis-aligned 509 bad of 2041, diagonal 994]
+var _GN_RUN = 0;
+var _GN_BAD = 0;
+for (var _gn_e = 0 - 1020; _gn_e <= 1020; _gn_e = _gn_e + 1) {
+    var _gn_k = (1023 + _gn_e) << 52;
+    var _gn_d = geo_segment_direction(geo_segment_new(hvec3_new(0, 0, 0),
+        hvec3_new(f64_mul(f64_from(3), _gn_k), f64_mul(f64_from(4), _gn_k), 0)));
+    _GN_RUN = _GN_RUN + 1;
+    # 3/5 and 4/5 -- not bit-exact through a division, so compare relatively.
+    if (f64_gt(f64_abs(f64_sub(HVec3_x(_gn_d), 0x3FE3333333333333)), ULP_TOL_M) == 1) {
+        _GN_BAD = _GN_BAD + 1;
+    }
+    if (f64_gt(f64_abs(f64_sub(HVec3_y(_gn_d), 0x3FE999999999999A)), ULP_TOL_M) == 1) {
+        _GN_BAD = _GN_BAD + 1;
+    }
+}
+assert_eq(_GN_RUN, 2041, "the segment-direction binade sweep actually ran 2041 scales");
+assert_eq(_GN_BAD, 0,
+  "geo_segment_direction: (3k,4k,0) -> (0.6,0.8,0) for k from 2^-1020 to 2^1020");
+
+# ⚠ THE TRIANGLE SWEEP IS SHALLOWER THAN THE SEGMENT ONE, AND THE DEPTH IS
+# DERIVED. A cross product is degree TWO, so legs of size s give a normal of size
+# s², and `hvec3_cross` ITSELF underflows for s below 2^-512 and overflows at or
+# above 2^512 — before any norm runs. That is upstream of this function and the
+# norm repair cannot reach it, so the sweep runs to where the repaired code is
+# actually right rather than pretending otherwise. Measured: the band moved from
+# legs of 2^-269 / 2^256 to 2^-512 / 2^512, i.e. 243 and 256 binades bought, and
+# 378 of 1401 remain — all of them the cross product's own limit.
+# [measured: 1401-binade two-sided sweep before and after, 2026-09-10]
+var _GT_RUN = 0;
+var _GT_BAD = 0;
+for (var _gt_e = 0 - 511; _gt_e <= 511; _gt_e = _gt_e + 1) {
+    var _gt_k = (1023 + _gt_e) << 52;
+    # a right triangle in the xy plane: the unit normal is +z at every leg length
+    var _gt_n = geo_triangle_unit_normal(geo_triangle_new(hvec3_new(0, 0, 0),
+        hvec3_new(_gt_k, 0, 0), hvec3_new(0, _gt_k, 0)));
+    _GT_RUN = _GT_RUN + 1;
+    if (HVec3_z(_gt_n) != 0x3FF0000000000000) { _GT_BAD = _GT_BAD + 1; }
+    # ⚠ z alone does not discriminate: the fabricated fallback is unit_y, whose z
+    # is 0 — but a HALF repair could leave y non-zero, so pin that too.
+    if (HVec3_y(_gt_n) != 0) { _GT_BAD = _GT_BAD + 1; }
+}
+assert_eq(_GT_RUN, 1023, "the triangle-normal binade sweep actually ran 1023 leg scales");
+assert_eq(_GT_BAD, 0,
+  "geo_triangle_unit_normal: +z for legs from 2^-511 to 2^511 (was unit_y below 2^-269)");
+
+# ⭐ ANTI-DELETION: the degenerate fallbacks must survive, or the repair is a
+# deletion. ⚠ And the NaN contract 2.10.2 deliberately closed — geo folds a NaN
+# into the fallback rather than propagating it, unlike hvec3_normalize.
+assert_eq(HVec3_y(geo_triangle_unit_normal(geo_triangle_new(hvec3_new(0, 0, 0),
+        hvec3_new(F64_ONE, 0, 0), hvec3_new(F64_TWO, 0, 0)))), 0x3FF0000000000000,
+  "geo_triangle_unit_normal: a colinear triangle still returns unit_y");
+assert_eq(HVec3_x(geo_segment_direction(geo_segment_new(hvec3_new(F64_ONE, 0, 0),
+        hvec3_new(F64_ONE, 0, 0)))), 0x3FF0000000000000,
+  "geo_segment_direction: a zero-length segment still returns unit_x");
+assert_eq(HVec3_y(geo_triangle_unit_normal(geo_triangle_new(hvec3_new(0, 0, 0),
+        hvec3_new(0x7FF8000000000000, 0, 0), hvec3_new(0, F64_ONE, 0)))), 0x3FF0000000000000,
+  "geo_triangle_unit_normal: a NaN triangle still folds to unit_y, as 2.10.2 made it");
+assert_eq(HVec3_x(geo_segment_direction(geo_segment_new(hvec3_new(0, 0, 0),
+        hvec3_new(0x7FF8000000000000, 0, 0)))), 0x3FF0000000000000,
+  "geo_segment_direction: a NaN segment still folds to unit_x");
 
 # --- J. THE SIX JETS. Each guarded `den` (or dk/fk) against an absolute 1e-12
 # while the thing that fails is `1 / den` on the next line, so an ordinary scene

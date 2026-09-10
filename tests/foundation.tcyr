@@ -489,9 +489,12 @@ assert_eq(HVec4_x(v4norm_z), f64_from(0), "v4 normalize zero.x");
 # [measured: docs/development/issues/archived/2026-08-11-quat-inverse-squared-epsilon.md]
 #
 # Seventh instance of a class first recorded in complex.cyr in 2.6.14 and
-# repaired six times across geo.cyr in 2.10.1/2.10.2. Both guards now use
-# _QUAT_F64_TINY (DBL_MIN), on the rule that settled all of them: guard exactly
+# repaired six times across geo.cyr in 2.10.1/2.10.2. 2.11.1 put both guards on
+# `_QUAT_F64_TINY` (DBL_MIN), on the rule that settled all of them: guard exactly
 # what makes the DIVISION fail and nothing more.
+# ⚠ THAT ALIAS NO LONGER EXISTS. 2.17.0 retired it, because DBL_MIN turned out to
+# be the wrong test for BOTH sites once the norms stopped flushing — see the
+# "2.17.0 quat" block below for what replaced each and why.
 #
 # ⚠ SCALE COVARIANCE IS THE ONLY SHAPE OF TEST THAT CATCHES THIS. Every other
 # quaternion fixture in this file uses magnitudes of order 1, where a threshold
@@ -537,6 +540,161 @@ _qt_sweep();
 assert_eq(_QT_RUN, 40, "the quat scale sweep ran 20 decades x 2 properties");
 assert_eq(_QT_BAD, 0,
   "q * q^-1 is the identity and normalize is unit AND correctly directed, down to 1e-19");
+
+test_group("2.17.0 quat: the two sites the norm repair MISSED");
+
+# ⛔ THIS BLOCK EXISTS BECAUSE 2.17.0's FIRST PASS REPAIRED `hquat_length` AND
+# LEFT BOTH ITS CALLERS BROKEN — and the comment that pass wrote on `hquat_length`
+# asserted a call graph that was false. `hquat_inverse` never went through it: it
+# reads `hquat_length_sq` directly, so it kept the whole defect.
+# ⚠ The sweep above cannot see any of this. It runs 20 DECADES, chosen in 2.11.1
+# to bracket the THRESHOLDS a repair might have picked, and the arithmetic floor
+# is 142 decades below where it stops. Bracketing the candidate thresholds is not
+# the same as reaching the floor, and this is the second release where a sweep
+# sized for one and not the other let a live defect through.
+# [measured: 2041-binade two-sided sweep on q*q^-1, 2026-09-10]
+var _QI_RUN = 0;
+var _QI_BAD = 0;
+var _QI_IDENT = 0;
+for (var _qi_e = 0 - 1020; _qi_e <= 1020; _qi_e = _qi_e + 1) {
+    var _qi_s = (1023 + _qi_e) << 52;                 # 2^e
+    # q = (3s, 4s, 0, 0), |q| = 5s -- never zero, invertible at every scale.
+    var _qi_q = hquat_new(f64_mul(f64_from(3), _qi_s), f64_mul(f64_from(4), _qi_s), 0, 0);
+    var _qi_v = hquat_inverse(_qi_q);
+    var _qi_p = hquat_mul(_qi_q, _qi_v);
+    _QI_RUN = _QI_RUN + 1;
+    # ⚠ THE DEFINING PROPERTY, not the magnitude: the fabricated identity is a
+    # perfectly valid unit quaternion, so |q^-1| discriminates nothing.
+    if (f64_gt(f64_abs(f64_sub(HQuat_w(_qi_p), F64_ONE)), TIGHT_TOL) == 1) {
+        _QI_BAD = _QI_BAD + 1;
+    }
+    if (f64_gt(f64_abs(HQuat_x(_qi_p)), TIGHT_TOL) == 1) { _QI_BAD = _QI_BAD + 1; }
+    # and count the fabrication itself, so a future regression is named not merely
+    # detected: hquat_inverse handing back the identity for an invertible q.
+    if (HQuat_w(_qi_v) == F64_ONE && HQuat_x(_qi_v) == 0) { _QI_IDENT = _QI_IDENT + 1; }
+}
+assert_eq(_QI_RUN, 2041, "the hquat_inverse binade sweep actually ran 2041 scales");
+assert_eq(_QI_BAD, 0,
+  "hquat_inverse: q * q^-1 = 1 for |q| from 2^-1020 to 2^1020 (was wrong at 1018)");
+assert_eq(_QI_IDENT, 0,
+  "hquat_inverse: never fabricates the identity for an invertible q (did at 507 scales)");
+
+# ⭐ THE UPPER HALF OF THE FAST-PATH TEST, AND THIS ASSERTION HAS TO BE BIT-EXACT
+# TO SEE IT. `1/|q|^2` goes SUBNORMAL — losing mantissa without ever reaching
+# +Inf — while `|q|^2` itself is still an ordinary finite double, so a guard that
+# tests only `ls` takes the fast path and quietly loses precision.
+# ⚠ Measured on the mutant that drops the reciprocal half: it is wrong at **511
+# scales, e = 510 to 1020**, which the sweep above catches at its 1e-12 tolerance
+# — and at **e = 509 it is 2 ulp out**, `0x3FEFFFFFFFFFFFFE` against an exact
+# `1.0`, which that tolerance CANNOT see. e = 509 is the one scale where `1/ls`
+# is subnormal but `ls` is still finite, and a tolerance-based assertion there is
+# VACUOUS: the first draft of this block used `f64_lt(|w - 1|, TIGHT_TOL)` and
+# passed with the mutant installed. The bit-exact compare is the whole test.
+# [measured: mutant swept over e = 0..1020, 2026-09-10]
+var _qi_hi = (1023 + 509) << 52;
+var _qi_hq = hquat_new(f64_mul(f64_from(3), _qi_hi), f64_mul(f64_from(4), _qi_hi), 0, 0);
+var _qi_hp = hquat_mul(_qi_hq, hquat_inverse(_qi_hq));
+assert_eq(HQuat_w(_qi_hp), F64_ONE,
+  "hquat_inverse: 2^509 is EXACTLY 1 — the reciprocal half of the fast-path test");
+
+# ⛔ AND `hquat_normalize` WAS A NET REGRESSION UNTIL ITS GUARD MOVED TOO. Its
+# `F64_TINY` test was harmless while the norm flushed at 2^-537 — the band below
+# DBL_MIN was unreachable — and repairing the norm made it reachable, at which
+# point it fabricated the identity for 48 of 48 subnormal magnitudes while the
+# already-repaired `hvec3_normalize` returned the unit vector for the same input.
+# ⚠ Asserted AGAINST THE VEC3 CONTROL rather than against a constant: the two must
+# agree, and where they both decline (a length whose reciprocal overflows) is a
+# documented tree-wide limit, not a quaternion defect.
+# [measured: 48-binade subnormal sweep, quat vs vec3, 2026-09-10]
+var _QN_RUN = 0;
+var _QN_BAD = 0;
+var _QN_MISMATCH = 0;
+for (var _qn_e = 0; _qn_e < 48; _qn_e = _qn_e + 1) {
+    var _qn_s = 1 << (51 - _qn_e);                    # 2^-1023 down to 2^-1070
+    var _qn_q = hquat_normalize(hquat_new(_qn_s, 0, 0, 0));
+    var _qn_v = hvec3_normalize(hvec3_new(_qn_s, 0, 0));
+    _QN_RUN = _QN_RUN + 1;
+    var _qn_qok = 0;
+    var _qn_vok = 0;
+    if (HQuat_x(_qn_q) == 0x3FF0000000000000) { _qn_qok = 1; }
+    if (HVec3_x(_qn_v) == 0x3FF0000000000000) { _qn_vok = 1; }
+    if (_qn_qok != _qn_vok) { _QN_MISMATCH = _QN_MISMATCH + 1; }
+    if (_qn_e == 0 && _qn_qok == 0) { _QN_BAD = _QN_BAD + 1; }
+}
+assert_eq(_QN_RUN, 48, "the subnormal normalize band sweep ran 48 magnitudes");
+assert_eq(_QN_MISMATCH, 0,
+  "hquat_normalize agrees with hvec3_normalize across the whole subnormal band");
+assert_eq(_QN_BAD, 0,
+  "hquat_normalize: |q| = 2^-1023 normalises (1/|q| is finite there); it used to give the identity");
+
+# ⚠ THE RESCUE MUST DIVIDE TWICE, NOT MULTIPLY BY A RECIPROCAL, and only a
+# SUBNORMAL magnitude separates the two. `1 / 2^-1030` is +Inf, so a reciprocal
+# form gives `0 * Inf` = NaN in every component that was zero, while two `f64_div`
+# calls leave them at 0 and let the one live component overflow honestly to -Inf,
+# which is the true value of an inverse of magnitude 2^1030. ⚠ The 2041-binade
+# sweep above cannot reach this: `(1023 + e) << 52` encodes only NORMAL powers of
+# two, so |q| never gets below DBL_MIN there and the mutant SURVIVES the sweep.
+# [measured: 16-mutant run — this fixture is what kills it, 2026-09-10]
+var _qi_sub = 1 << 44;                            # 2^-1030, subnormal
+var _qi_sv = hquat_inverse(hquat_new(_qi_sub, 0, 0, 0));
+assert_eq(HQuat_y(_qi_sv), 0,
+  "hquat_inverse: a subnormal q leaves the zero components at 0, not 0 * Inf = NaN");
+assert_eq(HQuat_x(_qi_sv), 0xFFF0000000000000,
+  "hquat_inverse: and the live component overflows honestly to -Inf");
+
+# ⭐ ANTI-DELETION and the NaN contract, neither of which any sweep reaches.
+assert_eq(HQuat_w(hquat_inverse(hquat_new(0, 0, 0, 0))), F64_ONE,
+  "hquat_inverse: the zero quaternion still returns the identity");
+assert_eq(HQuat_w(hquat_normalize(hquat_new(0, 0, 0, 0))), F64_ONE,
+  "hquat_normalize: the zero quaternion still returns the identity");
+var _qi_nan = HQuat_x(hquat_inverse(hquat_new(0x7FF8000000000000, 0, 0, 0)));
+assert_eq(f64_eq(_qi_nan, _qi_nan), 0,
+  "hquat_inverse: NaN propagates, it is not folded into the identity");
+var _qn_nan = HQuat_x(hquat_normalize(hquat_new(0x7FF8000000000000, 0, 0, 0)));
+assert_eq(f64_eq(_qn_nan, _qn_nan), 0,
+  "hquat_normalize: NaN propagates, it is not folded into the identity");
+
+test_group("2.17.0 mat3: the Frobenius norm is scale-free");
+
+# ⛔ `m3_frobenius` SQUARED BEFORE SUMMING and was wrong on **992 of 2041
+# binades** — |k·I| came back exactly 0 below 2^-538 and +Inf at or above 2^512,
+# where k·sqrt(3) is perfectly representable.
+# ⚠ ONE ASSERTION GUARDED THIS FUNCTION, at a single scale of 1. Nearly half the
+# input range was untested, and no number of assertions AT THAT SCALE would have
+# found it — which is the whole argument for scale sweeps over more fixtures.
+# [measured: 2041-binade two-sided sweep on k·I, 2026-09-10]
+var _MF_RUN = 0;
+var _MF_BAD = 0;
+var _mf_m = m3_identity();
+for (var _mf_e = 0 - 1020; _mf_e <= 1020; _mf_e = _mf_e + 1) {
+    var _mf_k = (1023 + _mf_e) << 52;
+    m3_set(_mf_m, 0, 0, _mf_k); m3_set(_mf_m, 1, 1, _mf_k); m3_set(_mf_m, 2, 2, _mf_k);
+    _MF_RUN = _MF_RUN + 1;
+    if (m3_frobenius(_mf_m) != f64_mul(_mf_k, f64_sqrt(f64_from(3)))) {
+        _MF_BAD = _MF_BAD + 1;
+    }
+}
+assert_eq(_MF_RUN, 2041, "the m3_frobenius binade sweep actually ran 2041 scales");
+assert_eq(_MF_BAD, 0, "m3_frobenius: |k*I| = k*sqrt(3) bit-exact from 2^-1020 to 2^1020");
+# ⚠ AND THE LOSSY PART OF THE SUBNORMAL BAND, WHICH THE k*I SWEEP CANNOT REACH.
+# For a power-of-two k the sum 3k² is an exact integer multiple of the subnormal
+# spacing 2^-1074 whenever it is representable at all, so it is either exact or
+# exactly zero — never lossy — and a trigger narrowed from `< F64_TINY` to `== 0`
+# SURVIVES the whole 2041-scale sweep. A single entry of 1.5*2^-538 squares to
+# 0.5625*2^-1074, which rounds to 1*2^-1074, and the naive sqrt then reads
+# **33% high**. [measured: 16-mutant run — this one assertion kills that mutant]
+var _mf_lossy = m3_new();
+m3_set(_mf_lossy, 0, 0, f64_mul(f64_from(3), (1023 - 539) << 52));
+assert_eq(m3_frobenius(_mf_lossy), f64_mul(f64_from(3), (1023 - 539) << 52),
+  "m3_frobenius: a lone entry whose square is a LOSSY subnormal is still exact");
+
+var _mf_z = m3_new();
+assert_eq(m3_frobenius(_mf_z), 0, "m3_frobenius: the zero matrix still has norm 0");
+m3_set(_mf_z, 0, 0, F64_POS_INF);
+assert_eq(m3_frobenius(_mf_z), F64_POS_INF, "m3_frobenius: +Inf in, +Inf out");
+m3_set(_mf_z, 0, 0, 0x7FF8000000000000);
+var _mf_n = m3_frobenius(_mf_z);
+assert_eq(f64_eq(_mf_n, _mf_n), 0, "m3_frobenius: NaN propagates");
 
 test_group("quat identity");
 

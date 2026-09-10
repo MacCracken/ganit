@@ -94,8 +94,8 @@ items: they are tracked in `issues/` and discharged as a **precondition** of the
 | ~~**2.14.0 — the epsilon release**~~ | ✅ **SHIPPED, PARTIALLY.** ⛔ **This row said "~20 sites"; the census found 136 guards and 97 confirmed defects in 23 modules** — the estimate came from the 2026-08-11 audit's *confirmed* table, which is a list of instances someone reproduced, not a census of the class. **23 confirmed sites repaired, 58 mutants killed, +83 assertions.** ⭐ Three repairs were NOT on the census list and came from grepping for the shape. **74 remain, enumerated with evidence.** | 2.13.0 |
 | ~~**2.15.0 — the epsilon tier, remainder**~~ | ✅ **SHIPPED.** **73 of the 74 repaired**, 81 mutants installed and **73 killed**; 8 survivors documented with their reasons rather than tidied away. ⛔ **1 DEFERRED — `su2_log`, and it is a formula change, not a threshold**: it divides by θ² and θ³, and at θ ≤ 2.2e-162 both `θ*θ` and `1−cos θ` are exactly 0, so lowering the guard would make the coefficient `0/0 = NaN`. ⭐ **Three siblings of it were never on the census list** (`so3_log`, `se3_exp`, `se3_log`) and were found by grepping for the shape. | 2.14.0 |
 | ~~**2.16.0 — the small-angle series**~~ | ✅ **SHIPPED.** All four maps repaired; 7 mutants, 5 killed, 2 documented equivalences that exist BECAUSE the repairs made each other redundant. ⛔ **The log maps had a larger defect the guard was hiding**: `acos` of a value that rounds to exactly 1.0 below θ ≈ 1.5e-8, so the whole rotation was lost — measured, exactly 0 from 2^-28 down. `atan2` recovers it bit-exactly. ⭐ **Round-trip floor 2^-26 → 2^-537, 511 decades.** | 2.15.0 |
-| **2.17.0 — the norm tier** | ⛔ Found in 2.16.0 by a mutant that would not die, and NOT closed by it: `su2_exp` and `so3_from_axis_angle` still take their norms as a naive sum of squares, which flushes to zero below ~2^-511 — so they collapse the rotation at **2^-538**, before 2.16.0's repaired log maps ever see it. ⭐ Same class as `cx_div` and the same fix (scale by the largest component first), a technique now proven twice. ⚠ **Grep for the shape before sizing this**: every `sqrt(sum of squares)` in the tree is a candidate, `hvec3_length`'s floor was measured at 2^-537 in 2.14.0, and the last three releases each found the class wider than its list said. | 2.16.0 |
-| **2.18.0 — the SVD factors** | ⛔ Found in 2.15.0 and NOT closed by it: `‖A − U S Vt‖_F` is exactly 0 for block ratios 1e-2…1e-5, then **4.17e-7 at 1e-6**, decaying proportionally to c. The singular VALUES stay correct — it is `U` and `Vt` that stop reconstructing the small block, so none of 2.15.0's nine threshold repairs touch it. 4.17e-7 reproduces the census's own figure for a half-repaired bidiagonalisation. ⚠ **Open-ended: a known defect with no known fix**, unlike 2.17.0. Also carries the EPA seed-upgrade trade, which is blocked on re-measurement. | 2.17.0 |
+| **2.17.0 — the norm tier** | 🚧 **IN PROGRESS — 25 of 38 sites repaired, 41 mutants all killed.** ⛔ **This row said the tier was `su2_exp` and `so3_from_axis_angle`; the tree-wide grep found 51 `f64_sqrt` sites in 16 files and a 70-agent census confirmed 19 more defects across 9 modules** — the fourth release running where the class was wider than its list, and the row's own warning to "grep for the shape before sizing this" was the thing that caught it. ⛔ **The regression sweep found what the release itself had missed**: `hquat_inverse` reads `hquat_length_sq` directly, so repairing `hquat_length` did nothing for it — **1018 of 2041 binades wrong, 507 the fabricated identity** — and a 2.17.0 comment asserting it "routes through" the repaired norm was simply false. ⛔ **`cga_rotor`'s 2.14.0 repair note describes a defect that was still live**, 500 binades lower: 991 of 2041 axis scales still returned the identity rotor. ⚠ **13 sites remain**: `cga_norm`, `calc_ext:793`, `optimize` ×3, `linalg_ext` ×3, `linalg_precision` ×5. | 2.16.0 |
+| **2.18.0 — the SVD factors** | ⛔ Found in 2.15.0 and NOT closed by it: `‖A − U S Vt‖_F` is exactly 0 for block ratios 1e-2…1e-5, then **4.17e-7 at 1e-6**, decaying proportionally to c. 4.17e-7 reproduces the census's own figure for a half-repaired bidiagonalisation. ⛔ **AND THIS ROW'S CLAIM THAT "the singular VALUES stay correct" IS REFUTED, measured 2026-09-10 during the 2.17.0 census.** `svd_golub_kahan([[1,0],[0,c],[0,c]])` has singular values {1, c·√2} and returns **{1, c} — 29.3% low — for every block ratio at or below 2^-41**, with `rc = HSB_ERR_NONE`. 2^-41 is ~1e-12, so this is an EPSILON-class deflation threshold on a sub-block, not the norm class: balancing makes the thresholds relative to the LARGEST entry, which says nothing about a small block. ⚠ **Open-ended: a known defect with no known fix**, unlike 2.17.0. Also carries the EPA seed-upgrade trade, which is blocked on re-measurement. | 2.17.0 |
 | **2.19.0 — the 3.0.0 prep** | `#must_use` on the fallible surface (167 `return HSB_ERR` sites; 199 `#must_use` annotations already exist, so this extends a pattern rather than starting one), negative enum values for the 12 `HSB_ERR_*` codes, and the decisions owed below. ⭐ All of it is non-breaking and all of it makes the `Result<T,E>` migration smaller. | 2.18.0 |
 | **3.0.0** | `Result<T,E>` API — breaking. ⚠ Re-scope before planning: it is the **v6.6.0 value form**, not the boxed form this file was written against. Carries the public/private function surface, which is breaking for the same reason. | 2.19.0 |
 
@@ -338,6 +338,50 @@ sections. It has been declared out of scope twice, which is a stronger claim tha
       assertions in `foundation.tcyr` — and the last three releases each found this class wider than
       its list said (2.12.0: 3 sites became 4; 2.14.0: "~20" became 97; 2.16.0: 4 became 4 plus two
       norms). Size it from the grep, not from this paragraph.
+
+  ⭐ **THE GREP WAS RUN, 2026-09-10, AND THE PARAGRAPH ABOVE WAS WRONG BY 19 SITES.** 51 `f64_sqrt`
+  sites in 16 files; a 10-agent census with 60 adversarial verifiers (three lenses each —
+  reachability, dimension, arithmetic) confirmed **19 DEFECT_NORM** and refuted 1. **Fifth release
+  running that this class was wider than its own list.** Progress and remainder below.
+
+- [x] ✅ **DONE — vec2/3/4, quat length, complex, lie/lie_ext (12 sites, 15 mutants).**
+- [x] ✅ **DONE — the foundation and geometry group (7 sites, 16 mutants, all killed).**
+      `hquat_inverse` **1018/2041 → 0**, `hquat_normalize` 48/48 subnormal magnitudes → 0,
+      `m3_frobenius` **992/2041 → 0**, `geo_segment_direction` **994/2041 → 0**,
+      `geo_triangle_unit_normal` 877/1401 → 378 (residue is `hvec3_cross` itself, upstream of the
+      norm), `cga_plane` **995/2041 → 0**, `cga_rotor` **995/2041 → 0** with 991 fabricated
+      identities gone.
+      ⛔ **Two of those were sites THIS RELEASE had already missed once**, found by a regression
+      sweep asking "what did the repair miss" rather than by the census: `hquat_inverse` reads
+      `hquat_length_sq` directly, and a 2.17.0 comment claiming it "routes through" the repaired
+      norm was false. **A comment asserting a call graph is a claim like any other.**
+
+- [ ] **[2.17.0]** **`cga_norm` (`geo_advanced.cyr:2438`) — confirmed defect, fix DEFERRED with
+      reasons.** `sqrt(|cga_norm_sq(mv)|)` over a 32-slot multivector, so there is no pair of legs
+      to scale. All three verifiers independently measured the obvious power-of-two rescale
+      returning **NaN** for a subnormal max coefficient (`mx & 0x7FF0…` is 0 for a subnormal, the
+      reciprocal is +Inf, and `cga_mv_scale` turns every structurally-zero slot into `0 * Inf`),
+      where the shipped code returns a wrong `0`. **A fabricated NaN is not an improvement on a
+      fabricated 0.** Needs a scale construction that works for subnormals and a `f64_div` rescale.
+
+- [ ] **[2.17.0]** **The remaining 12 sites.** `calc_ext:793`; `optimize:88/294/788`;
+      `linalg_ext:324/514/1219`; `linalg_precision:481/516/669/716/1156`.
+      Measured so far from public entry points: `solve_gmres` on A = 2I is wrong at **461 of 1001
+      scales**, first at 2^-539; `opt_conjugate_gradient` under objective scaling is wrong at **988
+      of 1001, and 446 of those are SILENT** — `rc = HSB_ERR_NONE` with `x` returned unmoved from
+      `x0`. ⚠ `linalg_precision`'s internals are only sound "when reached through the balanced
+      public entry points", and balancing bounds the LARGEST entry only, so a small sub-block is
+      still exposed — the discriminating variable is the block RATIO, never a uniform scale.
+      ⚠ `linalg_ext:1219` is an open-coded `cx_abs` (`sqrt(cx_norm_sq(...))`) and should simply call
+      the repaired one; the `max_norm < F64_TINY` guard two lines below it is the same
+      squared-quantity premise `cx_powf` had, and dies for the same reason.
+
+- [x] ✅ **REFUTED — `geo_advanced:1962` (`_toi_near_point`) is not a norm-class site.** Unanimous
+      3/3: eight lines above it, `if (f64_le(vv, 0) == 1) { … return 1; }` makes the flush-to-zero
+      band unreachable at that line. ⚠ Recorded rather than dropped: the verifiers note the function
+      is still not scale-free for other reasons (the `f64_le(vv, 0)` escape itself reports a false
+      impact below 2^-537, and the optimality test runs on the degraded `vv`). That is a separate
+      finding about `time_of_impact`, not about this line.
 
 ### EPA — one routine, three entangled questions
 

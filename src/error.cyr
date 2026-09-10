@@ -32,10 +32,16 @@ var EPSILON_F64 = 0x3D719799812DEA11;        # 1e-12 as f64 bits
 # operation fail and nothing more; a threshold that needs a scale chosen for it
 # IS the defect** — and three modules then wrote the same value under three
 # different names: `_GEO_F64_TINY` (geo, 15 uses), `_AD_F64_TINY` (autodiff, 4)
-# and `_QUAT_F64_TINY` (quat, 3). All three are byte-identical
-# `0x0010_0000_0000_0000`; they are now aliases of this one, so the VALUE has a
+# and `_QUAT_F64_TINY` (quat, 3). All three were byte-identical
+# `0x0010_0000_0000_0000` and became aliases of this one, so the VALUE has a
 # single definition and the constant gate has one literal to check instead of
-# three. The 22 existing use sites and 2 test references are untouched.
+# three.
+# ⚠ `_QUAT_F64_TINY` IS GONE as of 2.17.0 — not renamed, RETIRED. Both of its
+# uses were guards on a length or a squared length, and both turned out to be the
+# wrong test once the norms below them stopped flushing: DBL_MIN is one binade too
+# strict for a reciprocal, so `hquat_normalize` moved onto the overflow test the
+# vec family uses, and `hquat_inverse` onto an exact zero. The alias had no
+# remaining caller and an unused global is not free.
 #
 # ⚠ NOT A REPLACEMENT FOR `EPSILON_F64`. This is the right threshold when the
 # guard protects a DIVISION and the only thing that can actually fail is a zero

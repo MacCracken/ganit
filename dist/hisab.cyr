@@ -39,10 +39,16 @@ var EPSILON_F64 = 0x3D719799812DEA11;        # 1e-12 as f64 bits
 # operation fail and nothing more; a threshold that needs a scale chosen for it
 # IS the defect** — and three modules then wrote the same value under three
 # different names: `_GEO_F64_TINY` (geo, 15 uses), `_AD_F64_TINY` (autodiff, 4)
-# and `_QUAT_F64_TINY` (quat, 3). All three are byte-identical
-# `0x0010_0000_0000_0000`; they are now aliases of this one, so the VALUE has a
+# and `_QUAT_F64_TINY` (quat, 3). All three were byte-identical
+# `0x0010_0000_0000_0000` and became aliases of this one, so the VALUE has a
 # single definition and the constant gate has one literal to check instead of
-# three. The 22 existing use sites and 2 test references are untouched.
+# three.
+# ⚠ `_QUAT_F64_TINY` IS GONE as of 2.17.0 — not renamed, RETIRED. Both of its
+# uses were guards on a length or a squared length, and both turned out to be the
+# wrong test once the norms below them stopped flushing: DBL_MIN is one binade too
+# strict for a reciprocal, so `hquat_normalize` moved onto the overflow test the
+# vec family uses, and `hquat_inverse` onto an exact zero. The alias had no
+# remaining caller and an unused global is not free.
 #
 # ⚠ NOT A REPLACEMENT FOR `EPSILON_F64`. This is the right threshold when the
 # guard protects a DIVISION and the only thing that can actually fail is a zero
@@ -714,7 +720,6 @@ fn hvec4_normalize(v) {
 # below divide, and this is exactly the point at which the division stops
 # producing a usable answer -- the rule that settled six thresholds in geo.cyr
 # across 2.10.2 and four in autodiff.cyr in 2.11.0.
-var _QUAT_F64_TINY = F64_TINY;   # alias of error.cyr's F64_TINY (DBL_MIN)
 
 #derive(accessors)
 struct HQuat { x; y; z; w; }
@@ -811,8 +816,14 @@ fn _hquat_len_scaled(q) {
 # ⛔ 2.17.0 — same class as `hvec3_length`: squaring before summing loses 537
 # binades below and 512 above, and is silently wrong in the subnormal band
 # between. ⚠ This one matters beyond its own module: `hquat_normalize` and
-# `hquat_inverse` route through it, and 2.11.1 already repaired those two for
-# returning a fabricated IDENTITY — the guard was fixed then, the norm was not.
+# `hquat_inverse` are what 2.11.1 repaired for returning a fabricated IDENTITY —
+# the guard was fixed then, the norm was not.
+# ⛔ AND AN EARLIER DRAFT OF THIS VERY COMMENT SAID BOTH OF THEM "route through
+# it", WHICH WAS FALSE FOR `hquat_inverse` — it reads `hquat_length_sq` directly
+# and so kept the whole defect, 1018 of 2041 binades, 507 of them the fabricated
+# identity this file has now claimed to have fixed twice. A comment asserting a
+# call graph is a claim like any other and this one was never checked.
+# [measured: 2041-binade two-sided sweep on q*q^-1, 2026-09-10]
 fn hquat_length(q) {
     var ls = hquat_length_sq(q);
     if (f64_lt(ls, F64_TINY) == 1) { return _hquat_len_scaled(q); }
@@ -825,10 +836,24 @@ fn hquat_length(q) {
 # any quaternion shorter than that even though the division is well-defined far
 # below it. `len` is unsquared so the units were at least right -- unlike
 # hquat_inverse below, which was out by the square.
+# ⛔ 2.17.0 — AND THE THRESHOLD WAS STILL WRONG AFTER 2.11.1, in the direction
+# `src/error.cyr` already names out loud: DBL_MIN is one binade too strict for a
+# RECIPROCAL, because `1 / 2^-1023` is finite. That was harmless while the norm
+# itself flushed at 2^-537 — the band was unreachable — and repairing
+# `hquat_length` above made it reachable, so this guard began fabricating the
+# identity for a quaternion that normalises perfectly well.
+# ⚠ Measured: **48 of 48** subnormal magnitudes returned the identity here while
+# the already-repaired `hvec3_normalize` returned the unit vector for the same
+# input. ⭐ The vec family was moved onto the reciprocal-overflow test in 2.14.0;
+# this one was not, and repairing the norm without repairing the guard is a NET
+# REGRESSION over those 52 binades.
+# ⚠ `f64_eq(|inv|, +Inf)` and not the tempting `f64_lt(|inv|, +Inf) == 0`: the
+# latter is false for NaN too, and this API's contract is NaN in, NaN out.
+# [measured: 48-binade subnormal sweep against the vec3 control, 2026-09-10]
 fn hquat_normalize(q) {
     var len = hquat_length(q);
-    if (f64_lt(f64_abs(len), _QUAT_F64_TINY) == 1) { return hquat_identity(); }
     var inv = f64_div(F64_ONE, len);
+    if (f64_eq(f64_abs(inv), F64_POS_INF) == 1) { return hquat_identity(); }
     var r = alloc(sizeof(HQuat));
     f64v_scale(r, q, inv, 4);
     return r;
@@ -846,14 +871,55 @@ fn hquat_normalize(q) {
 # magnitude 1.4e-7 has an inverse of magnitude 7e6 -- finite, representable, and
 # silently replaced by a rotation of zero.
 # [measured: tests/foundation.tcyr "2.11.1 quat: inverse and normalize are scale-covariant"]
+# ⛔ 2.17.0 — THIS IS THE SITE THE RELEASE MISSED ON ITS FIRST PASS. It reads
+# `hquat_length_sq` DIRECTLY, so repairing `hquat_length` above did nothing for
+# it: measured, **1018 of 2041 binades wrong**, and **507 of them returned the
+# fabricated IDENTITY** — the exact failure the 2.11.1 note below says it fixed.
+# 2.11.1 moved the threshold from 1e-6 to DBL_MIN; the fabrication simply moved
+# with it, to |q| ~ 1.5e-155. At the other end `|q|² = +Inf` made `inv` 0 and the
+# inverse came back as the ZERO quaternion. ⚠ It surfaced from a regression sweep
+# asking "what did the repair miss", not from the census — the census listed the
+# module as done. [measured: 2041-binade two-sided sweep on q*q^-1, 2026-09-10]
+#
+# ⭐ FAST PATH, AND THE FAST PATH IS THE SHIPPED ARITHMETIC UNCHANGED. `1/|q|²` is
+# ONE rounding; the rescue below divides twice and pays two. Measured against
+# exact rational truth over 180 components of 45 ordinary quaternions: the direct
+# form is mean 0.309 ulp / worst 1.101, the two-division form mean 0.655 / worst
+# 2.115 — **2.12x the error**, and the two disagree on 97 of the 180. So the
+# direct form is kept wherever it is exact and the rescue runs only where the
+# direct form would otherwise fabricate.
+# ⚠ Replacing the whole function with the two-division form would therefore be a
+# precision REGRESSION on every ordinary quaternion, which is why this is a fast
+# path and not a rewrite.
+# [measured: scratch harness, exact Fraction truth vs both f64 pipelines, 2026-09-10]
+# ⚠ The fast-path test needs BOTH ends: `ls` subnormal or +Inf means the sum of
+# squares lost the value on the way in, and `1/ls` subnormal means the reciprocal
+# lost it on the way back — a fixture that only goes down would have missed the
+# second, which fails at 2^509 alone.
+# ⚠ NaN satisfies neither test, so it takes the fast path and propagates, which
+# is what `tests/abuse.tcyr` pins for this family.
+#
+# ⭐ THE RESCUE DIVIDES TWICE BY |q| AND NEVER ONCE BY |q|². A quaternion at
+# 2^-600 has an inverse at 2^600 — perfectly representable — but |q|² is not, so
+# the squared form cannot get there by any threshold. ⚠ And it must be `f64_div`,
+# not a multiply by `1/|q|`: for a subnormal |q| the reciprocal is +Inf and the
+# zero components would come back as `0 * Inf` = NaN, the rule
+# `src/linalg_precision.cyr:78` states verbatim.
 fn hquat_inverse(q) {
-    var len_sq = hquat_length_sq(q);
-    if (f64_lt(f64_abs(len_sq), _QUAT_F64_TINY) == 1) { return hquat_identity(); }
-    var inv = f64_div(F64_ONE, len_sq);
-    return hquat_new(f64_mul(f64_neg(HQuat_x(q)), inv),
-      f64_mul(f64_neg(HQuat_y(q)), inv),
-      f64_mul(f64_neg(HQuat_z(q)), inv),
-      f64_mul(HQuat_w(q), inv));
+    var ls = hquat_length_sq(q);
+    var inv = f64_div(F64_ONE, ls);
+    if (f64_lt(ls, F64_TINY) == 0 && f64_lt(inv, F64_TINY) == 0) {
+        return hquat_new(f64_mul(f64_neg(HQuat_x(q)), inv),
+          f64_mul(f64_neg(HQuat_y(q)), inv),
+          f64_mul(f64_neg(HQuat_z(q)), inv),
+          f64_mul(HQuat_w(q), inv));
+    }
+    var len = hquat_length(q);
+    if (f64_eq(len, 0) == 1) { return hquat_identity(); }
+    return hquat_new(f64_div(f64_div(f64_neg(HQuat_x(q)), len), len),
+      f64_div(f64_div(f64_neg(HQuat_y(q)), len), len),
+      f64_div(f64_div(f64_neg(HQuat_z(q)), len), len),
+      f64_div(f64_div(HQuat_w(q), len), len));
 }
 
 # ================================================================
@@ -1120,7 +1186,38 @@ fn m3_trace(m) {
     return f64_add(f64_add(m3_get(m, 0, 0), m3_get(m, 1, 1)), m3_get(m, 2, 2));
 }
 
+#must_use
+fn _m3_frob_scaled(m) {
+    var mx = f64_from(0);
+    var i = 0;
+    while (i < 9) {
+        var a = f64_abs(load64(m + i * 8));
+        if (f64_gt(a, mx) == 1) { mx = a; }
+        i = i + 1;
+    }
+    if (f64_gt(mx, 0) == 0) { return mx; }
+    # ⚠ Inf/Inf is NaN, so the infinity contract needs its own exit here.
+    if (f64_eq(mx, F64_POS_INF) == 1) { return mx; }
+    var sum = f64_from(0);
+    i = 0;
+    while (i < 9) {
+        var s = f64_div(load64(m + i * 8), mx);
+        sum = f64_add(sum, f64_mul(s, s));
+        i = i + 1;
+    }
+    return f64_mul(mx, f64_sqrt(sum));
+}
+
 # Frobenius norm
+# ⛔ 2.17.0 — THIS SQUARED BEFORE SUMMING and was wrong on **992 of 2041
+# binades**: `|k·I|` came back as exactly 0 for k below 2^-538 and as +Inf for k
+# at or above 2^512, where the answer `k·sqrt(3)` is perfectly representable.
+# ⚠ ONE ASSERTION GUARDED THIS FUNCTION — `m3_frobenius(I) = sqrt(3)` — at a
+# single scale of 1, so nearly half the input range was untested and the defect
+# was invisible however many times the suite ran.
+# ⭐ Fast path plus a scaled rescue, the same shape as `hvec3_length`; nine legs
+# has no stdlib hypot to delegate to, so the max-scale loop is written out.
+# [measured: 2041-binade two-sided sweep on k·I, 2026-09-10]
 #must_use
 fn m3_frobenius(m) {
     var sum = 0;
@@ -1130,6 +1227,8 @@ fn m3_frobenius(m) {
         sum = f64_add(sum, f64_mul(v, v));
         i = i + 1;
     }
+    if (f64_lt(sum, F64_TINY) == 1) { return _m3_frob_scaled(m); }
+    if (f64_eq(sum, F64_POS_INF) == 1) { return _m3_frob_scaled(m); }
     return f64_sqrt(sum);
 }
 
@@ -4015,27 +4114,52 @@ fn geo_triangle_normal(tri) {
 # legs in the xy-plane returned (0,1,0) where the truth is (0,0,1).
 # [measured: docs/development/issues/archived/2026-08-10-squared-epsilon-guards-in-geo-ray.md]
 #
-# The threshold is now _GEO_F64_TINY, on the same rule the slab repair uses:
-# guard exactly what makes the DIVISION fail and nothing more. sqrt(len_sq) is
-# usable down to len_sq ~ 1e-308, which is s ~ 1e-77.
+# ⚠ That paragraph is history: neither `_GEO_F64_TINY` nor `len_sq` survives in
+# this function as of 2.17.0. See the block inside it for what replaced them and
+# why the exact-zero test was not enough on its own.
 # [measured: docs/development/issues/archived/2026-08-10-squared-epsilon-guards-in-geo-ray.md]
 fn geo_triangle_unit_normal(tri) {
     var n = geo_triangle_normal(tri);
-    var len_sq = hvec3_length_sq(n);
     # ⛔ 2.10.2 MOVED THIS THRESHOLD AND LEFT THE EXPONENT WRONG. `len_sq` is a
     # cross product SQUARED — degree FOUR in the caller's units — and DBL_MIN is
     # the threshold for a degree-ONE quantity, so the guard still fired 77 decades
     # early and still returned a FABRICATED (0,1,0) for a well-formed right
     # triangle. Measured on the 2.13.0 tree: correct through legs of 1e-76, then
     # unit_y from 1e-77 down, which is exactly where sc^4 crosses DBL_MIN.
-    # ⭐ The division is `1 / sqrt(len_sq)`, and sqrt of any non-zero double —
-    # subnormal included — is normal, so the ONLY input that fails is an exact
-    # zero. A not-greater test is that, exactly, and needs no scale. It also
-    # closes a NaN hole the `<` form had: `f64_lt(NaN, x)` is 0, so a NaN
-    # triangle used to return a NaN normal instead of the degenerate fallback.
+    # 2.10.2 replaced that with `f64_gt(len_sq, 0) == 0`, reasoning that sqrt of
+    # any non-zero double is normal so only an exact zero fails — sound as far as
+    # it went, and it also closed a NaN hole (`f64_lt(NaN, x)` is 0, so a NaN
+    # triangle used to return a NaN normal instead of the degenerate fallback).
     # [measured: tests/modules.tcyr _sc_sweep, first bad decade 77 of 90]
-    if (f64_gt(len_sq, 0) == 0) { return hvec3_unit_y(); }
-    return hvec3_scale(n, f64_div(F64_ONE, f64_sqrt(len_sq)));
+    #
+    # ⛔ 2.17.0 — AND `len_sq` ITSELF WAS THE DEFECT, SO THE EXACT GUARD FIRED
+    # ANYWAY. `hvec3_length_sq` squares before summing, so for legs below 2^-269
+    # the squared cross product flushed to exactly zero, `f64_gt(0, 0) == 0` was
+    # true, and the FABRICATED (0,1,0) came back for a perfectly well-formed
+    # triangle — the very outcome 2.10.2 records as repaired, twice over now.
+    # Measured on the 2.16.0 tree: **877 of 1401 leg scales wrong**, legs below
+    # 2^-269 and at or above 2^256. ⭐ Half-depth bands because a cross product is
+    # degree TWO — derived from the arithmetic, not chosen.
+    # ⚠ THE `len_sq` TEST IS GONE, NOT SUPPLEMENTED. The first attempt kept it and
+    # added the repaired path below, which fixed nothing at all on the low side:
+    # the flushed `len_sq` still returned the fallback before the new code ran.
+    # The order of the guard is the guard.
+    # ⭐ `hvec3_length` (repaired earlier in this release) replaces the re-derived
+    # sqrt, and what is guarded is what actually fails: a zero or NaN length —
+    # `f64_gt(len, 0) == 0` keeps 2.10.2's NaN-to-fallback contract — and a length
+    # too small to invert.
+    # ⚠ WHAT THIS DOES NOT FIX, STATED SO IT IS NOT READ AS A FULL REPAIR: the
+    # residual band is now `hvec3_cross` itself. Legs at 2^-512 give cross
+    # components that are already subnormal or zero, and legs at 2^512 give +Inf,
+    # before any norm runs. The repair moves the floor from 2^-269 to 2^-512 and
+    # the ceiling from 2^256 to 2^512 — 243 and 256 binades — and what remains is
+    # destroyed upstream of this function. Measured after: 378 of 1401.
+    # [measured: 1401-binade two-sided sweep before and after, 2026-09-10]
+    var len = hvec3_length(n);
+    if (f64_gt(len, 0) == 0) { return hvec3_unit_y(); }
+    var inv = f64_div(F64_ONE, len);
+    if (f64_eq(inv, F64_POS_INF) == 1) { return hvec3_unit_y(); }
+    return hvec3_scale(n, inv);
 }
 
 fn geo_triangle_area(tri) {
@@ -4088,12 +4212,24 @@ fn geo_segment_midpoint(seg) {
 # geo_triangle_unit_normal. A segment shorter than 1e-6 got a fabricated unit_x.
 fn geo_segment_direction(seg) {
     var d = hvec3_sub(GeoSegment_end(seg), GeoSegment_start(seg));
-    var len_sq = hvec3_length_sq(d);
     # ⛔ Same shape as geo_triangle_unit_normal above: a SQUARED length against a
     # threshold meant for an unsquared one, so a valid short segment still got a
     # fabricated unit_x. `1 / sqrt(len_sq)` fails only at an exact zero.
-    if (f64_gt(len_sq, 0) == 0) { return hvec3_unit_x(); }
-    return hvec3_scale(d, f64_div(F64_ONE, f64_sqrt(len_sq)));
+    # ⛔ 2.17.0 — same residue as `geo_triangle_unit_normal`: `len_sq` squares
+    # before summing, so a segment whose components sit below 2^-538 flushes to a
+    # zero length and gets the FABRICATED unit_x, and one above 2^509 gets a
+    # length of +Inf and a direction of (0,0,0). Measured: **994 of 2041 scales
+    # wrong**, and at 2^-600 a (3k, 4k, 0) segment returns (1, 0, 0) where the
+    # direction is (0.6, 0.8, 0).
+    # ⚠ AN AXIS-ALIGNED FIXTURE CANNOT SEE THIS. The first probe used a segment
+    # along +x, and the fabricated unit_x fallback IS the right answer there, so
+    # it reported the low band clean. The diagonal is what discriminates.
+    # [measured: 2041-binade two-sided sweep on a (3k,4k,0) segment, 2026-09-10]
+    var len = hvec3_length(d);
+    if (f64_gt(len, 0) == 0) { return hvec3_unit_x(); }
+    var inv = f64_div(F64_ONE, len);
+    if (f64_eq(inv, F64_POS_INF) == 1) { return hvec3_unit_x(); }
+    return hvec3_scale(d, inv);
 }
 
 # 2.10.2, and this one is LOAD-BEARING beyond itself: geo_segment_distance_to_point
@@ -7708,7 +7844,21 @@ fn cga_sphere(cx, cy, cz, r) {
 # Normal is normalized.
 fn cga_plane(nx, ny, nz, d) {
     var mv = cga_mv_zero();
-    var norm = f64_sqrt(f64_add(f64_add(f64_mul(nx, nx), f64_mul(ny, ny)), f64_mul(nz, nz)));
+    # ⛔ 2.14.0 fixed the THRESHOLD here and 2.17.0 found the fabrication still
+    # live 500 binades lower, because the norm itself squared before summing.
+    # Measured on the 2.16.0 tree: **995 of 2041 scales wrong** — `cga_plane` with
+    # a (3k, 4k, 12k) normal returned an ALL-ZERO multivector, i.e. no plane at
+    # all, for every k below 2^-538, and at or above 2^509 the +Inf norm made
+    # every component zero the same way. The 2.14.0 note below says the old
+    # failure "carries no signal that anything went wrong"; neither did this one.
+    # ⭐ Chained `ganita_f64_hypot` rather than a fourth hand-rolled scaled loop.
+    # It is the stdlib's own scale-by-the-larger-leg form, and chaining it for a
+    # third leg was measured **bit-identical to `_lie_norm3` on all 2098 binades**
+    # including subnormals. ⚠ `_lie_norm3` itself is not reachable from here —
+    # `src/lie.cyr` sits after `src/geo_advanced.cyr` in the `[lib]` order, so
+    # calling it would invert the declared dependency direction.
+    # [measured: 2041-binade sweep; chained-hypot equivalence over 2098 binades]
+    var norm = ganita_f64_hypot(ganita_f64_hypot(nx, ny), nz);
     # ⛔ `norm` is the LENGTH of the caller's normal, in the caller's units,
     # against an absolute 1e-12 — and when the test failed it left `inv = 1` and
     # built a plane from the UNNORMALISED normal, which is not the plane the
@@ -7716,11 +7866,13 @@ fn cga_plane(nx, ny, nz, d) {
     # ⭐ A zero normal has no plane at all, so that is the only rejection; every
     # other normal divides.
     if (f64_gt(norm, 0) == 0) { return cga_mv_zero(); }
-    var inv = f64_div(F64_ONE, norm);
-    cga_mv_set(mv, 1, f64_mul(nx, inv));
-    cga_mv_set(mv, 2, f64_mul(ny, inv));
-    cga_mv_set(mv, 3, f64_mul(nz, inv));
-    var d_scaled = f64_mul(d, inv);
+    # ⚠ DIVIDE, NEVER MULTIPLY BY `1 / norm`. With the norm no longer flushing, a
+    # subnormal norm is reachable and its reciprocal is +Inf, which would turn the
+    # zero components into `0 * Inf` = NaN. Same rule as src/linalg_precision.cyr.
+    cga_mv_set(mv, 1, f64_div(nx, norm));
+    cga_mv_set(mv, 2, f64_div(ny, norm));
+    cga_mv_set(mv, 3, f64_div(nz, norm));
+    var d_scaled = f64_div(d, norm);
     cga_mv_set(mv, 4, d_scaled);  # ep component
     cga_mv_set(mv, 5, d_scaled);  # em component
     return mv;
@@ -7751,20 +7903,36 @@ fn cga_translator(tx, ty, tz) {
 # Rotor: R = cos(theta/2) - sin(theta/2) * (nz*e12 - ny*e13 + nx*e23)
 # Axis (ax, ay, az) is normalized internally.
 fn cga_rotor(ax, ay, az, angle) {
-    var norm = f64_sqrt(f64_add(f64_add(f64_mul(ax, ax), f64_mul(ay, ay)), f64_mul(az, az)));
+    # ⛔ 2.17.0 — THE 2.14.0 NOTE BELOW DESCRIBES A DEFECT THAT WAS STILL LIVE.
+    # It reads "an absolute 1e-12 turned a real rotation into the identity rotor
+    # for a short axis vector, with no error channel" — and after that repair the
+    # identity rotor was STILL returned, just 500 binades lower, because the norm
+    # squared before summing. Measured on the 2.16.0 tree: **995 of 2041 axis
+    # scales wrong, 991 of them the fabricated identity.** Moving a threshold does
+    # not help when the quantity it tests has already lost the value.
+    # ⭐ Chained `ganita_f64_hypot`, as in `cga_plane` above and for the same
+    # reasons (stdlib form; `_lie_norm3` is later in the `[lib]` order).
+    # [measured: 2041-binade two-sided sweep on the e23 component, 2026-09-10]
+    var norm = ganita_f64_hypot(ganita_f64_hypot(ax, ay), az);
     # ⛔ The axis LENGTH is a unit choice — the header one line up even says the
     # axis is normalised internally — so an absolute 1e-12 turned a real rotation
     # into the identity rotor for a short axis vector, with no error channel.
-    if (f64_lt(norm, _GA_F64_TINY) == 1) {
+    # ⚠ `f64_eq(norm, 0)`, NOT the `f64_gt(norm, 0) == 0` form `cga_plane` uses:
+    # `f64_gt(NaN, 0)` is 0, so that shape would fold a NaN axis into a fabricated
+    # identity rotor, and this function propagates NaN today. The two siblings
+    # differ here on purpose — `cga_plane` has always folded NaN to the null
+    # multivector and keeping each contract is the point.
+    if (f64_eq(norm, 0) == 1) {
         # Degenerate axis: return identity
         var mv = cga_mv_zero();
         cga_mv_set(mv, 0, F64_ONE);
         return mv;
     }
-    var inv = f64_div(F64_ONE, norm);
-    var nx = f64_mul(ax, inv);
-    var ny = f64_mul(ay, inv);
-    var nz = f64_mul(az, inv);
+    # ⚠ Divide, never multiply by `1 / norm` — a subnormal norm is reachable now
+    # and its reciprocal is +Inf.
+    var nx = f64_div(ax, norm);
+    var ny = f64_div(ay, norm);
+    var nz = f64_div(az, norm);
 
     var half = f64_mul(angle, F64_HALF);
     var c = f64_cos(half);

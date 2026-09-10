@@ -2533,7 +2533,21 @@ fn cga_sphere(cx, cy, cz, r) {
 # Normal is normalized.
 fn cga_plane(nx, ny, nz, d) {
     var mv = cga_mv_zero();
-    var norm = f64_sqrt(f64_add(f64_add(f64_mul(nx, nx), f64_mul(ny, ny)), f64_mul(nz, nz)));
+    # ⛔ 2.14.0 fixed the THRESHOLD here and 2.17.0 found the fabrication still
+    # live 500 binades lower, because the norm itself squared before summing.
+    # Measured on the 2.16.0 tree: **995 of 2041 scales wrong** — `cga_plane` with
+    # a (3k, 4k, 12k) normal returned an ALL-ZERO multivector, i.e. no plane at
+    # all, for every k below 2^-538, and at or above 2^509 the +Inf norm made
+    # every component zero the same way. The 2.14.0 note below says the old
+    # failure "carries no signal that anything went wrong"; neither did this one.
+    # ⭐ Chained `ganita_f64_hypot` rather than a fourth hand-rolled scaled loop.
+    # It is the stdlib's own scale-by-the-larger-leg form, and chaining it for a
+    # third leg was measured **bit-identical to `_lie_norm3` on all 2098 binades**
+    # including subnormals. ⚠ `_lie_norm3` itself is not reachable from here —
+    # `src/lie.cyr` sits after `src/geo_advanced.cyr` in the `[lib]` order, so
+    # calling it would invert the declared dependency direction.
+    # [measured: 2041-binade sweep; chained-hypot equivalence over 2098 binades]
+    var norm = ganita_f64_hypot(ganita_f64_hypot(nx, ny), nz);
     # ⛔ `norm` is the LENGTH of the caller's normal, in the caller's units,
     # against an absolute 1e-12 — and when the test failed it left `inv = 1` and
     # built a plane from the UNNORMALISED normal, which is not the plane the
@@ -2541,11 +2555,13 @@ fn cga_plane(nx, ny, nz, d) {
     # ⭐ A zero normal has no plane at all, so that is the only rejection; every
     # other normal divides.
     if (f64_gt(norm, 0) == 0) { return cga_mv_zero(); }
-    var inv = f64_div(F64_ONE, norm);
-    cga_mv_set(mv, 1, f64_mul(nx, inv));
-    cga_mv_set(mv, 2, f64_mul(ny, inv));
-    cga_mv_set(mv, 3, f64_mul(nz, inv));
-    var d_scaled = f64_mul(d, inv);
+    # ⚠ DIVIDE, NEVER MULTIPLY BY `1 / norm`. With the norm no longer flushing, a
+    # subnormal norm is reachable and its reciprocal is +Inf, which would turn the
+    # zero components into `0 * Inf` = NaN. Same rule as src/linalg_precision.cyr.
+    cga_mv_set(mv, 1, f64_div(nx, norm));
+    cga_mv_set(mv, 2, f64_div(ny, norm));
+    cga_mv_set(mv, 3, f64_div(nz, norm));
+    var d_scaled = f64_div(d, norm);
     cga_mv_set(mv, 4, d_scaled);  # ep component
     cga_mv_set(mv, 5, d_scaled);  # em component
     return mv;
@@ -2576,20 +2592,36 @@ fn cga_translator(tx, ty, tz) {
 # Rotor: R = cos(theta/2) - sin(theta/2) * (nz*e12 - ny*e13 + nx*e23)
 # Axis (ax, ay, az) is normalized internally.
 fn cga_rotor(ax, ay, az, angle) {
-    var norm = f64_sqrt(f64_add(f64_add(f64_mul(ax, ax), f64_mul(ay, ay)), f64_mul(az, az)));
+    # ⛔ 2.17.0 — THE 2.14.0 NOTE BELOW DESCRIBES A DEFECT THAT WAS STILL LIVE.
+    # It reads "an absolute 1e-12 turned a real rotation into the identity rotor
+    # for a short axis vector, with no error channel" — and after that repair the
+    # identity rotor was STILL returned, just 500 binades lower, because the norm
+    # squared before summing. Measured on the 2.16.0 tree: **995 of 2041 axis
+    # scales wrong, 991 of them the fabricated identity.** Moving a threshold does
+    # not help when the quantity it tests has already lost the value.
+    # ⭐ Chained `ganita_f64_hypot`, as in `cga_plane` above and for the same
+    # reasons (stdlib form; `_lie_norm3` is later in the `[lib]` order).
+    # [measured: 2041-binade two-sided sweep on the e23 component, 2026-09-10]
+    var norm = ganita_f64_hypot(ganita_f64_hypot(ax, ay), az);
     # ⛔ The axis LENGTH is a unit choice — the header one line up even says the
     # axis is normalised internally — so an absolute 1e-12 turned a real rotation
     # into the identity rotor for a short axis vector, with no error channel.
-    if (f64_lt(norm, _GA_F64_TINY) == 1) {
+    # ⚠ `f64_eq(norm, 0)`, NOT the `f64_gt(norm, 0) == 0` form `cga_plane` uses:
+    # `f64_gt(NaN, 0)` is 0, so that shape would fold a NaN axis into a fabricated
+    # identity rotor, and this function propagates NaN today. The two siblings
+    # differ here on purpose — `cga_plane` has always folded NaN to the null
+    # multivector and keeping each contract is the point.
+    if (f64_eq(norm, 0) == 1) {
         # Degenerate axis: return identity
         var mv = cga_mv_zero();
         cga_mv_set(mv, 0, F64_ONE);
         return mv;
     }
-    var inv = f64_div(F64_ONE, norm);
-    var nx = f64_mul(ax, inv);
-    var ny = f64_mul(ay, inv);
-    var nz = f64_mul(az, inv);
+    # ⚠ Divide, never multiply by `1 / norm` — a subnormal norm is reachable now
+    # and its reciprocal is +Inf.
+    var nx = f64_div(ax, norm);
+    var ny = f64_div(ay, norm);
+    var nz = f64_div(az, norm);
 
     var half = f64_mul(angle, F64_HALF);
     var c = f64_cos(half);

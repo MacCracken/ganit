@@ -157,27 +157,52 @@ fn geo_triangle_normal(tri) {
 # legs in the xy-plane returned (0,1,0) where the truth is (0,0,1).
 # [measured: docs/development/issues/archived/2026-08-10-squared-epsilon-guards-in-geo-ray.md]
 #
-# The threshold is now _GEO_F64_TINY, on the same rule the slab repair uses:
-# guard exactly what makes the DIVISION fail and nothing more. sqrt(len_sq) is
-# usable down to len_sq ~ 1e-308, which is s ~ 1e-77.
+# ⚠ That paragraph is history: neither `_GEO_F64_TINY` nor `len_sq` survives in
+# this function as of 2.17.0. See the block inside it for what replaced them and
+# why the exact-zero test was not enough on its own.
 # [measured: docs/development/issues/archived/2026-08-10-squared-epsilon-guards-in-geo-ray.md]
 fn geo_triangle_unit_normal(tri) {
     var n = geo_triangle_normal(tri);
-    var len_sq = hvec3_length_sq(n);
     # ⛔ 2.10.2 MOVED THIS THRESHOLD AND LEFT THE EXPONENT WRONG. `len_sq` is a
     # cross product SQUARED — degree FOUR in the caller's units — and DBL_MIN is
     # the threshold for a degree-ONE quantity, so the guard still fired 77 decades
     # early and still returned a FABRICATED (0,1,0) for a well-formed right
     # triangle. Measured on the 2.13.0 tree: correct through legs of 1e-76, then
     # unit_y from 1e-77 down, which is exactly where sc^4 crosses DBL_MIN.
-    # ⭐ The division is `1 / sqrt(len_sq)`, and sqrt of any non-zero double —
-    # subnormal included — is normal, so the ONLY input that fails is an exact
-    # zero. A not-greater test is that, exactly, and needs no scale. It also
-    # closes a NaN hole the `<` form had: `f64_lt(NaN, x)` is 0, so a NaN
-    # triangle used to return a NaN normal instead of the degenerate fallback.
+    # 2.10.2 replaced that with `f64_gt(len_sq, 0) == 0`, reasoning that sqrt of
+    # any non-zero double is normal so only an exact zero fails — sound as far as
+    # it went, and it also closed a NaN hole (`f64_lt(NaN, x)` is 0, so a NaN
+    # triangle used to return a NaN normal instead of the degenerate fallback).
     # [measured: tests/modules.tcyr _sc_sweep, first bad decade 77 of 90]
-    if (f64_gt(len_sq, 0) == 0) { return hvec3_unit_y(); }
-    return hvec3_scale(n, f64_div(F64_ONE, f64_sqrt(len_sq)));
+    #
+    # ⛔ 2.17.0 — AND `len_sq` ITSELF WAS THE DEFECT, SO THE EXACT GUARD FIRED
+    # ANYWAY. `hvec3_length_sq` squares before summing, so for legs below 2^-269
+    # the squared cross product flushed to exactly zero, `f64_gt(0, 0) == 0` was
+    # true, and the FABRICATED (0,1,0) came back for a perfectly well-formed
+    # triangle — the very outcome 2.10.2 records as repaired, twice over now.
+    # Measured on the 2.16.0 tree: **877 of 1401 leg scales wrong**, legs below
+    # 2^-269 and at or above 2^256. ⭐ Half-depth bands because a cross product is
+    # degree TWO — derived from the arithmetic, not chosen.
+    # ⚠ THE `len_sq` TEST IS GONE, NOT SUPPLEMENTED. The first attempt kept it and
+    # added the repaired path below, which fixed nothing at all on the low side:
+    # the flushed `len_sq` still returned the fallback before the new code ran.
+    # The order of the guard is the guard.
+    # ⭐ `hvec3_length` (repaired earlier in this release) replaces the re-derived
+    # sqrt, and what is guarded is what actually fails: a zero or NaN length —
+    # `f64_gt(len, 0) == 0` keeps 2.10.2's NaN-to-fallback contract — and a length
+    # too small to invert.
+    # ⚠ WHAT THIS DOES NOT FIX, STATED SO IT IS NOT READ AS A FULL REPAIR: the
+    # residual band is now `hvec3_cross` itself. Legs at 2^-512 give cross
+    # components that are already subnormal or zero, and legs at 2^512 give +Inf,
+    # before any norm runs. The repair moves the floor from 2^-269 to 2^-512 and
+    # the ceiling from 2^256 to 2^512 — 243 and 256 binades — and what remains is
+    # destroyed upstream of this function. Measured after: 378 of 1401.
+    # [measured: 1401-binade two-sided sweep before and after, 2026-09-10]
+    var len = hvec3_length(n);
+    if (f64_gt(len, 0) == 0) { return hvec3_unit_y(); }
+    var inv = f64_div(F64_ONE, len);
+    if (f64_eq(inv, F64_POS_INF) == 1) { return hvec3_unit_y(); }
+    return hvec3_scale(n, inv);
 }
 
 fn geo_triangle_area(tri) {
@@ -230,12 +255,24 @@ fn geo_segment_midpoint(seg) {
 # geo_triangle_unit_normal. A segment shorter than 1e-6 got a fabricated unit_x.
 fn geo_segment_direction(seg) {
     var d = hvec3_sub(GeoSegment_end(seg), GeoSegment_start(seg));
-    var len_sq = hvec3_length_sq(d);
     # ⛔ Same shape as geo_triangle_unit_normal above: a SQUARED length against a
     # threshold meant for an unsquared one, so a valid short segment still got a
     # fabricated unit_x. `1 / sqrt(len_sq)` fails only at an exact zero.
-    if (f64_gt(len_sq, 0) == 0) { return hvec3_unit_x(); }
-    return hvec3_scale(d, f64_div(F64_ONE, f64_sqrt(len_sq)));
+    # ⛔ 2.17.0 — same residue as `geo_triangle_unit_normal`: `len_sq` squares
+    # before summing, so a segment whose components sit below 2^-538 flushes to a
+    # zero length and gets the FABRICATED unit_x, and one above 2^509 gets a
+    # length of +Inf and a direction of (0,0,0). Measured: **994 of 2041 scales
+    # wrong**, and at 2^-600 a (3k, 4k, 0) segment returns (1, 0, 0) where the
+    # direction is (0.6, 0.8, 0).
+    # ⚠ AN AXIS-ALIGNED FIXTURE CANNOT SEE THIS. The first probe used a segment
+    # along +x, and the fabricated unit_x fallback IS the right answer there, so
+    # it reported the low band clean. The diagonal is what discriminates.
+    # [measured: 2041-binade two-sided sweep on a (3k,4k,0) segment, 2026-09-10]
+    var len = hvec3_length(d);
+    if (f64_gt(len, 0) == 0) { return hvec3_unit_x(); }
+    var inv = f64_div(F64_ONE, len);
+    if (f64_eq(inv, F64_POS_INF) == 1) { return hvec3_unit_x(); }
+    return hvec3_scale(d, inv);
 }
 
 # 2.10.2, and this one is LOAD-BEARING beyond itself: geo_segment_distance_to_point
