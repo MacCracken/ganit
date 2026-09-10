@@ -868,6 +868,7 @@ fn svd_compute(A, out_U, out_S, out_Vt) {
 # out_S:  flat f64 array of length k (caller allocates).
 # out_Vt: stdlib matrix (k x n, caller allocates).
 # Returns: 0 on success, HSB_ERR_INVALID_INPUT if k is invalid.
+#must_use
 fn svd_truncated(A, k, out_U, out_S, out_Vt) {
     var rows = ganita_mat_rows(A);
     var cols = ganita_mat_cols(A);
@@ -925,6 +926,7 @@ fn svd_truncated(A, k, out_U, out_S, out_Vt) {
 # Returns:  0 on success, HSB_ERR_NO_CONVERGENCE if max_iter exceeded,
 #           HSB_ERR_INVALID_INPUT on a null handle or a shape that does not
 #           match n, HSB_ERR_ALLOC if the working vectors cannot be allocated.
+#must_use
 fn eigen_power(A, n, max_iter, out_val, out_vec) {
     # NULL HANDLES. A may be the designed 0 that mat_new_guarded returns above
     # its element cap, and ganita_mat_rows(0) is a null dereference.
@@ -1061,6 +1063,7 @@ fn eigen_power(A, n, max_iter, out_val, out_vec) {
 # out_vecs' columns with it so a (lambda, v) pair is never broken. eigen_qr is
 # unchanged. This is a behaviour change for any caller that read eigen_symmetric's
 # raw Jacobi order -- see CHANGELOG "Breaking".
+#must_use
 fn eigen_symmetric(A, n, out_vals, out_vecs) {
     var result = ganita_mat_eigen_sym(A, out_vals, out_vecs);
     if (result < 0) { return HSB_ERR_NO_CONVERGENCE; }
@@ -1116,6 +1119,7 @@ fn eigen_symmetric(A, n, out_vals, out_vecs) {
 # Method: repeatedly QR-decompose A^k. The growth rate of R's diagonal
 # entries gives the Lyapunov exponent. This is the simplified discrete
 # version: repeatedly multiply A, QR-factor, and track log growth.
+#must_use
 fn lyapunov_max(A, n, iterations, out) {
     # NULL HANDLES. A may be the designed 0 from mat_new_guarded's cap.
     if (A == 0 || out == 0) { return HSB_ERR_INVALID_INPUT; }

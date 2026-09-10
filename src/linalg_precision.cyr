@@ -631,6 +631,7 @@ fn _lp_split_zero_diag(diag, superdiag, n, m, U_acc, Vt_acc, p_lo, p_hi) {
 # Operates on diag[0..n) and superdiag[0..n-1) in place.
 # Accumulates Givens rotations into U_acc (m x n) and Vt_acc (n x n).
 # max_iter: maximum total QR sweeps.
+#must_use
 fn _lp_bidiag_qr(diag, superdiag, n, m, U_acc, Vt_acc, max_iter) {
     var iter = 0;
     var p_hi = n - 1;  # active submatrix upper bound
@@ -945,6 +946,7 @@ fn _lp_bidiag_qr(diag, superdiag, n, m, U_acc, Vt_acc, max_iter) {
 # out_Vt: stdlib matrix (n x n, caller allocates).
 # Returns: HSB_ERR_NONE on success, HSB_ERR_NO_CONVERGENCE on failure,
 #          HSB_ERR_INVALID_INPUT if m < n or either dimension is non-positive.
+#must_use
 fn svd_golub_kahan(A, out_U, out_S, out_Vt) {
     # Any of these may be the designed 0 that ganita_mat_new returns above its own
     # element cap; ganita_mat_rows(0) is a null dereference -- guard before reading dims.
@@ -1244,6 +1246,7 @@ fn _lp_tridiagonalize(A, n, diag, offdiag, Q) {
 # offdiag[0..n): sub/superdiagonal (offdiag[i] = T[i,i-1], offdiag[0] = 0).
 # Q: n x n matrix (accumulates Givens rotations).
 # max_iter: maximum iterations.
+#must_use
 fn _lp_tridiag_qr(diag, offdiag, n, Q, max_iter) {
     var iter = 0;
     var p_hi = n - 1;
@@ -1441,6 +1444,7 @@ fn _lp_tridiag_qr(diag, offdiag, n, Q, max_iter) {
 # out_vecs: stdlib matrix (n x n, caller allocates, eigenvectors as columns).
 # Returns:  HSB_ERR_NONE on success, HSB_ERR_NO_CONVERGENCE if max_iter exceeded,
 #           HSB_ERR_INVALID_INPUT on a null handle or a shape that does not match n.
+#must_use
 fn eigen_qr(A, n, max_iter, out_vals, out_vecs) {
     # Any of these may be the designed 0 that ganita_mat_new / mat_new_guarded returns
     # above its own element cap; ganita_mat_rows(0) is a null dereference, so guard
@@ -1554,6 +1558,7 @@ fn eigen_qr(A, n, max_iter, out_vals, out_vecs) {
 #   H = I - (2 / v^H v) * v * v^H
 # where v = x + sign(x1)*||x||*e1, with sign chosen for numerical stability.
 
+#must_use
 fn cqr_decompose(A, out_Q, out_R) {
     # NULL HANDLES. cmat_rows(0) is load64(0). Each of the three may be the
     # designed 0 that cmat_new returns for a non-positive dimension or above

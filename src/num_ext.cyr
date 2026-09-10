@@ -330,6 +330,7 @@ fn num_factorize(n) {
 # out_x: pointer -- solution x written here
 # out_m: pointer -- combined modulus M written here
 # Returns: 0 on success, HSB_ERR_INVALID_INPUT on failure
+#must_use
 fn num_crt(remainders, moduli, count, out_x, out_m) {
     if (count <= 0) { return HSB_ERR_INVALID_INPUT; }
 
@@ -429,6 +430,7 @@ fn _numx_chirp_angle(j, n) {
 # data: pointer to n complex numbers ([re, im] pairs, 16 bytes each)
 # Returns: 0 on success, HSB_ERR_INVALID_INPUT if n <= 0 or n > _NUMX_DFT_MAX,
 #          HSB_ERR_ALLOC if a work buffer could not be allocated.
+#must_use
 fn _numx_dft(data, n) {
     if (n <= 0) { return HSB_ERR_INVALID_INPUT; }
     if (n == 1) { return HSB_ERR_NONE; }
@@ -508,6 +510,7 @@ fn _numx_dft(data, n) {
 # In-place inverse DFT of `n` complex values, any n >= 1.
 # Same conjugate-forward-conjugate identity num_ifft uses, so it inherits
 # _numx_dft's guards; `data` is only touched after those guards pass.
+#must_use
 fn _numx_idft(data, n) {
     if (n <= 0) { return HSB_ERR_INVALID_INPUT; }
     if (n == 1) { return HSB_ERR_NONE; }
@@ -651,6 +654,7 @@ fn _numx_use_fft(n, len, post) {
 # n: number of values (must be > 0)
 # Returns: 0 on success, HSB_ERR_INVALID_INPUT if n <= 0, HSB_ERR_ALLOC if a
 #          work buffer could not be allocated
+#must_use
 fn num_dst(data, n) {
     if (n <= 0) { return HSB_ERR_INVALID_INPUT; }
     if (n == 1) { return HSB_ERR_NONE; }   # sin(PI/2) == 1 exactly
@@ -692,6 +696,7 @@ fn num_dst(data, n) {
 
 # Direct O(n^2) DST-I -- the pre-2.8.3 body, kept because it is the faster
 # path below the crossover (see _numx_use_fft).
+#must_use
 fn _numx_dst_direct(data, n) {
     var out = alloc(n * 8);
     if (out == 0) { return HSB_ERR_ALLOC; }
@@ -727,6 +732,7 @@ fn _numx_dst_direct(data, n) {
 # n: number of values
 # Returns: 0 on success, HSB_ERR_INVALID_INPUT if n <= 0, HSB_ERR_ALLOC if a
 #          work buffer could not be allocated (propagated from num_dst)
+#must_use
 fn num_idst(data, n) {
     if (n <= 0) { return HSB_ERR_INVALID_INPUT; }
 
@@ -750,6 +756,7 @@ fn num_idst(data, n) {
 # n: number of values (must be > 0)
 # Returns: 0 on success, HSB_ERR_INVALID_INPUT if n <= 0, HSB_ERR_ALLOC if a
 #          work buffer could not be allocated
+#must_use
 fn num_dct(data, n) {
     if (n <= 0) { return HSB_ERR_INVALID_INPUT; }
     if (n == 1) { return HSB_ERR_NONE; }   # X[0] = x[0] * cos(0)
@@ -791,6 +798,7 @@ fn num_dct(data, n) {
 }
 
 # Direct O(n^2) DCT-II -- the pre-2.8.3 body, kept as the sub-crossover path.
+#must_use
 fn _numx_dct_direct(data, n) {
     var out = alloc(n * 8);
     if (out == 0) { return HSB_ERR_ALLOC; }
@@ -825,6 +833,7 @@ fn _numx_dct_direct(data, n) {
 # n: number of values
 # Returns: 0 on success, HSB_ERR_INVALID_INPUT if n <= 0, HSB_ERR_ALLOC if a
 #          work buffer could not be allocated
+#must_use
 fn num_idct(data, n) {
     if (n <= 0) { return HSB_ERR_INVALID_INPUT; }
     if (n == 1) { return HSB_ERR_NONE; }   # x[0] = X[0] / 1
@@ -870,6 +879,7 @@ fn num_idct(data, n) {
 }
 
 # Direct O(n^2) DCT-III -- the pre-2.8.3 body, kept as the sub-crossover path.
+#must_use
 fn _numx_idct_direct(data, n) {
     var out = alloc(n * 8);
     if (out == 0) { return HSB_ERR_ALLOC; }
@@ -913,6 +923,7 @@ fn _numx_idct_direct(data, n) {
 # rows: number of rows (must be power of 2)
 # cols: number of columns (must be power of 2)
 # Returns: 0 on success, HSB_ERR_INVALID_INPUT if dimensions not power of 2
+#must_use
 fn num_fft_2d(data, rows, cols) {
     if (_num_is_pow2(rows) == 0) { return HSB_ERR_INVALID_INPUT; }
     if (_num_is_pow2(cols) == 0) { return HSB_ERR_INVALID_INPUT; }
@@ -971,6 +982,7 @@ fn num_fft_2d(data, rows, cols) {
 # data: pointer to rows*cols complex numbers
 # rows, cols: must be powers of 2
 # Returns: 0 on success
+#must_use
 fn num_ifft_2d(data, rows, cols) {
     if (_num_is_pow2(rows) == 0) { return HSB_ERR_INVALID_INPUT; }
     if (_num_is_pow2(cols) == 0) { return HSB_ERR_INVALID_INPUT; }
@@ -1110,6 +1122,7 @@ fn num_sobol(index) {
 # ~60 of these 70 lines uncertified. tests/modules.tcyr now solves a 1-D Poisson
 # system and an asymmetric (sub != super) system whose right-hand sides were
 # built as d = A x for a chosen integer x.
+#must_use
 fn num_tridiag_solve(a, b, c, d, n, out) {
     if (n <= 0) { return HSB_ERR_INVALID_INPUT; }
 

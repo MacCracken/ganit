@@ -3541,6 +3541,7 @@ fn ad_abs(t, a) {
 #
 # Returns 0 on success and a negative HSB_ERR_* on a bad root. The adjoints live
 # in the tape and are read back with ad_grad_of.
+#must_use
 fn ad_grad(t, root) {
     if (ad_ok(t, root) == 0) { return HSB_ERR_INVALID_INPUT; }
     var n = AdTape_n(t);
@@ -3617,6 +3618,7 @@ fn ad_grad_of(t, i) {
 # It exists because the alternative is a per-variable
 # `store64(out + k * 8, ad_grad_of(t, load64(ids + k * 8)))` at every call site,
 # which is exactly the shape an off-by-one hides in.
+#must_use
 fn ad_grad_write(t, ids, n, out) {
     if (n < 0) { return HSB_ERR_INVALID_INPUT; }
     for (var k = 0; k < n; k = k + 1) {
@@ -9382,6 +9384,7 @@ fn quadtree_new(x_min, y_min, x_max, y_max, max_depth) {
 # `if (rc == HSB_ERR_NONE)`; a caller that IGNORED the return is unaffected, which
 # is every call site in src/ (there are none) and every one in tests/ that was not
 # asserting on it.
+#must_use
 fn quadtree_insert(qt, x, y, data) {
     var root = load64(qt);
     var max_depth = load64(qt + 8);
@@ -9603,6 +9606,7 @@ fn octree_new(min_vec3, max_vec3, max_depth) {
 #          HSB_ERR_OUT_OF_RANGE (-3) when it lies outside the root bounds and was
 #          dropped. BREAKING at 2.8.5 -- see quadtree_insert for the full note;
 #          this returned 1 / 0 and now returns 0 / -3.
+#must_use
 fn octree_insert(ot, point, data) {
     var root = load64(ot);
     var max_depth = load64(ot + 8);
@@ -10303,6 +10307,7 @@ fn contact_new(body_a, body_b, normal, penetration, friction, restitution, inv_m
 # Returns: HSB_ERR_NONE on success and for n <= 0 (a no-op frame, which was the
 #   incumbent behaviour and is now contracted); HSB_ERR_INVALID_INPUT if
 #   `contacts` is null or `n` exceeds `vec_len(contacts)`.
+#must_use
 fn sequential_impulse(contacts, n, iterations, out_impulses) {
     # ⛔ THE ZEROING LOOP BELOW RUNS BEFORE THE FIRST `vec_get`, SO WITHOUT THIS
     # GUARD THE FUNCTION WROTE OUT OF BOUNDS AND RETURNED **SUCCESS**.
@@ -12161,6 +12166,7 @@ fn halfedge_adjacent_faces(mesh, face) {
 # assert "boundary". The two documented HSB_ERR_* codes are outside {0, 1}, so
 # `== 1` and `== 0` callers both keep their meaning and a caller that wants to
 # tell "not a boundary" from "not a vertex" can.
+#must_use
 fn halfedge_is_boundary(mesh, vertex) {
     if (mesh == 0) { return HSB_ERR_INVALID_INPUT; }
     if (vertex < 0) { return HSB_ERR_OUT_OF_RANGE; }
@@ -12362,6 +12368,7 @@ fn calc_derivative(f, x, h) {
 # f: function pointer (f64 -> f64), a/b: interval bounds (f64),
 # steps: integer count, out: pointer to store f64 result.
 # Returns 0 on success, HSB_ERR_ZERO_STEPS if steps == 0.
+#must_use
 fn calc_integral_trapez(f, a, b, steps, out) {
     if (steps == 0) { return HSB_ERR_ZERO_STEPS; }
     var h = f64_div(f64_sub(b, a), f64_from(steps));
@@ -12382,6 +12389,7 @@ fn calc_integral_trapez(f, a, b, steps, out) {
 # f: function pointer (f64 -> f64), a/b: interval bounds (f64),
 # steps: integer count, out: pointer to store f64 result.
 # Returns 0 on success, HSB_ERR_ZERO_STEPS if steps == 0.
+#must_use
 fn calc_integral_simpson(f, a, b, steps, out) {
     # Round up to even
     if (steps % 2 == 1) { steps = steps + 1; }
@@ -12950,6 +12958,7 @@ fn calc_partial_derivative(f, x, n, index, h) {
 # x: pointer to flat f64[n], n: dimension, h: step size (f64).
 # out: pointer to flat f64[n] to receive gradient components.
 # Returns HSB_ERR_NONE on success, HSB_ERR_INVALID_INPUT if n == 0.
+#must_use
 fn calc_gradient(f, x, n, h, out) {
     if (n == 0) { return HSB_ERR_INVALID_INPUT; }
 
@@ -12984,6 +12993,7 @@ fn calc_gradient(f, x, n, h, out) {
 # h: step size (f64).
 # out: pointer to flat f64[n_out * n_in] (row-major: J[i][j] = out[i*n_in + j]).
 # Returns HSB_ERR_NONE on success, HSB_ERR_INVALID_INPUT if n_in or n_out == 0.
+#must_use
 fn calc_jacobian(f, x, n_in, n_out, h, out) {
     if (n_in == 0) { return HSB_ERR_INVALID_INPUT; }
     if (n_out == 0) { return HSB_ERR_INVALID_INPUT; }
@@ -13030,6 +13040,7 @@ fn calc_jacobian(f, x, n_in, n_out, h, out) {
 # x: pointer to flat f64[n], n: dimension, h: step size (f64).
 # out: pointer to flat f64[n*n] (row-major: H[i][j] = out[i*n + j]).
 # Returns HSB_ERR_NONE on success, HSB_ERR_INVALID_INPUT if n == 0.
+#must_use
 fn calc_hessian(f, x, n, h, out) {
     if (n == 0) { return HSB_ERR_INVALID_INPUT; }
 
@@ -13874,6 +13885,7 @@ var _NUM_F64_INV_2P32 = 0x3DF0000000000000;          # 2^-32 = 2.328306436538696
 # max_iter: integer
 # out: pointer, result f64 written here on success
 # Returns: 0 on success, HSB_ERR_NO_CONVERGENCE or HSB_ERR_DIVISION_BY_ZERO on failure
+#must_use
 fn num_newton(f, df, x0, tol, max_iter, out) {
     var x = x0;
     var i = 0;
@@ -13907,6 +13919,7 @@ fn num_newton(f, df, x0, tol, max_iter, out) {
 # max_iter: integer
 # out: pointer, result f64 written here on success
 # Returns: 0 on success, HSB_ERR_INVALID_INPUT if same sign
+#must_use
 fn num_bisection(f, a, b, tol, max_iter, out) {
     var lo = a;
     var hi = b;
@@ -14000,6 +14013,7 @@ fn _num_cswap(data, i, j) {
 # data: pointer to n complex numbers (2n f64 values, 16n bytes)
 # n: number of complex elements (must be power of 2)
 # Returns: 0 on success, HSB_ERR_INVALID_INPUT if n is not power of 2
+#must_use
 fn num_fft(data, n) {
     if (n <= 1) { return HSB_ERR_NONE; }
     if (_num_is_pow2(n) == 0) { return HSB_ERR_INVALID_INPUT; }
@@ -14077,6 +14091,7 @@ fn num_fft(data, n) {
 # data: pointer to n complex numbers (2n f64 values)
 # n: number of complex elements (must be power of 2)
 # Returns: 0 on success, HSB_ERR_INVALID_INPUT if n is not power of 2
+#must_use
 fn num_ifft(data, n) {
     # Validate BEFORE touching the caller's buffer. The conjugate pass below
     # mutates `data` IN PLACE, so through 2.6.15 leaving validation to num_fft
@@ -14300,6 +14315,7 @@ fn _num_mulmod(a, b, m) {
 # function, is what says what a negative base means; and with it enforced every
 # legal call answers in [0, modulus), so a negative return from num_modpow is
 # UNAMBIGUOUSLY an error code.
+#must_use
 fn num_modpow(base, exp, modulus) {
     if (modulus == 0) { return HSB_ERR_DIVISION_BY_ZERO; }
     if (modulus < 0) { return HSB_ERR_INVALID_INPUT; }
@@ -14809,6 +14825,7 @@ fn num_factorize(n) {
 # out_x: pointer -- solution x written here
 # out_m: pointer -- combined modulus M written here
 # Returns: 0 on success, HSB_ERR_INVALID_INPUT on failure
+#must_use
 fn num_crt(remainders, moduli, count, out_x, out_m) {
     if (count <= 0) { return HSB_ERR_INVALID_INPUT; }
 
@@ -14908,6 +14925,7 @@ fn _numx_chirp_angle(j, n) {
 # data: pointer to n complex numbers ([re, im] pairs, 16 bytes each)
 # Returns: 0 on success, HSB_ERR_INVALID_INPUT if n <= 0 or n > _NUMX_DFT_MAX,
 #          HSB_ERR_ALLOC if a work buffer could not be allocated.
+#must_use
 fn _numx_dft(data, n) {
     if (n <= 0) { return HSB_ERR_INVALID_INPUT; }
     if (n == 1) { return HSB_ERR_NONE; }
@@ -14987,6 +15005,7 @@ fn _numx_dft(data, n) {
 # In-place inverse DFT of `n` complex values, any n >= 1.
 # Same conjugate-forward-conjugate identity num_ifft uses, so it inherits
 # _numx_dft's guards; `data` is only touched after those guards pass.
+#must_use
 fn _numx_idft(data, n) {
     if (n <= 0) { return HSB_ERR_INVALID_INPUT; }
     if (n == 1) { return HSB_ERR_NONE; }
@@ -15130,6 +15149,7 @@ fn _numx_use_fft(n, len, post) {
 # n: number of values (must be > 0)
 # Returns: 0 on success, HSB_ERR_INVALID_INPUT if n <= 0, HSB_ERR_ALLOC if a
 #          work buffer could not be allocated
+#must_use
 fn num_dst(data, n) {
     if (n <= 0) { return HSB_ERR_INVALID_INPUT; }
     if (n == 1) { return HSB_ERR_NONE; }   # sin(PI/2) == 1 exactly
@@ -15171,6 +15191,7 @@ fn num_dst(data, n) {
 
 # Direct O(n^2) DST-I -- the pre-2.8.3 body, kept because it is the faster
 # path below the crossover (see _numx_use_fft).
+#must_use
 fn _numx_dst_direct(data, n) {
     var out = alloc(n * 8);
     if (out == 0) { return HSB_ERR_ALLOC; }
@@ -15206,6 +15227,7 @@ fn _numx_dst_direct(data, n) {
 # n: number of values
 # Returns: 0 on success, HSB_ERR_INVALID_INPUT if n <= 0, HSB_ERR_ALLOC if a
 #          work buffer could not be allocated (propagated from num_dst)
+#must_use
 fn num_idst(data, n) {
     if (n <= 0) { return HSB_ERR_INVALID_INPUT; }
 
@@ -15229,6 +15251,7 @@ fn num_idst(data, n) {
 # n: number of values (must be > 0)
 # Returns: 0 on success, HSB_ERR_INVALID_INPUT if n <= 0, HSB_ERR_ALLOC if a
 #          work buffer could not be allocated
+#must_use
 fn num_dct(data, n) {
     if (n <= 0) { return HSB_ERR_INVALID_INPUT; }
     if (n == 1) { return HSB_ERR_NONE; }   # X[0] = x[0] * cos(0)
@@ -15270,6 +15293,7 @@ fn num_dct(data, n) {
 }
 
 # Direct O(n^2) DCT-II -- the pre-2.8.3 body, kept as the sub-crossover path.
+#must_use
 fn _numx_dct_direct(data, n) {
     var out = alloc(n * 8);
     if (out == 0) { return HSB_ERR_ALLOC; }
@@ -15304,6 +15328,7 @@ fn _numx_dct_direct(data, n) {
 # n: number of values
 # Returns: 0 on success, HSB_ERR_INVALID_INPUT if n <= 0, HSB_ERR_ALLOC if a
 #          work buffer could not be allocated
+#must_use
 fn num_idct(data, n) {
     if (n <= 0) { return HSB_ERR_INVALID_INPUT; }
     if (n == 1) { return HSB_ERR_NONE; }   # x[0] = X[0] / 1
@@ -15349,6 +15374,7 @@ fn num_idct(data, n) {
 }
 
 # Direct O(n^2) DCT-III -- the pre-2.8.3 body, kept as the sub-crossover path.
+#must_use
 fn _numx_idct_direct(data, n) {
     var out = alloc(n * 8);
     if (out == 0) { return HSB_ERR_ALLOC; }
@@ -15392,6 +15418,7 @@ fn _numx_idct_direct(data, n) {
 # rows: number of rows (must be power of 2)
 # cols: number of columns (must be power of 2)
 # Returns: 0 on success, HSB_ERR_INVALID_INPUT if dimensions not power of 2
+#must_use
 fn num_fft_2d(data, rows, cols) {
     if (_num_is_pow2(rows) == 0) { return HSB_ERR_INVALID_INPUT; }
     if (_num_is_pow2(cols) == 0) { return HSB_ERR_INVALID_INPUT; }
@@ -15450,6 +15477,7 @@ fn num_fft_2d(data, rows, cols) {
 # data: pointer to rows*cols complex numbers
 # rows, cols: must be powers of 2
 # Returns: 0 on success
+#must_use
 fn num_ifft_2d(data, rows, cols) {
     if (_num_is_pow2(rows) == 0) { return HSB_ERR_INVALID_INPUT; }
     if (_num_is_pow2(cols) == 0) { return HSB_ERR_INVALID_INPUT; }
@@ -15589,6 +15617,7 @@ fn num_sobol(index) {
 # ~60 of these 70 lines uncertified. tests/modules.tcyr now solves a 1-D Poisson
 # system and an asymmetric (sub != super) system whose right-hand sides were
 # built as d = A x for a chosen integer x.
+#must_use
 fn num_tridiag_solve(a, b, c, d, n, out) {
     if (n <= 0) { return HSB_ERR_INVALID_INPUT; }
 
@@ -15915,6 +15944,7 @@ fn ode_dopri45(f, t, y, dt, out_y, out_err) {
 # out_ts: vec -- time values pushed here
 # out_ys: vec -- state values pushed here
 # Returns: HSB_ERR_NONE on success, HSB_ERR_NO_CONVERGENCE if max steps exceeded
+#must_use
 fn ode_dopri45_trajectory(f, t0, y0, tf, dt0, tol, out_ts, out_ys) {
     var t = t0;
     var y = y0;
@@ -16618,6 +16648,7 @@ fn _opt_armijo(f, x, d, grad_ptr, n, f_old, x_trial) {
 # out_x:    pointer where optimal x is written (n f64s, caller allocates)
 # out_fmin: pointer where minimum f value is written (1 f64, caller allocates)
 # Returns:  HSB_ERR_NONE on success, HSB_ERR_INVALID_INPUT or HSB_ERR_NO_CONVERGENCE
+#must_use
 fn opt_gradient_descent(f, grad, x0, n, lr, tol, max_iter, out_x, out_fmin) {
     if (n <= 0) { return HSB_ERR_INVALID_INPUT; }
     # ⛔ CWE-190: `n * 8` WRAPS, AND THE WRAP DEFEATS THE NULL CHECK BELOW. For
@@ -16700,6 +16731,7 @@ fn opt_gradient_descent(f, grad, x0, n, lr, tol, max_iter, out_x, out_fmin) {
 # out_x:    pointer where optimal x is written (n f64s, caller allocates)
 # out_fmin: pointer where minimum f value is written (1 f64, caller allocates)
 # Returns:  HSB_ERR_NONE on success, HSB_ERR_INVALID_INPUT or HSB_ERR_NO_CONVERGENCE
+#must_use
 fn opt_conjugate_gradient(f, grad, x0, n, tol, max_iter, out_x, out_fmin) {
     if (n <= 0) { return HSB_ERR_INVALID_INPUT; }
     # ⛔ CWE-190: `n * 8` WRAPS, AND THE WRAP DEFEATS THE NULL CHECK BELOW. For
@@ -16828,6 +16860,7 @@ fn opt_conjugate_gradient(f, grad, x0, n, tol, max_iter, out_x, out_fmin) {
 # out_x:    pointer where optimal x is written (n f64s, caller allocates)
 # out_fmin: pointer where minimum f value is written (1 f64, caller allocates)
 # Returns:  HSB_ERR_NONE on success, HSB_ERR_INVALID_INPUT or HSB_ERR_NO_CONVERGENCE
+#must_use
 fn opt_bfgs(f, grad, x0, n, tol, max_iter, out_x, out_fmin) {
     if (n <= 0) { return HSB_ERR_INVALID_INPUT; }
     # CWE-190/CWE-476: the inverse Hessian is n*n, so an unbounded n both risks
@@ -16993,6 +17026,7 @@ fn opt_bfgs(f, grad, x0, n, tol, max_iter, out_x, out_fmin) {
 # out_x:    pointer where optimal x is written (n f64s, caller allocates)
 # out_fmin: pointer where minimum f value is written (1 f64, caller allocates)
 # Returns:  HSB_ERR_NONE on success, HSB_ERR_INVALID_INPUT or HSB_ERR_NO_CONVERGENCE
+#must_use
 fn opt_lbfgs(f, grad, x0, n, m, tol, max_iter, out_x, out_fmin) {
     if (n <= 0) { return HSB_ERR_INVALID_INPUT; }
     if (m <= 0) { return HSB_ERR_INVALID_INPUT; }
@@ -17207,6 +17241,7 @@ fn opt_lbfgs(f, grad, x0, n, m, tol, max_iter, out_x, out_fmin) {
 # max_iter:  maximum iterations (integer)
 # out_x:     pointer where optimal parameters are written (n_params f64s, caller allocates)
 # Returns:   HSB_ERR_NONE on success, HSB_ERR_INVALID_INPUT or HSB_ERR_NO_CONVERGENCE
+#must_use
 fn opt_levenberg_marquardt(residuals, jacobian, x0, n_params, n_residuals, tol, max_iter, out_x) {
     if (n_params <= 0) { return HSB_ERR_INVALID_INPUT; }
     if (n_residuals <= 0) { return HSB_ERR_INVALID_INPUT; }
@@ -18226,6 +18261,7 @@ fn svd_compute(A, out_U, out_S, out_Vt) {
 # out_S:  flat f64 array of length k (caller allocates).
 # out_Vt: stdlib matrix (k x n, caller allocates).
 # Returns: 0 on success, HSB_ERR_INVALID_INPUT if k is invalid.
+#must_use
 fn svd_truncated(A, k, out_U, out_S, out_Vt) {
     var rows = ganita_mat_rows(A);
     var cols = ganita_mat_cols(A);
@@ -18283,6 +18319,7 @@ fn svd_truncated(A, k, out_U, out_S, out_Vt) {
 # Returns:  0 on success, HSB_ERR_NO_CONVERGENCE if max_iter exceeded,
 #           HSB_ERR_INVALID_INPUT on a null handle or a shape that does not
 #           match n, HSB_ERR_ALLOC if the working vectors cannot be allocated.
+#must_use
 fn eigen_power(A, n, max_iter, out_val, out_vec) {
     # NULL HANDLES. A may be the designed 0 that mat_new_guarded returns above
     # its element cap, and ganita_mat_rows(0) is a null dereference.
@@ -18419,6 +18456,7 @@ fn eigen_power(A, n, max_iter, out_val, out_vec) {
 # out_vecs' columns with it so a (lambda, v) pair is never broken. eigen_qr is
 # unchanged. This is a behaviour change for any caller that read eigen_symmetric's
 # raw Jacobi order -- see CHANGELOG "Breaking".
+#must_use
 fn eigen_symmetric(A, n, out_vals, out_vecs) {
     var result = ganita_mat_eigen_sym(A, out_vals, out_vecs);
     if (result < 0) { return HSB_ERR_NO_CONVERGENCE; }
@@ -18474,6 +18512,7 @@ fn eigen_symmetric(A, n, out_vals, out_vecs) {
 # Method: repeatedly QR-decompose A^k. The growth rate of R's diagonal
 # entries gives the Lyapunov exponent. This is the simplified discrete
 # version: repeatedly multiply A, QR-factor, and track log growth.
+#must_use
 fn lyapunov_max(A, n, iterations, out) {
     # NULL HANDLES. A may be the designed 0 from mat_new_guarded's cap.
     if (A == 0 || out == 0) { return HSB_ERR_INVALID_INPUT; }
@@ -19350,6 +19389,7 @@ fn _lp_split_zero_diag(diag, superdiag, n, m, U_acc, Vt_acc, p_lo, p_hi) {
 # Operates on diag[0..n) and superdiag[0..n-1) in place.
 # Accumulates Givens rotations into U_acc (m x n) and Vt_acc (n x n).
 # max_iter: maximum total QR sweeps.
+#must_use
 fn _lp_bidiag_qr(diag, superdiag, n, m, U_acc, Vt_acc, max_iter) {
     var iter = 0;
     var p_hi = n - 1;  # active submatrix upper bound
@@ -19664,6 +19704,7 @@ fn _lp_bidiag_qr(diag, superdiag, n, m, U_acc, Vt_acc, max_iter) {
 # out_Vt: stdlib matrix (n x n, caller allocates).
 # Returns: HSB_ERR_NONE on success, HSB_ERR_NO_CONVERGENCE on failure,
 #          HSB_ERR_INVALID_INPUT if m < n or either dimension is non-positive.
+#must_use
 fn svd_golub_kahan(A, out_U, out_S, out_Vt) {
     # Any of these may be the designed 0 that ganita_mat_new returns above its own
     # element cap; ganita_mat_rows(0) is a null dereference -- guard before reading dims.
@@ -19963,6 +20004,7 @@ fn _lp_tridiagonalize(A, n, diag, offdiag, Q) {
 # offdiag[0..n): sub/superdiagonal (offdiag[i] = T[i,i-1], offdiag[0] = 0).
 # Q: n x n matrix (accumulates Givens rotations).
 # max_iter: maximum iterations.
+#must_use
 fn _lp_tridiag_qr(diag, offdiag, n, Q, max_iter) {
     var iter = 0;
     var p_hi = n - 1;
@@ -20160,6 +20202,7 @@ fn _lp_tridiag_qr(diag, offdiag, n, Q, max_iter) {
 # out_vecs: stdlib matrix (n x n, caller allocates, eigenvectors as columns).
 # Returns:  HSB_ERR_NONE on success, HSB_ERR_NO_CONVERGENCE if max_iter exceeded,
 #           HSB_ERR_INVALID_INPUT on a null handle or a shape that does not match n.
+#must_use
 fn eigen_qr(A, n, max_iter, out_vals, out_vecs) {
     # Any of these may be the designed 0 that ganita_mat_new / mat_new_guarded returns
     # above its own element cap; ganita_mat_rows(0) is a null dereference, so guard
@@ -20273,6 +20316,7 @@ fn eigen_qr(A, n, max_iter, out_vals, out_vecs) {
 #   H = I - (2 / v^H v) * v * v^H
 # where v = x + sign(x1)*||x||*e1, with sign chosen for numerical stability.
 
+#must_use
 fn cqr_decompose(A, out_Q, out_R) {
     # NULL HANDLES. cmat_rows(0) is load64(0). Each of the three may be the
     # designed 0 that cmat_new returns for a non-positive dimension or above

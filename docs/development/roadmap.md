@@ -796,7 +796,25 @@ a major, with a migration guide, not a 2.x patch.
 
 - [ ] **[3.0.0]** Wrap fallible returns in `Result<T,E>` (keep `ERR_*` codes as the `E` payload) — **value form**
 - [ ] **[3.0.0]** Adopt `?` to replace manual `-1`-return + check chains
-- [ ] **[2.19.0]** `#must_use` on the fallible surface (**167** `return HSB_ERR` sites across 12 files; re-counted 2026-09-10, the row said 162)
+- [x] ✅ **DONE — 44 annotations, and a GATE, because without one it was decorative.**
+      ⚠ **The count is 44 functions, not 167.** 167 is the number of `return HSB_ERR` STATEMENTS;
+      `#must_use` goes on functions, of which 48 can return one — and **4 of those can only ever
+      return `HSB_ERR_NONE`** (`_lp_bidiagonalize`, `_lp_tridiagonalize`, `num_halton_2d`,
+      `ode_dopri45`), so annotating them would train readers to ignore the annotation. 44 annotated,
+      200 → 244 in the tree.
+      ⛔ **THE ROW'S CAVEAT WAS RIGHT AND IS NOW MEASURED**: `#must_use` is a COMPILER diagnostic, not
+      a cyrlint one. A file that discards one gives `cyrius lint` *"0 warnings"* and matches the CI
+      `^  warn ` grep **zero times**, while `cyrius build` prints
+      `warning: #must_use result of 'f' is discarded`. A new CI step greps for it.
+      ⭐ **The gate was verified to FIRE before being trusted**: a deliberate discard installed in
+      `src/ode.cyr` takes it 0 → 1, and removing it returns 0. It covers the bundle (all 35 modules
+      with the stdlib resolved, so every intra-library call site) and `examples/`, and deliberately
+      NOT `tests/` — calling a fallible function and asserting on its out-parameter is a legitimate
+      testing idiom, and 67 sites there do exactly that.
+      ⛔ **It found a real defect on its first run**: `examples/basic_math.cyr` called
+      `calc_integral_simpson` and `num_newton` and read their out-parameters **without checking
+      either return**, so a failed call would have printed a confident wrong number. **An example is
+      copied more often than it is read.** Repaired, output unchanged.
 - [ ] **[3.0.0]** Migration guide + deprecation window for the old integer-code API
 - [ ] **[3.0.0]** **Public / private function surface.** hisab currently signals intent by naming convention
       alone — a leading `_` means "internal" and nothing enforces it. Two consequences already

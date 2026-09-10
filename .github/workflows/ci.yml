@@ -185,6 +185,38 @@ jobs:
         # it alone and pretending every undefined symbol is expected.
         run: cyrius check --with-deps dist/hisab.cyr
 
+      - name: Discarded #must_use results
+        # ⛔ THE LINT GATE ABOVE CANNOT SEE THIS AND THAT IS MEASURED, NOT ASSUMED.
+        # `#must_use` is a COMPILER diagnostic, not a cyrlint one: a file whose
+        # result is discarded gives `cyrius lint` "0 warnings" and matches the
+        # `^  warn ` grep zero times, while `cyrius build` prints
+        # `warning: #must_use result of 'f' is discarded`. Annotating the fallible
+        # surface without this step would have been decorative.
+        #
+        # SCOPE, and why it stops where it does. The bundle is compiled with the
+        # stdlib resolved, so this reaches every intra-library call site across all
+        # 35 modules — verified by installing a deliberate discard in src/ode.cyr
+        # and watching this step go 0 -> 1. `examples/` is included because an
+        # example is copied more often than it is read. `tests/` is NOT: calling a
+        # fallible function and asserting on its out-parameter is a legitimate
+        # testing idiom, and 67 sites there do exactly that.
+        run: |
+          fail=0
+          for target in "dist/hisab.cyr" examples/*.cyr; do
+            [ -f "$target" ] || continue
+            if [ "$target" = "dist/hisab.cyr" ]; then
+              out=$(cyrius check --with-deps "$target" 2>&1)
+            else
+              out=$(cyrius check "$target" 2>&1)
+            fi
+            if echo "$out" | grep -q 'must_use'; then
+              echo "$out" | grep 'must_use'
+              echo "::error file=$target::a #must_use result is discarded"
+              fail=1
+            fi
+          done
+          [ $fail -eq 0 ] || { echo "must_use: discarded results present"; exit 1; }
+
       - name: Build
         run: |
           mkdir -p build

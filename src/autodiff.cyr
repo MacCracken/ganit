@@ -516,6 +516,7 @@ fn ad_abs(t, a) {
 #
 # Returns 0 on success and a negative HSB_ERR_* on a bad root. The adjoints live
 # in the tape and are read back with ad_grad_of.
+#must_use
 fn ad_grad(t, root) {
     if (ad_ok(t, root) == 0) { return HSB_ERR_INVALID_INPUT; }
     var n = AdTape_n(t);
@@ -592,6 +593,7 @@ fn ad_grad_of(t, i) {
 # It exists because the alternative is a per-variable
 # `store64(out + k * 8, ad_grad_of(t, load64(ids + k * 8)))` at every call site,
 # which is exactly the shape an off-by-one hides in.
+#must_use
 fn ad_grad_write(t, ids, n, out) {
     if (n < 0) { return HSB_ERR_INVALID_INPUT; }
     for (var k = 0; k < n; k = k + 1) {

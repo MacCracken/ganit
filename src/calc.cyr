@@ -31,6 +31,7 @@ fn calc_derivative(f, x, h) {
 # f: function pointer (f64 -> f64), a/b: interval bounds (f64),
 # steps: integer count, out: pointer to store f64 result.
 # Returns 0 on success, HSB_ERR_ZERO_STEPS if steps == 0.
+#must_use
 fn calc_integral_trapez(f, a, b, steps, out) {
     if (steps == 0) { return HSB_ERR_ZERO_STEPS; }
     var h = f64_div(f64_sub(b, a), f64_from(steps));
@@ -51,6 +52,7 @@ fn calc_integral_trapez(f, a, b, steps, out) {
 # f: function pointer (f64 -> f64), a/b: interval bounds (f64),
 # steps: integer count, out: pointer to store f64 result.
 # Returns 0 on success, HSB_ERR_ZERO_STEPS if steps == 0.
+#must_use
 fn calc_integral_simpson(f, a, b, steps, out) {
     # Round up to even
     if (steps % 2 == 1) { steps = steps + 1; }

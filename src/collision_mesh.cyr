@@ -1228,6 +1228,7 @@ fn halfedge_adjacent_faces(mesh, face) {
 # assert "boundary". The two documented HSB_ERR_* codes are outside {0, 1}, so
 # `== 1` and `== 0` callers both keep their meaning and a caller that wants to
 # tell "not a boundary" from "not a vertex" can.
+#must_use
 fn halfedge_is_boundary(mesh, vertex) {
     if (mesh == 0) { return HSB_ERR_INVALID_INPUT; }
     if (vertex < 0) { return HSB_ERR_OUT_OF_RANGE; }

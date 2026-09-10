@@ -262,6 +262,7 @@ fn contact_new(body_a, body_b, normal, penetration, friction, restitution, inv_m
 # Returns: HSB_ERR_NONE on success and for n <= 0 (a no-op frame, which was the
 #   incumbent behaviour and is now contracted); HSB_ERR_INVALID_INPUT if
 #   `contacts` is null or `n` exceeds `vec_len(contacts)`.
+#must_use
 fn sequential_impulse(contacts, n, iterations, out_impulses) {
     # ⛔ THE ZEROING LOOP BELOW RUNS BEFORE THE FIRST `vec_get`, SO WITHOUT THIS
     # GUARD THE FUNCTION WROTE OUT OF BOUNDS AND RETURNED **SUCCESS**.

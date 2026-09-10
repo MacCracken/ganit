@@ -606,6 +606,7 @@ fn quadtree_new(x_min, y_min, x_max, y_max, max_depth) {
 # `if (rc == HSB_ERR_NONE)`; a caller that IGNORED the return is unaffected, which
 # is every call site in src/ (there are none) and every one in tests/ that was not
 # asserting on it.
+#must_use
 fn quadtree_insert(qt, x, y, data) {
     var root = load64(qt);
     var max_depth = load64(qt + 8);
@@ -827,6 +828,7 @@ fn octree_new(min_vec3, max_vec3, max_depth) {
 #          HSB_ERR_OUT_OF_RANGE (-3) when it lies outside the root bounds and was
 #          dropped. BREAKING at 2.8.5 -- see quadtree_insert for the full note;
 #          this returned 1 / 0 and now returns 0 / -3.
+#must_use
 fn octree_insert(ot, point, data) {
     var root = load64(ot);
     var max_depth = load64(ot + 8);

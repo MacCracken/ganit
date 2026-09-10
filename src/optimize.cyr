@@ -216,6 +216,7 @@ fn _opt_armijo(f, x, d, grad_ptr, n, f_old, x_trial) {
 # out_x:    pointer where optimal x is written (n f64s, caller allocates)
 # out_fmin: pointer where minimum f value is written (1 f64, caller allocates)
 # Returns:  HSB_ERR_NONE on success, HSB_ERR_INVALID_INPUT or HSB_ERR_NO_CONVERGENCE
+#must_use
 fn opt_gradient_descent(f, grad, x0, n, lr, tol, max_iter, out_x, out_fmin) {
     if (n <= 0) { return HSB_ERR_INVALID_INPUT; }
     # ⛔ CWE-190: `n * 8` WRAPS, AND THE WRAP DEFEATS THE NULL CHECK BELOW. For
@@ -298,6 +299,7 @@ fn opt_gradient_descent(f, grad, x0, n, lr, tol, max_iter, out_x, out_fmin) {
 # out_x:    pointer where optimal x is written (n f64s, caller allocates)
 # out_fmin: pointer where minimum f value is written (1 f64, caller allocates)
 # Returns:  HSB_ERR_NONE on success, HSB_ERR_INVALID_INPUT or HSB_ERR_NO_CONVERGENCE
+#must_use
 fn opt_conjugate_gradient(f, grad, x0, n, tol, max_iter, out_x, out_fmin) {
     if (n <= 0) { return HSB_ERR_INVALID_INPUT; }
     # ⛔ CWE-190: `n * 8` WRAPS, AND THE WRAP DEFEATS THE NULL CHECK BELOW. For
@@ -426,6 +428,7 @@ fn opt_conjugate_gradient(f, grad, x0, n, tol, max_iter, out_x, out_fmin) {
 # out_x:    pointer where optimal x is written (n f64s, caller allocates)
 # out_fmin: pointer where minimum f value is written (1 f64, caller allocates)
 # Returns:  HSB_ERR_NONE on success, HSB_ERR_INVALID_INPUT or HSB_ERR_NO_CONVERGENCE
+#must_use
 fn opt_bfgs(f, grad, x0, n, tol, max_iter, out_x, out_fmin) {
     if (n <= 0) { return HSB_ERR_INVALID_INPUT; }
     # CWE-190/CWE-476: the inverse Hessian is n*n, so an unbounded n both risks
@@ -591,6 +594,7 @@ fn opt_bfgs(f, grad, x0, n, tol, max_iter, out_x, out_fmin) {
 # out_x:    pointer where optimal x is written (n f64s, caller allocates)
 # out_fmin: pointer where minimum f value is written (1 f64, caller allocates)
 # Returns:  HSB_ERR_NONE on success, HSB_ERR_INVALID_INPUT or HSB_ERR_NO_CONVERGENCE
+#must_use
 fn opt_lbfgs(f, grad, x0, n, m, tol, max_iter, out_x, out_fmin) {
     if (n <= 0) { return HSB_ERR_INVALID_INPUT; }
     if (m <= 0) { return HSB_ERR_INVALID_INPUT; }
@@ -805,6 +809,7 @@ fn opt_lbfgs(f, grad, x0, n, m, tol, max_iter, out_x, out_fmin) {
 # max_iter:  maximum iterations (integer)
 # out_x:     pointer where optimal parameters are written (n_params f64s, caller allocates)
 # Returns:   HSB_ERR_NONE on success, HSB_ERR_INVALID_INPUT or HSB_ERR_NO_CONVERGENCE
+#must_use
 fn opt_levenberg_marquardt(residuals, jacobian, x0, n_params, n_residuals, tol, max_iter, out_x) {
     if (n_params <= 0) { return HSB_ERR_INVALID_INPUT; }
     if (n_residuals <= 0) { return HSB_ERR_INVALID_INPUT; }
