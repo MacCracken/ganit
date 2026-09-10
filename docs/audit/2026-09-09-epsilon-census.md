@@ -51,10 +51,23 @@ the shape**: `geo_diff.cyr:204` (`geo_jet_plane`), `src/vec3.cyr` (`hvec3_normal
 tree), and the four `geo.cyr` squared-length guards. The same lesson as 2.12.0's
 "the tier said 3 allocation sites; it was 4".
 
-## Still open — 74 confirmed defects
+## ~~Still open — 74 confirmed defects~~ → CLOSED IN 2.15.0
 
-Not repaired, not refuted. Each has a verified `guarded_quantity`, a
-`correct_threshold` and a bracketing `scale_test`.
+⭐ **2.15.0 repaired 73 of the 74**, every one mutation-proven; **1 is deferred**
+with its reason recorded. The table below is the state as this section was
+written, kept because the per-module shape is the useful record; the live
+disposition is the `disposition` field on each entry of the JSON beside it.
+
+⛔ **`su2_log` is the deferral, and it is a formula change rather than a
+threshold.** Lowering its guard alone would introduce a NEW defect: the log and
+exp maps divide by `theta^2` and `theta^3`, and at `theta <= 2.2e-162` both
+`theta*theta` and `1 - cos(theta)` are exactly 0, so the coefficient becomes
+`0/0 = NaN`. It is grouped with `so3_log`, `se3_exp` and `se3_log`, which were
+never on this list but have the identical shape — three more sites the census
+missed and a grep found.
+
+Each entry has a verified `guarded_quantity`, a `correct_threshold` and a
+bracketing `scale_test`.
 
 ⭐ **The full evidence is committed beside this file** as
 [`2026-09-09-epsilon-open.json`](2026-09-09-epsilon-open.json) — 74 entries, every field

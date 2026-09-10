@@ -2,6 +2,99 @@
 
 ## [Unreleased]
 
+## [2.15.0] - 2026-09-10 — the epsilon tier, closed: 73 of the remaining 74
+
+2.14.0 repaired 23 of the 97 confirmed epsilon defects and enumerated the rest. **This release
+closes the other 74 — 73 repaired, every one mutation-proven, and 1 deferred with its reason
+recorded.** 81 mutants installed, **73 killed**, 8 surviving and documented rather than hidden.
+Suites **3657 → 3789**.
+
+⭐ **The census's central claim held up: the class is one guard comparing a DIMENSIONED quantity
+against an absolute 1e-12.** But the *repair* is not one rule, and this release is mostly a record
+of the distinctions that turned out to matter:
+
+- **An unbounded numerator needs DBL_MIN; a bounded one needs an exact zero.** `2/vtv` and
+  `e2sq/denom` overflow for a subnormal denominator, so they take `F64_TINY`. `y/r` and `x/r` are
+  bounded by 1 because `r` is the norm of `(y,z)`, so only an exact zero can fail and a DBL_MIN
+  floor still fabricates an identity rotation.
+- **A convergence test divides nothing**, so representability is the wrong question entirely —
+  `solve_pgs`, `eigen_power` and `ode_dopri45_trajectory` take relative forms.
+- **Sparsity is structural**, not a tolerance: `csr_from_dense` decided which entries *exist* by
+  magnitude, so the same matrix in millimetres and metres became different matrices.
+- **A sort comparator with a tolerance is not an order.** `_col_xy_greater`'s epsilon-equality is
+  not transitive, so the relation was not a total order and the hull built on it inherits that.
+- **Convexity is a sign, not a magnitude** — four `collision_core` tests asked whether twice the
+  signed area exceeded 1e-12, producing a plausible *diagnosis* rather than a plausible number.
+
+### Fixed
+
+- **complex** — ⛔ `cx_div` is the defect `complex.cyr` has named in its own comment **since
+  2.6.14**, and **no threshold fixes it**: over a 401-decade sweep 1e-12 fails 241 decades, the
+  shipped 1e-24 fails 235, DBL_MIN fails 93, and *removing the guard entirely* still fails 89 —
+  `br² + bi²` overflows above 1e154 and underflows below 1e-154, so the quantity is destroyed
+  before any comparison runs. **Smith's algorithm fails 0.** Judging the repair against 89 rather
+  than 0 would have licensed leaving 89 decades broken. `cx_inv` takes the same treatment.
+- **linalg_precision** (9) and **linalg_ext** (12) — SVD, eigen, complex QR, GMRES, PGS, power
+  iteration, sparse CSR. ⛔ `solve_gmres`'s back-substitution stored the **undivided numerator** as
+  a solution component when it skipped the divide; at `hii = 0` the true `y_i` is unbounded, so
+  that is not an approximation of anything.
+- **geo_advanced** (18) — the CGA products, the BVH slab tests, `time_of_impact`,
+  `cga_blade_inverse`, `cga_plane`, `cga_rotor` and EPA's degenerate-normal path.
+- **collision_core** (6), **optimize** (4), **num_ext** (3), **mat3**/**mat4** (3), **lie** (5),
+  **lie_ext** (2), **transforms** (2), **color** (2), **num**, **f64_util**, **diffgeo**, **ode**.
+
+### Changed
+
+- **error** — `F64_POS_INF` gains a fifth consumer; `_GA_F64_TINY` added as an alias.
+- **geo_advanced** — `_CGA_NULL_TOL` = 8 × DBL_EPSILON, a **measured** bound: over 3000
+  pseudo-random conformal points per scale the null residual is 2.13e-16 at coordinate scale 1 and
+  1.11e-16 from 1e2 to 1e8, i.e. genuinely relative. ⚠ Reusing `EPSILON_F64` there is ~4500× looser
+  and discards resolvable geometry — a radius-10 sphere at x = 1e4 has `nsq = 100` exactly, 90×
+  above the floor, and would be called null. Constant gate 154 → **155**.
+
+### Deferred
+
+- **`su2_log`**, with **`so3_log`, `se3_exp` and `se3_log`** — ⛔ **a threshold repair there would
+  introduce a NEW defect.** These divide by `theta²` and `theta³`, and at `theta <= 2.2e-162` both
+  `theta*theta` and `1 - cos(theta)` are exactly 0, so the coefficient becomes `0/0 = NaN`. They
+  need a small-angle series. ⭐ Three of the four were **never on the census list** and were found
+  by grepping for the shape.
+
+### Notes on process
+
+- ⛔ **Six of my own fixtures were wrong before the code was**, each caught by measuring rather than
+  by reasoning: a tridiagonal sub-diagonal offset by one (1500 of 2000 checks failed against
+  *correct* code); an optimizer fixture that scaled the **objective**, which is not "the same
+  problem in different units" — the gradient scales but the distance to the minimum does not, so at
+  2^-60 the step is below the ULP of `x` and it never moves at any iteration budget; hand-written
+  singular values wrong in the fourth digit; a sweep starting where the two blocks' singular values
+  **interleave**; three "distinct" hull points that were **colinear**; and `cga_plane` fed a fixed
+  `d` when `d` scales with the normal.
+- ⛔ **A reachability probe returned the right answer by accident.** Replacing
+  `_epa_degenerate_normal` with a constant `+z` passed everything, which reads as "unreachable". It
+  is reachable — `+z` is simply *correct* for the coplanar-boxes case. The real finding is sharper:
+  the existing assertions check only `x = 0`, `y = 0` and unit length, so **a constant would have
+  passed them**. The assertions were weak, not the coverage.
+- ⭐ **The census warned me off a whole class of fixture and was right.** A uniform units change is
+  *vacuous* for `svd_golub_kahan` — it balances via `pow2_floor`, so `c*A` is bit-exactly invariant
+  on the defective tree, and all eight mutants survived my first sweep. The discriminating variable
+  is the **ratio between sub-blocks**.
+- ⚠ **Eight mutants survive and are recorded with their reasons**, not tidied away: three
+  tridiagonal guards behind `eigen_qr`'s balancing (where the census also failed to construct a
+  reachable case and said so), a BFGS bare-sign test a convex quadratic cannot generate, an L-BFGS
+  rate effect, `_col_ring_is_convex`'s conservative-only epsilon, `f64_fmod`'s `f64_eq(y,0)`
+  (IEEE makes `-0.0 == 0.0`, so it is a true equivalence — **an earlier draft of that comment
+  claimed otherwise and was wrong**), and an EPA edge-selection loop equivalent for planar hulls.
+- ⚠ **One finding beyond the guards, recorded not papered over**: `‖A − U S Vt‖_F` is exactly 0 for
+  block ratios 1e-2…1e-5, then 4.17e-7 at 1e-6, decaying proportionally to `c`. The singular
+  *values* stay correct — it is `U` and `Vt` that stop reconstructing the small block. Nine
+  threshold repairs do not close it; 4.17e-7 matches the census's own figure for a half-repaired
+  bidiagonalisation. On the roadmap.
+- **No performance change is claimed**: guard-touched rows moved **+0.25%** median against
+  **−0.52%** untouched, on a quiet box (load 0.30), with **no row outside its own historical
+  spread**.
+
+
 ## [2.14.0] - 2026-09-09 — the epsilon release: guards moved onto the quantity that actually fails
 
 The roadmap sized this tier at **"~20 sites"**. A census of every `EPSILON_F64` comparison guard in
