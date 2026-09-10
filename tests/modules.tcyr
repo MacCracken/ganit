@@ -11370,6 +11370,314 @@ assert_eq(_OS_RUN, 600, "the optimizer scale sweep ran 3 solvers x 200 scales");
 assert_eq(_OS_BAD, 0,
   "cg / bfgs / lbfgs: the minimum is (k, 2k) for variable scales 2^0 to 2^-199");
 
+var _GV_A = 0x3FF0000000000000;
+fn _sv_mv1(x) {
+    var y = alloc(8);
+    store64(y, f64_mul(_GV_A, load64(x)));
+    return y;
+}
+fn _sv_mv2(x) {
+    var y = alloc(24);
+    var i = 0;
+    while (i < 3) { store64(y + i * 8, f64_mul(F64_TWO, load64(x + i * 8))); i = i + 1; }
+    return y;
+}
+
+test_group("2.17.0 solvers: the convergence norms are scale-free");
+
+# ⛔ EVERY CONVERGENCE TEST IN `optimize.cyr` AND `linalg_ext.cyr` IS `norm < tol`,
+# AND THE NORM SQUARED BEFORE SUMMING. A gradient, residual or Krylov vector whose
+# largest component falls below 2^-538 has a norm of exactly 0, so the test fires
+# on the first iteration and the solver returns **HSB_ERR_NONE with `out_x` still
+# equal to `x0`**. That is not a wrong number; it is a confident success at the
+# starting point, which is strictly worse because the caller has no signal.
+#
+# ⚠ THE FIXTURE SCALES THE OBJECTIVE / THE RESIDUALS, NOT THE VARIABLES. Scaling
+# the variables scales the gradient AND the distance to the minimum together, so
+# the step falls below the ULP of x and the run stalls for a reason that is not
+# this defect — the trap the 2.15.0 sweep above documents.
+# ⚠ AND IT ASSERTS THE FABRICATION, NOT THE ANSWER. Multiplying an objective by a
+# positive constant leaves its argmin exactly where it was, but it does NOT leave
+# the natural STEP SIZE alone: steepest descent moves by −α·g, which is degree one
+# in the objective's scale, so far below 1 the solver genuinely cannot reach the
+# minimum and honestly says so. What must never happen is claiming it did.
+# Measured on the 2.16.0 tree: **446 of 1001 objective scales for conjugate
+# gradient and 461 of 1001 residual scales for Levenberg-Marquardt returned
+# HSB_ERR_NONE with x untouched.** Both are 0 now.
+# [measured: 1001-scale objective and residual sweeps, before and after]
+var _SV_RUN = 0;
+var _SV_SILENT = 0;
+var _SV_C = 0x3FF0000000000000;
+var _SV_K = 0x40F86A0000000000;                   # 1e5 — ill-conditioned on purpose
+fn _sv_f(x) {
+    var a = f64_sub(load64(x), F64_ONE);
+    var b = f64_sub(load64(x + 8), F64_TWO);
+    return f64_mul(_SV_C, f64_add(f64_mul(a, a), f64_mul(_SV_K, f64_mul(b, b))));
+}
+fn _sv_g(x, out) {
+    var a = f64_sub(load64(x), F64_ONE);
+    var b = f64_sub(load64(x + 8), F64_TWO);
+    store64(out, f64_mul(_SV_C, f64_mul(F64_TWO, a)));
+    store64(out + 8, f64_mul(_SV_C, f64_mul(F64_TWO, f64_mul(_SV_K, b))));
+    return 0;
+}
+# Rosenbrock as least squares, residuals scaled by _SV_C. Fresh buffer per call:
+# opt_levenberg_marquardt keeps r_ptr alive across the trial evaluation.
+fn _sv_res(x) {
+    var o = alloc(16);
+    var a = load64(x);
+    var b = load64(x + 8);
+    store64(o, f64_mul(_SV_C, f64_mul(f64_from(10), f64_sub(b, f64_mul(a, a)))));
+    store64(o + 8, f64_mul(_SV_C, f64_sub(F64_ONE, a)));
+    return o;
+}
+fn _sv_jac(x, out) {
+    store64(out, f64_mul(_SV_C, f64_neg(f64_mul(f64_from(20), load64(x)))));
+    store64(out + 8, f64_mul(_SV_C, f64_from(10)));
+    store64(out + 16, f64_mul(_SV_C, f64_neg(F64_ONE)));
+    store64(out + 24, 0);
+    return 0;
+}
+for (var _sv_e = 0; _sv_e < 1001; _sv_e = _sv_e + 1) {
+    _SV_C = (1023 - _sv_e) << 52;                 # 2^-e
+    var _sv_tol = f64_mul(_SV_C, 0x3EB0C6F7A0B5ED8D);          # C * 1e-6
+    _SV_RUN = _SV_RUN + 1;
+
+    # conjugate gradient: x0 = (-0.5, 2.5), minimum at (1, 2)
+    var _sv_x0 = alloc(16);
+    store64(_sv_x0, f64_neg(F64_HALF));
+    store64(_sv_x0 + 8, 0x4004000000000000);
+    var _sv_ox = alloc(16);
+    var _sv_of = alloc(8);
+    var _sv_rc = opt_conjugate_gradient(&_sv_f, &_sv_g, _sv_x0, 2, _sv_tol, 400,
+      _sv_ox, _sv_of);
+    if (_sv_rc == HSB_ERR_NONE && load64(_sv_ox) == f64_neg(F64_HALF)) {
+        _SV_SILENT = _SV_SILENT + 1;
+    }
+
+    # gradient descent / bfgs / lbfgs all converge through `_opt_norm` rather
+    # than `_opt_norm_ss`, so they cover the third call site.
+    var _sv_gx = alloc(16);
+    store64(_sv_gx, f64_neg(F64_HALF));
+    store64(_sv_gx + 8, 0x4004000000000000);
+    var _sv_gox = alloc(16);
+    var _sv_gof = alloc(8);
+    if (opt_gradient_descent(&_sv_f, &_sv_g, _sv_gx, 2, 0x3F1A36E2EB1C432D,
+        _sv_tol, 400, _sv_gox, _sv_gof) == HSB_ERR_NONE
+      && load64(_sv_gox) == f64_neg(F64_HALF)) {
+        _SV_SILENT = _SV_SILENT + 1;
+    }
+    var _sv_box = alloc(16);
+    var _sv_bof = alloc(8);
+    if (opt_bfgs(&_sv_f, &_sv_g, _sv_gx, 2, _sv_tol, 400, _sv_box, _sv_bof) == HSB_ERR_NONE
+      && load64(_sv_box) == f64_neg(F64_HALF)) {
+        _SV_SILENT = _SV_SILENT + 1;
+    }
+    var _sv_lbx = alloc(16);
+    var _sv_lbf = alloc(8);
+    if (opt_lbfgs(&_sv_f, &_sv_g, _sv_gx, 2, 5, _sv_tol, 400, _sv_lbx, _sv_lbf) == HSB_ERR_NONE
+      && load64(_sv_lbx) == f64_neg(F64_HALF)) {
+        _SV_SILENT = _SV_SILENT + 1;
+    }
+
+    # Levenberg-Marquardt: x0 = (-1.2, 1), minimum at (1, 1)
+    var _sv_lx0 = alloc(16);
+    store64(_sv_lx0, f64_neg(0x3FF3333333333333));
+    store64(_sv_lx0 + 8, F64_ONE);
+    var _sv_lox = alloc(16);
+    store64(_sv_lox, 0);
+    var _sv_lrc = opt_levenberg_marquardt(&_sv_res, &_sv_jac, _sv_lx0, 2, 2,
+      _sv_tol, 300, _sv_lox);
+    if (_sv_lrc == HSB_ERR_NONE && load64(_sv_lox) == f64_neg(0x3FF3333333333333)) {
+        _SV_SILENT = _SV_SILENT + 1;
+    }
+}
+_SV_C = 0x3FF0000000000000;
+assert_eq(_SV_RUN, 1001, "the solver objective/residual sweep actually ran 1001 scales");
+assert_eq(_SV_SILENT, 0,
+  "cg / gd / bfgs / lbfgs / lm: never report HSB_ERR_NONE while leaving x at x0");
+
+# ⭐ `solve_gmres` — the residual norm, measured end to end on A = 2I where the
+# answer is b/2 at every scale and the caller scales `tol` with the problem as a
+# careful caller would. Measured on the 2.16.0 tree: 461 of 1001 wrong, first at
+# 2^-539. ⚠ A Krylov solver has a second failure mode the optimisers do not: the
+# line after the convergence test is `1 / r_norm`, so a fabricated zero norm does
+# not merely stop early, it normalises by infinity.
+# [measured: 1001-scale sweep on solve_gmres before and after, 2026-09-10]
+var _GM_RUN = 0;
+var _GM_BAD = 0;
+for (var _gm_e = 0; _gm_e < 1001; _gm_e = _gm_e + 1) {
+    var _gm_k = (1023 - _gm_e) << 52;
+    var _gm_b = alloc(24);
+    store64(_gm_b, f64_mul(F64_TWO, _gm_k));
+    store64(_gm_b + 8, f64_mul(f64_from(4), _gm_k));
+    store64(_gm_b + 16, f64_mul(f64_from(6), _gm_k));
+    var _gm_x0 = alloc(24);
+    store64(_gm_x0, 0);
+    store64(_gm_x0 + 8, 0);
+    store64(_gm_x0 + 16, 0);
+    var _gm_tol = f64_mul(_gm_k, 0x3CD203AF9EE75616);          # k * 1e-15
+    var _gm_x = solve_gmres(&_sv_mv2, _gm_b, _gm_x0, 3, _gm_tol, 20, 3);
+    _GM_RUN = _GM_RUN + 1;
+    if (_gm_x == 0) { _GM_BAD = _GM_BAD + 1; }
+    if (_gm_x != 0) {
+        if (f64_gt(f64_abs(f64_div(f64_sub(load64(_gm_x), _gm_k), _gm_k)),
+            0x3D06849B86A12B9B) == 1) { _GM_BAD = _GM_BAD + 1; }
+    }
+}
+assert_eq(_GM_RUN, 1001, "the gmres residual sweep actually ran 1001 scales");
+assert_eq(_GM_BAD, 0,
+  "solve_gmres: A = 2I gives x = b/2 for b from 2^0 down to 2^-1000");
+
+# ⭐ AND THE GIVENS RADIUS ON ITS OWN, ISOLATED SO IT CANNOT BORROW THE FIX ABOVE.
+# n = 1, b = [1], x0 = [0], A = a*I. Then r = b so `_lext_norm` sees 1 exactly,
+# and wj = A*v0 - h00*v0 = 0 so it sees 0 exactly — NEITHER call is near the flush
+# band, and the only remaining scale-carrying quantity is the Givens radius
+# sqrt(hjj² + hj1j²) with hjj = a. Measured: with `_lext_norm` repaired and this
+# line left alone, **463 of 1001 still fail**, first at a = 2^-538 returning x = 0
+# where the answer is 2^538. ⚠ In the silent middle the stored rotation is not
+# orthogonal (cs² + sn² != 1), which no residual check downstream would catch.
+# [measured: isolating sweep with each half of the repair applied alone]
+var _GV_RUN = 0;
+var _GV_BAD = 0;
+for (var _gv_e = 0; _gv_e < 1001; _gv_e = _gv_e + 1) {
+    _GV_A = (1023 - _gv_e) << 52;
+    var _gv_b = alloc(8);
+    store64(_gv_b, F64_ONE);
+    var _gv_x0 = alloc(8);
+    store64(_gv_x0, 0);
+    var _gv_x = solve_gmres(&_sv_mv1, _gv_b, _gv_x0, 1, 0x3CD203AF9EE75616, 20, 1);
+    _GV_RUN = _GV_RUN + 1;
+    if (_gv_x == 0) { _GV_BAD = _GV_BAD + 1; }
+    if (_gv_x != 0 && load64(_gv_x) != (1023 + _gv_e) << 52) { _GV_BAD = _GV_BAD + 1; }
+}
+_GV_A = 0x3FF0000000000000;
+assert_eq(_GV_RUN, 1001, "the isolated Givens sweep actually ran 1001 scales");
+assert_eq(_GV_BAD, 0,
+  "solve_gmres: n=1, A = a*I gives x = 1/a bit-exactly for a from 2^0 to 2^-1000");
+
+# ⛔ `cmat_inverse` FABRICATED "SINGULAR" FOR 498 OF 1010 EXPONENTS. Its pivot
+# search tracked `cx_norm_sq` — a SQUARED modulus — and then compared it against
+# two degree-ONE quantities, so a perfectly invertible matrix below 2^-512 was
+# rejected outright. ⚠ Three lines had to move together: measured, repairing only
+# the open-coded `cx_abs` at :1219 takes 489 of 2001 to 488.
+# [measured: 1010-exponent cmat_inverse sweep before and after, 2026-09-10]
+var _CI_RUN = 0;
+var _CI_BAD = 0;
+for (var _ci_e = 0; _ci_e < 1010; _ci_e = _ci_e + 1) {
+    var _ci_a = (1023 - _ci_e) << 52;
+    var _ci_m = cmat_new(2, 2);
+    cmat_set(_ci_m, 0, 0, cx_new(_ci_a, 0));
+    cmat_set(_ci_m, 0, 1, cx_zero());
+    cmat_set(_ci_m, 1, 0, cx_zero());
+    cmat_set(_ci_m, 1, 1, cx_new((1023 - _ci_e + 1) << 52, 0));
+    var _ci_v = cmat_inverse(_ci_m);
+    _CI_RUN = _CI_RUN + 1;
+    if (_ci_v == 0) { _CI_BAD = _CI_BAD + 1; }
+    if (_ci_v != 0 && HComplex_re(cmat_get(_ci_v, 0, 0)) != (1023 + _ci_e) << 52) {
+        _CI_BAD = _CI_BAD + 1;
+    }
+}
+assert_eq(_CI_RUN, 1010, "the cmat_inverse exponent sweep actually ran 1010 scales");
+assert_eq(_CI_BAD, 0,
+  "cmat_inverse: diag(2^-e, 2^-(e+1)) inverts exactly for e from 0 to 1009");
+# ⚠ AND A MIXED-MAGNITUDE MATRIX, which a diagonal sweep cannot produce: the
+# pivot column and the column scale sit 20 binades apart, so this exercises the
+# RELATIVE test rather than the DBL_MIN floor.
+var _ci_mm = cmat_new(2, 2);
+cmat_set(_ci_mm, 0, 0, cx_new((1023 + 500) << 52, 0));
+cmat_set(_ci_mm, 0, 1, cx_new((1023 + 520) << 52, 0));
+cmat_set(_ci_mm, 1, 0, cx_zero());
+cmat_set(_ci_mm, 1, 1, cx_new(F64_ONE, 0));
+assert_neq(cmat_inverse(_ci_mm), 0,
+  "cmat_inverse: [[2^500, 2^520], [0, 1]] is invertible, not singular");
+# ⭐ ANTI-DELETION: a genuinely singular matrix must still be rejected, or the
+# repair is a deletion wearing a comment.
+var _ci_s = cmat_new(2, 2);
+cmat_set(_ci_s, 0, 0, cx_new(F64_ONE, 0));
+cmat_set(_ci_s, 0, 1, cx_new(F64_TWO, 0));
+cmat_set(_ci_s, 1, 0, cx_new(F64_TWO, 0));
+cmat_set(_ci_s, 1, 1, cx_new(f64_from(4), 0));
+assert_eq(cmat_inverse(_ci_s), 0, "cmat_inverse: [[1,2],[2,4]] is still singular");
+var _ci_z = cmat_new(2, 2);
+cmat_set(_ci_z, 0, 0, cx_zero());
+cmat_set(_ci_z, 0, 1, cx_zero());
+cmat_set(_ci_z, 1, 0, cx_zero());
+cmat_set(_ci_z, 1, 1, cx_zero());
+assert_eq(cmat_inverse(_ci_z), 0, "cmat_inverse: the all-zero matrix is still singular");
+
+# ⭐ THE TWO n-LEG NORM HELPERS, TESTED DIRECTLY. The solver sweeps above prove
+# the CONSEQUENCE — no silent success, right answer at every scale — but they
+# cannot discriminate the helpers' own bands, and measurement says so: six of
+# thirteen mutants survived the consequence tests alone. A Krylov solve on A = 2I
+# converges in one iteration whatever the residual norm reads, so a norm that is
+# 33% wrong still produces the right x; only the norm itself shows it.
+# ⚠ These are internal helpers and are called by name on purpose. That is what the
+# suite already does for `_col_dl_incircle` and friends, and it is the only way to
+# aim at a band the public path smooths over.
+# ⭐ The fixture is the Pythagorean quadruple (3, 4, 12 | 13): every leg and the
+# hypotenuse are exact at every power of two, so this compares bit for bit.
+# [measured: 13-mutant run, 6 survived the solver sweeps and die here, 2026-09-10]
+var _NH_RUN = 0;
+var _NH_BAD = 0;
+var _nh_v = alloc(24);
+for (var _nh_e = 0 - 1020; _nh_e <= 1020; _nh_e = _nh_e + 1) {
+    var _nh_k = (1023 + _nh_e) << 52;
+    store64(_nh_v, f64_mul(f64_from(3), _nh_k));
+    store64(_nh_v + 8, f64_mul(f64_from(4), _nh_k));
+    store64(_nh_v + 16, f64_mul(f64_from(12), _nh_k));
+    var _nh_w = f64_mul(f64_from(13), _nh_k);
+    _NH_RUN = _NH_RUN + 1;
+    if (_lext_norm(_nh_v, 3) != _nh_w) { _NH_BAD = _NH_BAD + 1; }
+    if (_opt_norm(_nh_v, 3) != _nh_w) { _NH_BAD = _NH_BAD + 1; }
+}
+assert_eq(_NH_RUN, 2041, "the n-leg norm helper sweep actually ran 2041 scales");
+assert_eq(_NH_BAD, 0,
+  "_lext_norm / _opt_norm: |(3k,4k,12k)| = 13k bit-exact from 2^-1020 to 2^1020");
+
+# ⚠ THE LOSSY SUBNORMAL BAND, which a power-of-two sweep cannot reach. For a
+# single component v the sum is v², and for v = 1.5*2^-538 that is 0.5625*2^-1074,
+# which ROUNDS to 1*2^-1074 — so the naive sqrt reads 2^-537 against a truth of
+# 0.75*2^-537, **33% high**. A trigger narrowed from `< F64_TINY` to `== 0` passes
+# the whole sweep above and fails here, which is exactly what it did.
+# [measured: 13-mutant run over optimize.cyr + linalg_ext.cyr, 2026-09-10]
+store64(_nh_v, f64_mul(f64_from(3), (1023 - 539) << 52));
+store64(_nh_v + 8, 0);
+store64(_nh_v + 16, 0);
+assert_eq(_lext_norm(_nh_v, 3), f64_mul(f64_from(3), (1023 - 539) << 52),
+  "_lext_norm: a lone component whose square is a LOSSY subnormal is exact");
+assert_eq(_opt_norm(_nh_v, 3), f64_mul(f64_from(3), (1023 - 539) << 52),
+  "_opt_norm: the same");
+
+# ⚠ AND THE OVERFLOW END, where the SUM is +Inf but the answer is an ordinary
+# double. |(2^600, 2^600, 0)| = 2^600*sqrt(2); without the +Inf rescue the naive
+# sum is +Inf and the norm comes back +Inf for a perfectly representable vector.
+store64(_nh_v, (1023 + 600) << 52);
+store64(_nh_v + 8, (1023 + 600) << 52);
+store64(_nh_v + 16, 0);
+assert_eq(_lext_norm(_nh_v, 3), f64_mul((1023 + 600) << 52, 0x3FF6A09E667F3BCD),
+  "_lext_norm: a sum that overflows still gives 2^600*sqrt(2), not +Inf");
+assert_eq(_opt_norm(_nh_v, 3), f64_mul((1023 + 600) << 52, 0x3FF6A09E667F3BCD),
+  "_opt_norm: the same");
+# ⭐ An ACTUALLY infinite component must still give +Inf, and that needs the exit
+# inside the scaled helper — `Inf/Inf` is NaN.
+store64(_nh_v, F64_POS_INF);
+store64(_nh_v + 8, F64_ONE);
+store64(_nh_v + 16, 0);
+assert_eq(_lext_norm(_nh_v, 3), F64_POS_INF, "_lext_norm: +Inf in, +Inf out");
+assert_eq(_opt_norm(_nh_v, 3), F64_POS_INF, "_opt_norm: +Inf in, +Inf out");
+# ⭐ ANTI-DELETION plus the NaN contract. NaN never reaches the scaled helper —
+# a NaN sum satisfies neither trigger — so it falls through to f64_sqrt(NaN).
+store64(_nh_v, 0);
+store64(_nh_v + 8, 0);
+assert_eq(_lext_norm(_nh_v, 3), 0, "_lext_norm: the zero vector still has norm 0");
+assert_eq(_opt_norm(_nh_v, 3), 0, "_opt_norm: the zero vector still has norm 0");
+store64(_nh_v, 0x7FF8000000000000);
+var _nh_n1 = _lext_norm(_nh_v, 3);
+var _nh_n2 = _opt_norm(_nh_v, 3);
+assert_eq(f64_eq(_nh_n1, _nh_n1), 0, "_lext_norm: NaN propagates");
+assert_eq(f64_eq(_nh_n2, _nh_n2), 0, "_opt_norm: NaN propagates");
+
 # ⚠ TWO OPTIMIZER MUTANTS SURVIVE THIS BLOCK AND ARE RECORDED, NOT HIDDEN.
 # (a) Replacing the BFGS curvature test with a BARE SIGN TEST (`sy > 0`) passes
 #     everything here. That is a real gap, not an equivalence: the census measured

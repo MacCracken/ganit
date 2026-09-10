@@ -83,9 +83,68 @@ fn _opt_dot(a, b, n) {
     return sum;
 }
 
+# ⭐ n-LEG SCALED RESCUE. Same shape as `_hvec3_len_scaled`, generalised to a
+# length-n array: divide through by the largest component before squaring.
+# ⚠ NaN NEVER REACHES HERE, and it is worth saying why rather than guarding for
+# it: a NaN component makes the caller's sum NaN, which satisfies neither
+# `< F64_TINY` nor `== +Inf`, so the fast path returns `f64_sqrt(NaN)` and this
+# helper is not called. ⛔ An earlier draft of this comment claimed the `mx == 0`
+# exit propagated NaN because it returns `mx`. Measured, it does NOT: this max is
+# an explicit `f64_gt` loop, and `f64_gt(NaN, mx)` is 0, so a NaN never raises
+# `mx` and an all-NaN vector would return 0 here. `_hvec3_len_scaled` uses
+# `f64_max` and does propagate — the two are not interchangeable, and returning
+# `mx` versus a literal zero is an EQUIVALENCE in this shape, mutation-confirmed.
+# ⚠ The `+Inf` exit is REQUIRED: without it `Inf/Inf` is NaN and an infinite
+# component would turn a well-defined +Inf norm into a NaN.
+# [measured: NaN probe on both scaled helpers, 2026-09-10]
+fn _opt_norm_scaled(v, n) {
+    var mx = _OPT_F64_ZERO;
+    var i = 0;
+    while (i < n) {
+        var a = f64_abs(load64(v + i * 8));
+        if (f64_gt(a, mx) == 1) { mx = a; }
+        i = i + 1;
+    }
+    if (f64_gt(mx, 0) == 0) { return mx; }
+    if (f64_eq(mx, F64_POS_INF) == 1) { return mx; }
+    var s = _OPT_F64_ZERO;
+    i = 0;
+    while (i < n) {
+        var q = f64_div(load64(v + i * 8), mx);
+        s = f64_add(s, f64_mul(q, q));
+        i = i + 1;
+    }
+    return f64_mul(mx, f64_sqrt(s));
+}
+
+# ⛔ 2.17.0 — THE NORM SQUARED BEFORE SUMMING, and in an optimiser that does not
+# produce a wrong number, it produces a CONFIDENT SUCCESS AT THE STARTING POINT.
+# Every convergence test in this file is `norm < tol`, so a gradient whose largest
+# component falls below 2^-538 has a norm of exactly 0, the test fires on the
+# first iteration, and the solver returns `HSB_ERR_NONE` with `out_x` still equal
+# to `x0`. Measured on `opt_conjugate_gradient` with the objective scaled by C
+# (which leaves the argmin exactly where it was): **988 of 1001 scales give the
+# wrong answer and 446 of those are SILENT** — rc = HSB_ERR_NONE, x unmoved.
+# ⚠ THE FIXTURE HAS TO SCALE THE OBJECTIVE, NOT THE VARIABLES. Scaling the
+# variables scales the gradient AND the distance to the minimum together, so the
+# step falls below the ULP of x and the solver stalls for a reason that is not
+# this defect — the trap 2.15.0's optimizer sweep already fell into.
+# [measured: 1001-scale objective sweep on opt_conjugate_gradient, 2026-09-10]
+#
+# ⭐ SUM-AWARE, because two of the three call sites ALREADY HAVE the sum. `gg_old`
+# in conjugate-gradient and `cost` in Levenberg-Marquardt are carried across
+# iterations deliberately, and recomputing the dot product to get a norm would
+# cost an O(n) pass per iteration for nothing. The rescue re-reads the vector, but
+# only on the path where the naive sum has already announced that it failed.
+fn _opt_norm_ss(v, n, ss) {
+    if (f64_lt(ss, F64_TINY) == 1) { return _opt_norm_scaled(v, n); }
+    if (f64_eq(ss, F64_POS_INF) == 1) { return _opt_norm_scaled(v, n); }
+    return f64_sqrt(ss);
+}
+
 # Euclidean norm of a flat f64 array of length n
 fn _opt_norm(v, n) {
-    return f64_sqrt(_opt_dot(v, v, n));
+    return _opt_norm_ss(v, n, _opt_dot(v, v, n));
 }
 
 # Copy n f64 values from src to dst
@@ -291,7 +350,12 @@ fn opt_conjugate_gradient(f, grad, x0, n, tol, max_iter, out_x, out_fmin) {
 
     var iter = 0;
     while (iter < max_iter) {
-        var gnorm = f64_sqrt(gg_old);
+        # ⛔ 2.17.0 — this read `f64_sqrt(gg_old)`, and `gg_old` is a sum of
+        # squares that has already lost the value by the time the sqrt sees it.
+        # `g` and `gg_old` are updated together (line above the loop, then
+        # `gg_old = gg_new` at the tail), so the sum-aware norm can rescue from
+        # the vector itself without recomputing the dot product.
+        var gnorm = _opt_norm_ss(g, n, gg_old);
         if (f64_lt(gnorm, tol) == 1) {
             _opt_copy(out_x, x, n);
             store64(out_fmin, fncall1(f, x));
@@ -784,8 +848,14 @@ fn opt_levenberg_marquardt(residuals, jacobian, x0, n_params, n_residuals, tol, 
 
     var iter = 0;
     while (iter < max_iter) {
-        # Check convergence: sqrt(cost) < tol
-        if (f64_lt(f64_sqrt(cost), tol) == 1) {
+        # ⛔ 2.17.0 — same defect, and here it fires BEFORE the Jacobian is ever
+        # evaluated: `cost` is the sum of squared residuals, so a residual set
+        # whose largest member is below 2^-538 gives cost = 0 and this returns
+        # success at the initial point. `r_ptr` and `cost` move together (both
+        # are updated on step acceptance and neither on rejection), so the
+        # sum-aware norm always sees a consistent pair.
+        # Check convergence: ||r|| < tol
+        if (f64_lt(_opt_norm_ss(r_ptr, nr, cost), tol) == 1) {
             _opt_copy(out_x, x, np);
             return HSB_ERR_NONE;
         }
