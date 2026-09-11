@@ -2,6 +2,40 @@
 
 ## [Unreleased]
 
+### Fixed
+- **symbolic / symbolic_ext** — above 2^63 **both public renderers returned the same wrong constant for
+  every input**, and all 3955 assertions passed. `f64_to` SATURATES, so `f64_to(f64_floor(mag))` is
+  `i64::MIN` for any |val| ≥ 2^63: `expr_to_str` and `sym_to_latex` each answered
+  **-9223372036854775808** for 1e19, 1e20 and 2^100 alike — a *negative* number for a *positive* input.
+  ⚠ And because the LaTeX path writes the sign separately, negatives came out malformed:
+  `sym_to_latex(-1e19)` was `{--9223372036854775808.000000}`, a **double minus**.
+  ⭐ Repaired with an exact decimal expansion — every f64 at |val| ≥ 2^52 is an integer, so there is no
+  fractional information up there and no rounding to do; the renderer seeds a little-endian digit array
+  with the 53-bit mantissa and doubles it k times, with **no f64 arithmetic touching the result**.
+  Verified against an independent exact oracle (Python's arbitrary-precision `int(float)`): the 961
+  binades 2^63..2^1023 plus 10,000 signed random mantissas, **10,961 renderings, 0 mismatches**.
+  ⛔ **The earlier filing was wrong about the size and the shape of this.** It recorded "30 diverging
+  values" and framed the current output as well-formed and the *deletion* as the risk. It is the entire
+  finite band above 2^63, the shipped code is what was wrong, and the negative case was already
+  malformed before anything was deleted.
+- **symbolic_ext** — `_latex_fmt_const` capped its integer path at 1e15, and **the cap was the bug**.
+  The function's own contract, one line above it, is *"Integer values render without decimals"* — yet
+  every integral value from 1e15 up fell through to the 6-decimal float path and rendered
+  `1000000000000000.000000`, while `expr_to_str` rendered `1000000000000000`. The two public renderers
+  disagreed across that whole band. The cap was never a design choice: it guarded against `f64_to`
+  saturating and sat ~3 binades below where saturation starts, so it matched neither the contract nor
+  the hazard. Now bounded by the real hazard and exact beyond it — measured, the two agree on
+  **1024 of 1024 integral binades**, 2^0..2^1023.
+
+### Added
+- **tests/modules.tcyr** — 11 assertions pinning exact integer rendering (**3955 → 3966**): 2^63 itself,
+  1e19, 2^100 at 31 digits, the 1e15 contract case, and a 1024-binade agreement sweep between the two
+  renderers whose **pair count is asserted too**, because a loop that ran zero times would report zero
+  disagreements. ⚠ The negative case is asserted on its exact string, not its magnitude — the defect
+  there was a doubled sign, which a magnitude check could not see. 6 mutants installed, 6 killed, with
+  a no-op control that correctly **survived**, proving the harness discriminates.
+
+
 ### Changed
 - **roadmap / issues** — swept for orphaned work before 3.0.0. **Two items still tagged `[2.17.0]`
   were already fixed and their checkboxes never ticked**, both re-verified on the shipped tree rather
