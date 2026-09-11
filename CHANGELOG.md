@@ -3,6 +3,37 @@
 ## [Unreleased]
 
 ### Added
+- **geo_advanced** — the **null-basis product table**, built once at first use by **integer arithmetic
+  only** (no f64 touches it, so it is exact by construction rather than by tolerance) via the change of
+  basis `n0 = (em − ep)/2`, `ninf = ep + em`. It **reproduces the derivation's contract exactly**:
+  FNV-1a `0xF4A98C5706D5CF5B` over all 1024 blade-index entries, with `n0² = 0`, `ninf² = 0`,
+  `e1² = +1`, and `n0*ninf` filling **both** term slots (scalar + bivector). Two independent
+  implementations of the same algebra agreeing bit for bit is the point — either alone could be
+  confidently wrong. 5 assertions added (**3983 → 3988**), verified to fail when the metric is flipped.
+  ⚠ Not wired into `_cga_geo_blades` yet: the CGA behaviour checksum is still `ff49e7071c7f4fc`,
+  unchanged. Building the table and switching to it are separate steps on purpose.
+
+### Fixed
+- **upstream (cyrius)** — filed
+  `2026-09-11-nested-continue-exits-outer-loop.md`: on cycc 6.6.2, **a loop nest with `continue` at two
+  levels miscompiles — a firing inner `continue` exits the OUTER loop as well.**
+  ⛔ **Silent wrong code, no diagnostic.** The natural sparse-skip idiom for building a 32×32 table —
+  `if (cp == 0) { continue; }` in the outer loop and the same in the inner — produced an **all-zero
+  1024-entry table** while reporting success. Nothing failed; the values were simply absent.
+  ⚠ **The decisive case has an outer `continue` that never fires**: `if (c == 99) { continue; }` for
+  `c` in 0..2 cannot execute, yet its mere *presence* breaks the inner one. That rules out a misreading
+  of the semantics, and the same nest written with `if`-guards is correct on the same compiler — which
+  is what makes it codegen rather than a language question.
+  ⚠ The repro **proves itself**: exit 0 if the compiler is correct, exit 1 while the bug is present,
+  with the if-guard control as a third case so a failing run also shows the expected values are
+  achievable on that build. **Not bisected** — only 6.6.0–6.6.2 are installed and hisab pins 6.6.2, so
+  establishing a first-bad-version would mean repinning; stated rather than guessed, and this project's
+  own history records a first-bad-version as evidence about *visibility* rather than *origin*.
+  ⭐ hisab's table builder is written with `if`-guards and carries a comment saying **not to tidy them
+  back into `continue`** until the issue closes.
+
+
+### Added
 - **scripts/derive-cga-null-table.sh** — two more claims, so the gate now pins the *implementation
   contract* and not just the mathematics:
   - **The defining null-basis identities**: `n0² = 0`, `ninf² = 0`, `n0·ninf = −1`, the symmetric sum

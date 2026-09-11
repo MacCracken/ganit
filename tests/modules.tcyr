@@ -8155,6 +8155,33 @@ var _cn_hi_rel = f64_abs(f64_div(f64_sub(f64_mul(f64_from(0 - 2), _cn_hi_ip), _c
 assert_eq(f64_gt(_cn_hi_rel, F64_ONE), 1,
   "cga: at 2^+30 distance recovery is KNOWN WRONG too (BOTH tails, not just small)");
 
+# ================================================================
+# 2.21.0 -- THE NULL-BASIS PRODUCT TABLE MATCHES ITS DERIVATION
+# ================================================================
+# `scripts/derive-cga-null-table.sh` derives all 1024 entries from first
+# principles and prints their FNV-1a. The Cyrius table is built independently, by
+# integer arithmetic, and must reproduce it exactly. Two implementations of the
+# same algebra agreeing bit for bit is the whole point: either alone could be
+# confidently wrong.
+# ⚠ The defining identities are asserted separately, because a checksum tells you
+# the table CHANGED but not which way -- these say what it must MEAN.
+# [measured: scripts/derive-cga-null-table.sh claim 6, blade-index space, 2026-09-10]
+var _nt = _cga_null_tbl();
+var _nt_h = 1469598103934665603;
+for (var _nt_i = 0; _nt_i < 1024; _nt_i = _nt_i + 1) {
+    _nt_h = (_nt_h ^ load64(_nt + _nt_i * 8)) * 1099511628211;
+}
+assert_eq(_nt_h, 0xF4A98C5706D5CF5B,
+  "CGA null table reproduces the derivation's FNV-1a over all 1024 entries");
+
+# n0 is blade index 4, ninf is blade index 5 under the null reading.
+assert_eq(load64(_nt + (4 * 32 + 4) * 8), 0, "CGA null basis: n0 * n0 vanishes");
+assert_eq(load64(_nt + (5 * 32 + 5) * 8), 0, "CGA null basis: ninf * ninf vanishes");
+assert_eq(load64(_nt + (1 * 32 + 1) * 8), 0x1, "CGA null basis: e1 * e1 = +1 (scalar)");
+# n0*ninf packs a scalar term AND a bivector term -- the two-slot case.
+assert_neq(load64(_nt + (4 * 32 + 5) * 8) >> 7, 0,
+  "CGA null basis: n0 * ninf fills BOTH term slots (scalar + bivector)");
+
 # --- CGA: the algebra identities.
 var g9a = cga_point(F64_ONE, 0, 0);
 var g9b = cga_mv_clone(g9a);

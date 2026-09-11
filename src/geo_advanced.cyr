@@ -2219,6 +2219,200 @@ fn _cga_popcount5(x) {
     return c;
 }
 
+# ================================================================
+# 2.21.0 — THE NULL-BASIS PRODUCT TABLE
+# ================================================================
+# Built once at first use, with INTEGER arithmetic only — no f64 touches this, so
+# the table is exact by construction rather than by tolerance. Every entry is
+# derived from the orthonormal product via the change of basis
+#   n0 = (em - ep)/2      ninf = ep + em
+#   ep = (ninf - 2*n0)/2  em   = (ninf + 2*n0)/2
+# and `scripts/derive-cga-null-table.sh` independently derives the same 1024
+# entries and prints their FNV-1a: the Cyrius table must reproduce
+# **0xF4A98C5706D5CF5B** exactly, and a test asserts it.
+# ⚠ TWO INDEX SPACES, AND CONFUSING THEM IS THE HAZARD. Bitmask space has
+# bit0=e1..bit2=e3, bit3=n0, bit4=ninf; blade-index space is the 0..31 numbering
+# `_cga_blade_bits` maps from. The table is keyed by BLADE INDEX because that is
+# `_cga_geo_blades`'s calling convention, while the derivation runs in bitmask
+# space — a table that is right in the wrong space is a plausible wrong answer.
+
+# Metric-free ordering sign. Returns 0 when the two blades share an index,
+# otherwise (result_bits + 1) * sign so one i64 carries both.
+fn _cga_wedge_bits(a, b) {
+    var sign = 1;
+    for (var bi = 4; bi >= 0; bi = bi - 1) {
+        if ((a & (1 << bi)) != 0) {
+            if ((_cga_popcount5(b & ((1 << bi) - 1)) & 1) != 0) { sign = 0 - sign; }
+            if ((b & (1 << bi)) != 0) { return 0; }
+        }
+    }
+    return (((a ^ b) & 31) + 1) * sign;
+}
+
+# Orthonormal geometric product on BITMASKS. Never vanishes; em (bit 4) squares
+# to -1 and everything else to +1.
+fn _cga_geo_bits(a, b) {
+    var sign = 1;
+    var bb = b;
+    for (var bi = 4; bi >= 0; bi = bi - 1) {
+        if ((a & (1 << bi)) != 0) {
+            if ((_cga_popcount5(bb & ((1 << bi) - 1)) & 1) != 0) { sign = 0 - sign; }
+            if ((bb & (1 << bi)) != 0) {
+                if (bi == 4) { sign = 0 - sign; }
+                bb = bb ^ (1 << bi);
+            }
+        }
+    }
+    return (((a ^ b) & 31) + 1) * sign;
+}
+
+# Apply one basis-vector replacement across a 32-slot integer coefficient array.
+fn _cga_apply_repl(arr, tmp, r0b, r0n, r1b, r1n) {
+    for (var z = 0; z < 32; z = z + 1) { store64(tmp + z * 8, 0); }
+    for (var b = 0; b < 32; b = b + 1) {
+        var c = load64(arr + b * 8);
+        if (c != 0) {
+            var w = _cga_wedge_bits(b, r0b);
+            if (w != 0) {
+                var sg = 1;
+                var nb = w - 1;
+                if (w < 0) { sg = 0 - 1; nb = (0 - w) - 1; }
+                store64(tmp + nb * 8, load64(tmp + nb * 8) + c * r0n * sg);
+            }
+            if (r1b >= 0) {
+                var w2 = _cga_wedge_bits(b, r1b);
+                if (w2 != 0) {
+                    var sg2 = 1;
+                    var nb2 = w2 - 1;
+                    if (w2 < 0) { sg2 = 0 - 1; nb2 = (0 - w2) - 1; }
+                    store64(tmp + nb2 * 8, load64(tmp + nb2 * 8) + c * r1n * sg2);
+                }
+            }
+        }
+    }
+    for (var z2 = 0; z2 < 32; z2 = z2 + 1) { store64(arr + z2 * 8, load64(tmp + z2 * 8)); }
+    return 0;
+}
+
+# Null-basis blade (bitmask) -> orthonormal coefficients. Returns the denominator.
+fn _cga_expand_null(bits, arr, tmp) {
+    for (var z = 0; z < 32; z = z + 1) { store64(arr + z * 8, 0); }
+    store64(arr, 1);
+    var denom = 1;
+    for (var bi = 0; bi < 5; bi = bi + 1) {
+        if ((bits & (1 << bi)) != 0) {
+            if (bi == 3) {
+                _cga_apply_repl(arr, tmp, 16, 1, 8, 0 - 1);  # n0 = (em - ep)/2
+                denom = denom * 2;
+            }
+            if (bi == 4) { _cga_apply_repl(arr, tmp, 8, 1, 16, 1); }   # ninf = ep+em
+            if (bi != 3 && bi != 4) { _cga_apply_repl(arr, tmp, 1 << bi, 1, 0 - 1, 0); }
+        }
+    }
+    return denom;
+}
+
+# Orthonormal blade (bitmask) -> null-basis coefficients. Returns the denominator.
+fn _cga_contract_orth(bits, arr, tmp) {
+    for (var z = 0; z < 32; z = z + 1) { store64(arr + z * 8, 0); }
+    store64(arr, 1);
+    var denom = 1;
+    for (var bi = 0; bi < 5; bi = bi + 1) {
+        if ((bits & (1 << bi)) != 0) {
+            if (bi == 3) {
+                _cga_apply_repl(arr, tmp, 16, 1, 8, 0 - 2);  # ep = (ninf - 2 n0)/2
+                denom = denom * 2;
+            }
+            if (bi == 4) {
+                _cga_apply_repl(arr, tmp, 16, 1, 8, 2);      # em = (ninf + 2 n0)/2
+                denom = denom * 2;
+            }
+            if (bi != 3 && bi != 4) { _cga_apply_repl(arr, tmp, 1 << bi, 1, 0 - 1, 0); }
+        }
+    }
+    return denom;
+}
+
+var _CGA_NULL_TBL = 0;
+
+fn _cga_build_null_tbl() {
+    var tbl = alloc(1024 * 8);
+    var ea = alloc(32 * 8);
+    var eb = alloc(32 * 8);
+    var mid = alloc(32 * 8);
+    var res = alloc(32 * 8);
+    var cx = alloc(32 * 8);
+    var tmp = alloc(32 * 8);
+    for (var ai = 0; ai < 32; ai = ai + 1) {
+        for (var bj = 0; bj < 32; bj = bj + 1) {
+            var da = _cga_expand_null(_cga_blade_bits(ai), ea, tmp);
+            var db = _cga_expand_null(_cga_blade_bits(bj), eb, tmp);
+            for (var z = 0; z < 32; z = z + 1) { store64(mid + z * 8, 0); }
+            # ⛔ `if`-GUARDS, NOT `continue`, AND THAT IS A COMPILER WORKAROUND.
+            # On cycc 6.6.2 a loop nest with `continue` at TWO levels miscompiles:
+            # a firing inner `continue` exits the OUTER loop as well, even when the
+            # outer `continue` never fires. The natural sparse-skip form of this
+            # nest silently produced an ALL-ZERO table — no diagnostic, no crash.
+            # Filed upstream as
+            # docs/development/issues/2026-09-11-nested-continue-exits-outer-loop.md
+            # with a repro that exits 0 when fixed and 1 while the bug is present.
+            # ⚠ Do not "tidy" these back into `continue` until that issue closes.
+            for (var p = 0; p < 32; p = p + 1) {
+                var cp = load64(ea + p * 8);
+                if (cp != 0) {
+                    for (var q = 0; q < 32; q = q + 1) {
+                        var cq = load64(eb + q * 8);
+                        if (cq != 0) {
+                            var g = _cga_geo_bits(p, q);
+                            var sg = 1;
+                            var rb = g - 1;
+                            if (g < 0) { sg = 0 - 1; rb = (0 - g) - 1; }
+                            store64(mid + rb * 8, load64(mid + rb * 8) + cp * cq * sg);
+                        }
+                    }
+                }
+            }
+            for (var z2 = 0; z2 < 32; z2 = z2 + 1) { store64(res + z2 * 8, 0); }
+            for (var ob = 0; ob < 32; ob = ob + 1) {
+                var co = load64(mid + ob * 8);
+                if (co != 0) {
+                    var dc = _cga_contract_orth(ob, cx, tmp);
+                    var wgt = 4 / dc;
+                    for (var nb3 = 0; nb3 < 32; nb3 = nb3 + 1) {
+                        var cn = load64(cx + nb3 * 8);
+                        if (cn != 0) {
+                            store64(res + nb3 * 8, load64(res + nb3 * 8) + co * cn * wgt);
+                        }
+                    }
+                }
+            }
+            var scale = da * db * 4;
+            var packed = 0;
+            var slot = 0;
+            # ⚠ Bitmask order, matching the derivation's term ordering exactly.
+            for (var nb = 0; nb < 32; nb = nb + 1) {
+                var v = load64(res + nb * 8);
+                if (v != 0) {
+                    var coef = v / scale;
+                    var sgn = 1;
+                    if (coef < 0) { sgn = 2; }
+                    var bidx = _cga_bits_blade(nb);
+                    if (slot == 0) { packed = packed | sgn | (bidx << 2); }
+                    if (slot == 1) { packed = packed | (sgn << 7) | (bidx << 9); }
+                    slot = slot + 1;
+                }
+            }
+            store64(tbl + (ai * 32 + bj) * 8, packed);
+        }
+    }
+    return tbl;
+}
+
+fn _cga_null_tbl() {
+    if (_CGA_NULL_TBL == 0) { _CGA_NULL_TBL = _cga_build_null_tbl(); }
+    return _CGA_NULL_TBL;
+}
+
 # Geometric product of two basis blades.
 # Returns sign * 256 + result_blade_index (packed).
 # Sign: 0 = zero, 1 = positive, 2 = negative (sign = 1 - (packed >> 8) * 2... etc)
