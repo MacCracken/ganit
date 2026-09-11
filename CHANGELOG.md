@@ -2,6 +2,80 @@
 
 ## [Unreleased]
 
+## [2.19.0] - 2026-09-10 — the 3.0.0 prep, and five gates that could not fail
+
+The roadmap scoped this as non-breaking groundwork for `Result<T,E>`: `#must_use` on the fallible
+surface, negative enum values for the 12 `HSB_ERR_*` codes, and the decisions owed. All of that shipped.
+**But every piece of it arrived the same way — the annotation, the enum, the version string — each
+needing a gate, and each gate turning out to be one that could not have failed.** Suites **3937 → 3955**.
+
+⛔ **`#must_use` IS A COMPILER DIAGNOSTIC, NOT A LINT ONE.** A file that discards a `#must_use` result
+gives `cyrius lint` *"0 warnings"* and matches CI's `^  warn ` grep **zero times**, while `cyrius build`
+prints `warning: #must_use result of 'f' is discarded`. Annotating 44 functions without wiring a step
+would have been decorative. ⚠ The row said 167 sites; it is **44 functions** — 167 is the number of
+`return HSB_ERR` *statements*, and 4 of the 48 functions that can return one can only ever return
+`HSB_ERR_NONE`, so annotating them would train readers to ignore the annotation. The new gate,
+**verified to fire before being trusted**, found `examples/basic_math.cyr` discarding two fallible
+returns.
+
+⛔ **THE SUITE COULD NOT SEE A WRONG ERROR CODE AT ALL.** Converting the 12 codes to an enum meant
+re-typing twelve values by hand, so the conversion was mutation-tested — and **two mutants survived all
+3940 assertions**: `HSB_ERR_SINGULAR_MATRIX -2 → -22`, and `HSB_ERR_ALLOC -11 → -1`, which makes ALLOC
+**collide with `HSB_ERR_INVALID_TRANSFORM`** — two distinct failures reported under one code. The cause
+is structural rather than an oversight in any one test: **every existing assertion compares a return
+against a code by NAME, so both sides move together and the value cancels out.** 15 assertions now name
+the number and check all 66 pairs for distinctness; 6 of 6 mutants killed. ⚠ A duplicate enum member
+*is* diagnosed at file:line where a duplicate `var` global is completely silent — but
+`cyrius check --with-deps` prints that warning and still **exits 0**, and `cyrius lint` never emits it,
+so that safety benefit was wired to nothing until a gate was added.
+
+⛔ **AND THE RELEASE SHIPPED ITS OWN BROKEN PROVENANCE MARKER, CAUGHT BY THE GATE THAT HAS NEVER RUN.**
+The enum bite wrote a `[measured: ...]` wrapped across two comment lines — malformed to the single-line
+regex. The gate that catches it, `check-measurements.sh`, is wired
+`if: github.event_name == 'pull_request'`, and this repository has **0 pull requests in its entire
+history against 303 workflow runs, the last 100 all `event: push`** (checked against the GitHub API).
+**It has executed zero times.** ⛔ Its `--diff` mode was *also* blind to its own dominant case: a
+path-resolution failure was filed against the PARAGRAPH's first line while the malformed arm filed the
+marker's own line, so a bad marker appended to an EXISTING block was intersected away as "not added" —
+and it made the gate **greener**, because the fabricated marker SATISFIED the real claim beside it.
+Both fixed; broken markers tree-wide **3 → 0**, now gated on push.
+
+⛔ **THE VERSION GATE COMPARED COMMITTED TEXT TO COMMITTED TEXT AND NEVER RAN THE BINARY.**
+`src/main.cyr` now prints `CYRIUS_PKG_VERSION`, so the one site `${file:VERSION}` could not reach holds
+no second copy — output byte-identical, binary 257,176 B both ways. Measured with `VERSION` bumped: the
+old hardcoded form rebuilds and still prints the *previous* version, which is the 2.9.1 → 2.9.2 defect
+reproduced. ⚠ **The roadmap's claim that two files "still assert" the stale *"Cyrius has no build-time
+string interpolation"* was FALSE** — `ci.yml` contains it zero times; both had been excised sloppily,
+splicing the correction into the middle of a sentence, while the two live claims sat in files the row
+never named. The claim was true for **four days**: written 2026-08-09, falsified by cyrius 6.5.21 on
+2026-08-13, and it stood four more weeks.
+
+⛔ **AND FOUR OF MY OWN INSTRUMENTS WERE WRONG BEFORE THE THING MEASURED WAS.** (1) A `git show
+"$c:tests/x"` loop returned 0 for every commit because **zsh reads `:t` as a path modifier even inside
+double quotes**, silently truncating the ref. (2) An included-file probe returned `2.17.0` — neither the
+real version nor the control — because it ran with `cd` into a scratchpad holding a **stale
+`cyrius.cyml` from an earlier session**. (3) A `$?` captured `head` after a pipe rather than the script,
+reading a gate's exit 1 as 0 — the third time this repo has recorded that exact shape. (4) **Both
+replacement version guards were wrong on their first draft, in opposite directions**: the "no hardcoded
+literal" guard **failed on its own tree**, because the comment explaining the change quotes the retired
+literal, and the "symbol still used" guard was **vacuous**, matching that same comment's mentions of the
+symbol so that deleting the call still exited 0. **A gate that cannot tell code from a comment quoting
+code fires on every honest explanation of itself.**
+
+⭐ **THE DECISIONS OWED WERE MEASURED RATHER THAN ARGUED, AND FOUR OF THE ROADMAP'S OWN PREMISES DID NOT
+SURVIVE IT.** A per-benchmark noise band is **strictly worse** than the shipped global ±10% (to match its
+false-positive rate the band must widen to a 11.1% median, 55.0% max, and it then flags 67 code-changed
+cells where the global filter flags 96) — the row that called it "the distinct and more useful item" is
+refuted by the only data that exists to build one from. `dual_*` stays declined. The remaining four are
+**repairs, not decisions**, and are scheduled rather than folded in: `_sym_render_f64` diverges across
+the whole finite `|val| ≥ 2^63` band rather than at 30 values, and the *shipped* tree already renders
+`sym_to_latex(-1e19)` as `{--9223372036854775808.000000}`, a double minus; `cga_point` is non-null at
+**500/500 trials in every binade from 2^-20 to 2^20** with full-mantissa coordinates, so the recorded
+"small coordinates" framing was an artifact of a dyadic sweep making `x²` exact.
+
+**No performance change is claimed, and the control is what settles it.** Against the immediately preceding run 2.19.0 looked like **11 rows improving 10-23%** — every one of them in the mat4 / quat / transforms / jet family, which this release never touched and which contains **0 `HSB_ERR_` references**, so the enum conversion cannot have altered their codegen. The previous baseline had been recorded **twice, 53 seconds apart, from the same binary**, and that pair moves the very same rows by **+31.6%, +26.5%, +26.3%, +25.6%, +21.1%** — the same magnitudes in the opposite direction. The second of the pair was simply a contaminated sample. Measured against the other two baselines instead, 2.19.0 is **median +0.00% (mean -0.29%, 2 rows >10%)** and **median +0.43% (mean +0.62%, 0 rows >10%)**, while the same-binary control is **median +2.82%, mean +5.09%, 13 rows >10%**. The only runtime change in the release is the EPA polish budget 64 -> 128 (`mpr_penetration` worst **1.65e-05 -> 6.3e-16**), measured in isolation at no detectable cost with controls moving as much as the EPA rows. ⚠ **A single adjacent run is not a baseline** — comparing against one would have licensed claiming five wins this release did not earn.
+
+
 ### Changed
 - **error** — the 12 `HSB_ERR_*` codes are an `enum HsbError`, not 12 `var` globals. Names and values
   are identical, so every reference is unchanged — **567 on non-comment lines** across `src/` (182)
@@ -39,6 +113,16 @@
   further four weeks.
 
 ### Fixed
+- **geo_advanced** — `mpr_penetration` was wrong by up to **1.65e-05** on ordinary overlapping spheres
+  where `gjk_epa_3d` is 5.57e-16, and the cause was the **polish budget**, not either mechanism the
+  roadmap had guessed. `_EPA_POLISH_ITER` 64 → 128: 38 of those rounds are mandatory halvings from
+  0.25 rad down to `EPSILON_F64`, leaving only 26 for moves, and the portal seed starts further out so
+  it was the one running out. At 128 the two entry points agree to the last bits (**6.3e-16**); 256
+  changes nothing further. ⚠ Rare, not systematic — 7 of 4000 pairs exceeded 1e-10. ⚠ Both hypotheses
+  originally filed were refuted by measurement: swapping which axis carries the large offset leaves the
+  error identical, and both entry points polish on every case.
+- **examples/basic_math.cyr** — `calc_integral_simpson` and `num_newton` return values were discarded.
+  Found by the new `#must_use` gate, not by review. Output is byte-identical.
 - **provenance markers** — 3 broken `[measured: ...]` markers, now **0**. One was introduced by this
   release's own enum bite: a marker wrapped across two comment lines, which the single-line `MARKER`
   regex reports as malformed. The other two (`src/collision_core.cyr`, `tests/modules.tcyr`) named
@@ -57,6 +141,18 @@
   line; both placements fail, and a clean tree still exits 0.
 
 ### Added
+- **`#must_use` on the fallible surface** — 44 annotations across 12 modules (`num_ext` 14,
+  `linalg_precision` 5, `num` 5, `optimize` 5, `linalg_ext` 4, `calc_ext` 3, and 8 more); the tree goes
+  **200 → 244**. ⚠ **The count is 44 functions, not the roadmap's 167.** 167 is the number of
+  `return HSB_ERR` *statements*; `#must_use` goes on functions, of which 48 can return one — and **4 of
+  those can only ever return `HSB_ERR_NONE`** (`_lp_bidiagonalize`, `_lp_tridiagonalize`,
+  `num_halton_2d`, `ode_dopri45`), so annotating them would train readers to ignore the annotation.
+- **CI** — a `Discarded #must_use results` gate. ⛔ Without it the annotations were decorative: a file
+  that discards one gives `cyrius lint` *"0 warnings"* and matches the `^  warn ` grep **zero times**,
+  while `cyrius build` prints the warning. Covers the bundle (all 35 modules with the stdlib resolved,
+  so every intra-library call site) and `examples/`, deliberately **not** `tests/` — calling a fallible
+  function and asserting on its out-parameter is a legitimate testing idiom and 67 sites do exactly
+  that. Verified to fire: a deliberate discard in `src/ode.cyr` takes it 0 → 1, removing it returns 0.
 - **tests/hisab.tcyr** — 15 assertions pinning each error code's exact **value** and all **66 pairs**
   for distinctness, plus that every failure code is negative. Written because a mutation sweep found
   the suite could not see a wrong one: `HSB_ERR_SINGULAR_MATRIX -2 → -22` **survived all 3940
