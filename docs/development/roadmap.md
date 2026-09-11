@@ -541,7 +541,19 @@ sections. It has been declared out of scope twice, which is a stronger claim tha
       whose off-diagonal is entirely NaN returns `HSB_ERR_NONE` with **fabricated eigenvalues
       (3, 3)**. Same trap as `_opt_armijo`, and the same one that made 2.17.0's SVD figure wrong.
 
-- [ ] **[2.20.0 — the premise is REFUTED]** ⚠ **The remaining 28 subnormal block ratios are the GRID, not a defect —
+- [x] ✅ **MEASURED, THE FALSE CLAIM RETRACTED, THE FIXTURE FAMILY WIDENED — repair filed, not
+      shipped.** This row's own instruction was "widen the fixture family before touching the code";
+      that is done, and the widened family says the standing claim was false in BOTH halves.
+      ⛔ **It is a defect**, and ⛔ **it mostly does NOT report NO_CONVERGENCE**: over 8 fixtures x 52
+      subnormal scales (416 rows) against a 120-digit oracle built from the ACTUAL rounded entries,
+      **270 rows return HSB_ERR_NONE and only 57 are right** — 213 confident wrong answers, worst
+      **9.78x**, one of them a smallest singular value returned as exactly ZERO where the truth is 4
+      units of 2^-1074. ⛔ The old sweep could not have seen it: all its fixtures are
+      UPPER-TRIANGULAR. Upper is 56/60/92 (correct/loud/silent); a GENERAL 2x2 is **1/86/121**.
+      ⚠ The verifier's 2.19.0 refutation of the obvious fix STANDS and is why nothing is shipped
+      here. 7 assertions pin the true state as a tracked defect with an acceptance test.
+      ⛔ ORIGINAL ROW FOLLOWS.
+- [ ] **[filed for its own release — subnormal SVD: scale the active block]** ⚠ **The remaining 28 subnormal block ratios are the GRID, not a defect —
       ⛔ **"THE GRID, NOT A DEFECT" IS REFUTED, AND THE REPLACEMENT IS NOT READY EITHER.** Scaling the
       block into the normal range before the QR sweep answers **all 75 ratios** on the SAME grid, worst
       **2 ulp**, 600/600 across eight fixtures — so the grid was never the binding constraint; the

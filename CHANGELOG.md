@@ -3,6 +3,30 @@
 ## [Unreleased]
 
 ### Changed
+- **linalg_precision / tests** — the standing claim about subnormal SVD block ratios was **false in
+  both halves**, and it had been asserting something reassuring since 2.18.0. It read: *"the remaining
+  28 are the GRID, NOT A DEFECT ... the routine reports `HSB_ERR_NO_CONVERGENCE`, which is the honest
+  answer to an unanswerable question."*
+  ⛔ **(1) It is a defect.** Scaling the active block into the normal range before the QR sweep answers
+  ratios the shipped tree gets wrong, so the subnormal grid was never the binding constraint — the
+  binding constraint is that the sweep does its arithmetic *on* that grid.
+  ⛔ **(2) It mostly does not report `NO_CONVERGENCE`.** Measured over 8 fixtures × 52 subnormal scales
+  = 416 rows, against singular values computed from the **actual rounded f64 entries** at 120 decimal
+  digits: **270 rows return `HSB_ERR_NONE` and only 57 of those are right.** 213 are reported successes
+  with singular values wrong by more than 2 ulp — worst **9.78×**, including a smallest singular value
+  returned as **exactly zero** where the truth is 4 units of 2^-1074. 146 fail loudly.
+  ⛔ **(3) The old sweep could not have seen it**: every one of its fixtures is an **upper-triangular**
+  2×2 block. Split by family — upper is 56 correct / 60 loud / 92 silent; a **general** 2×2 with a
+  non-zero lower-left entry is **1 correct / 86 loud / 121 silent**. The routine is essentially never
+  right there.
+  ⚠ **No repair is shipped here, deliberately.** The obvious candidate — scale the active block, step,
+  unscale — was refuted on scope by an adversarial verifier in 2.19.0 (validated only on
+  upper-triangular blocks, and on a general 2×2 it converts loud failures into silent wrong answers),
+  and the roadmap's own instruction was *"widen the fixture family before touching the code."* That
+  family now exists and is in the suite as the repair's acceptance test. The repair is an algorithm
+  change inside `_lp_bidiag_qr` and is filed as its own release.
+
+### Changed
 - **geo_advanced** — `cga_point`'s nullity is now a **measured, tested property with a stated band**
   rather than an open question. ⛔ **It is a wrong answer, not a representation nicety.** The canonical
   use of a null conformal point is distance recovery, `P₁·P₂ = −d²/2`; measured over random
@@ -47,6 +71,16 @@
   **1024 of 1024 integral binades**, 2^0..2^1023.
 
 ### Added
+- **tests/hisab.tcyr** — 7 assertions pinning the true subnormal-SVD state (**3973 → 3980**): a
+  general-2×2 fixture family, the fabricated-zero case, the 9.3×-too-large case, the surviving loud
+  arm, and a 156-pair sweep whose sample count is asserted alongside its result. These are a
+  **characterisation of a tracked defect, not a contract** — they exist so the repair has an acceptance
+  test and so any movement announces itself.
+  ⚠ My own sweep was wrong twice before the measurement stood: the scale factor was built as
+  `1 << (73 - e)`, which reaches a shift of 71 that x86 **masks to 7**, so the sweep silently
+  duplicated scales; and the first oracle computed truth from the *ideal* integers rather than the
+  rounded f64 entries the routine actually sees. The second error turned out not to change the counts,
+  but it was wrong for a reason that could have.
 - **tests/modules.tcyr** — 7 assertions pinning CGA point nullity (**3966 → 3973**): the bit-exact
   representational limit, a 22-binade distance-recovery sweep with its pair count asserted, and — so a
   future repair has to announce itself — the **known failures at 2^-30 and 2^+30 pinned as failures**,

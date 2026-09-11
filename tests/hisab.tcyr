@@ -3728,13 +3728,29 @@ assert_eq(load64(_PS_S + 8), 26,
 # below the smallest subnormal, i.e. exactly 0. The test became `|off| < 0`, never
 # fired, and the block never deflated. Five sites, all now dividing.
 # Measured across the 72 subnormal block ratios: **37 failing -> 28**.
-# ⚠ THE REMAINING 28 ARE THE GRID, NOT A DEFECT, and that is measured rather than
-# assumed: at 2^-1050 with **max_iter = 100,000** the superdiagonal is stuck at
-# ONE unit of 2^-1074 — the smallest non-zero value that exists — against a
-# diagonal of 2.7e7 units, so the ratio floor is 3.7e-8 and a relative 1e-12
-# criterion is unreachable by construction. The routine reports
-# HSB_ERR_NO_CONVERGENCE, which is the honest answer to an unanswerable question.
-# [measured: 72-ratio subnormal scan before and after; 100k-iteration probe]
+# ⛔ 2.20.0 — THE PARAGRAPH THAT USED TO SIT HERE WAS FALSE IN BOTH HALVES, AND IT
+# HAD BEEN ASSERTING SOMETHING REASSURING FOR TWO RELEASES. It read: "the
+# remaining 28 are the GRID, NOT A DEFECT ... the routine reports
+# HSB_ERR_NO_CONVERGENCE, which is the honest answer to an unanswerable question."
+# ⛔ (1) IT IS A DEFECT. Scaling the active block into the normal range before the
+# QR sweep answers ratios the shipped tree gets wrong, so the subnormal grid was
+# never the binding constraint — the binding constraint is that the sweep does its
+# arithmetic ON that grid, where every rounding is +-0.5 unit of 2^-1074.
+# ⛔ (2) IT MOSTLY DOES NOT REPORT NO_CONVERGENCE. Measured over 8 fixtures x 52
+# subnormal scales = 416 rows, against singular values computed from the ACTUAL
+# rounded f64 entries at 120 decimal digits: **270 rows return HSB_ERR_NONE and
+# only 57 of those are right**. 213 are rc = NONE with singular values wrong by
+# more than 2 ulp — worst **9.78x** — i.e. a confident wrong answer, the class this
+# project has spent six releases removing. 146 fail loudly.
+# ⛔ (3) THE OLD SWEEP COULD NOT HAVE SEEN IT: all its fixtures are
+# UPPER-TRIANGULAR 2x2 blocks. Split by family, upper is 56 correct / 60 loud /
+# 92 silent, while a GENERAL 2x2 (non-zero lower-left) is **1 correct / 86 loud /
+# 121 silent** — the routine is essentially never right there.
+# ⚠ The counts below are a CHARACTERISATION of a tracked defect, not a contract.
+# The repair is an algorithm change inside `_lp_bidiag_qr` (scale the active block,
+# step, unscale) and is filed on the roadmap; these assertions exist so it has an
+# acceptance test and so any movement announces itself.
+# [measured: 8 fixtures x 52 subnormal scales vs a 120-digit oracle, 2026-09-11]
 var _DF_A = ganita_mat_new(4, 4);
 for (var _df_i = 0; _df_i < 4; _df_i = _df_i + 1) {
     for (var _df_j = 0; _df_j < 4; _df_j = _df_j + 1) { ganita_mat_set(_DF_A, _df_i, _df_j, 0); }
@@ -3754,6 +3770,88 @@ assert_eq(svd_golub_kahan(_DF_A, _DF_U, _DF_S, _DF_Vt), HSB_ERR_NONE,
   "svd_golub_kahan: a SUBNORMAL sub-block at 2^-1065 deflates (the product used to flush to 0)");
 assert_eq(f64_div(load64(_DF_S + 16), load64(_DF_S)), _DF_c,
   "svd_golub_kahan: and its singular values are still c times the large block's");
+
+# --- 2.20.0: the widened family, and what it shows.
+# Build a 4x4 block-diagonal [B, c*B] and sweep c over subnormal powers of two.
+# Truth for such a matrix is {s1(B), s2(B), c*s1(B), c*s2(B)}.
+# ⚠ FIXTURE 2 HAS A NON-ZERO LOWER-LEFT ENTRY. The old sweep used only
+# upper-triangular blocks, which is the family this defect is mildest in.
+fn _sq_blk(idx, which) {
+    if (idx == 0) {
+        if (which == 0) { return 3; }
+        if (which == 1) { return 4; }
+        if (which == 2) { return 0; }
+        return 3;
+    }
+    if (idx == 1) {
+        if (which == 0) { return 9; }
+        if (which == 1) { return 1; }
+        if (which == 2) { return 0; }
+        return 2;
+    }
+    if (which == 0) { return 3; }
+    if (which == 1) { return 4; }
+    if (which == 2) { return 2; }
+    return 3;
+}
+fn _sq_run(idx, cscale, out_S) {
+    var A = ganita_mat_new(4, 4);
+    for (var i = 0; i < 4; i = i + 1) {
+        for (var j = 0; j < 4; j = j + 1) { ganita_mat_set(A, i, j, 0); }
+    }
+    ganita_mat_set(A, 0, 0, f64_from(_sq_blk(idx, 0)));
+    ganita_mat_set(A, 0, 1, f64_from(_sq_blk(idx, 1)));
+    ganita_mat_set(A, 1, 0, f64_from(_sq_blk(idx, 2)));
+    ganita_mat_set(A, 1, 1, f64_from(_sq_blk(idx, 3)));
+    ganita_mat_set(A, 2, 2, f64_mul(f64_from(_sq_blk(idx, 0)), cscale));
+    ganita_mat_set(A, 2, 3, f64_mul(f64_from(_sq_blk(idx, 1)), cscale));
+    ganita_mat_set(A, 3, 2, f64_mul(f64_from(_sq_blk(idx, 2)), cscale));
+    ganita_mat_set(A, 3, 3, f64_mul(f64_from(_sq_blk(idx, 3)), cscale));
+    var U = ganita_mat_new(4, 4);
+    var Vt = ganita_mat_new(4, 4);
+    for (var k = 0; k < 4; k = k + 1) { store64(out_S + k * 8, 0); }
+    return svd_golub_kahan(A, U, out_S, Vt);
+}
+
+var _sq_S = alloc(32);
+
+# ⛔ THE SMALLEST SINGULAR VALUE IS RETURNED AS EXACTLY ZERO, WITH rc = NONE.
+# Fixture [[9,1],[0,2]] at c = 2^-1073. Truth from a 120-digit oracle over the
+# ACTUAL rounded entries: the two subnormal singular values are 18 and 4 units of
+# 2^-1074. The routine returns 16 and **0** and calls it success.
+assert_eq(_sq_run(1, 1 << 1, _sq_S), HSB_ERR_NONE,
+  "svd subnormal: upper-triangular block reports SUCCESS at c=2^-1073");
+assert_eq(load64(_sq_S + 24), 0,
+  "svd subnormal: ...and its smallest singular value is a fabricated ZERO (truth: 4 units)");
+
+# ⛔ A GENERAL 2x2 IS WORSE: the smallest singular value comes back 9.3x TOO
+# LARGE. Fixture [[3,4],[2,3]] at c = 2^-1070; truth is 99 and 3 units of
+# 2^-1074, returned are 88 and 28.
+assert_eq(_sq_run(2, 1 << 4, _sq_S), HSB_ERR_NONE,
+  "svd subnormal: general 2x2 reports SUCCESS at c=2^-1070");
+assert_eq(load64(_sq_S + 24), 0x1C,
+  "svd subnormal: ...smallest singular value 28 units where truth is 3 (9.3x, silent)");
+
+# ⚠ The loud arm still exists, so this is not a blanket failure: the same general
+# fixture at c = 2^-1074 does report NO_CONVERGENCE.
+assert_eq(_sq_run(2, 1 << 0, _sq_S), HSB_ERR_NO_CONVERGENCE,
+  "svd subnormal: general 2x2 at c=2^-1074 DOES fail loudly");
+
+# ⚠ A COUNTER over the widened sweep, asserted with its sample count so a loop
+# that ran zero times cannot read as success.
+var _sq_ok = 0;
+var _sq_n = 0;
+for (var _sq_f = 0; _sq_f < 3; _sq_f = _sq_f + 1) {
+    for (var _sq_e = 0; _sq_e < 52; _sq_e = _sq_e + 1) {
+        _sq_n = _sq_n + 1;
+        if (_sq_run(_sq_f, 1 << _sq_e, _sq_S) == HSB_ERR_NONE) { _sq_ok = _sq_ok + 1; }
+    }
+}
+assert_eq(_sq_n, 156, "svd subnormal sweep: all 156 (fixture, scale) pairs ran");
+# ⛔ 94 of 156 report SUCCESS. Across the full 8-fixture measurement it is 270 of
+# 416, of which only 57 are right — so most of these are confident wrong answers,
+# not successes. Pinned as a tracked defect so the repair has an acceptance test.
+assert_eq(_sq_ok, 94, "svd subnormal sweep: 94 of 156 report SUCCESS (most of them wrongly)");
 
 # ⭐ AND THE NaN CONTRACT, WHICH IS WHAT DECIDES THE SHAPE OF THAT ZERO ARM. The
 # test must be `f64_eq(|off|, 0)`, not the tempting `f64_gt(|off|, 0) == 0` —
