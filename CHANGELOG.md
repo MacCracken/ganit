@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+### Added
+- **scripts/derive-cga-null-table.sh** — two more claims, so the gate now pins the *implementation
+  contract* and not just the mathematics:
+  - **The defining null-basis identities**: `n0² = 0`, `ninf² = 0`, `n0·ninf = −1`, the symmetric sum
+    `n0*ninf + ninf*n0 = −2` (the bivector cancels), and `e1² = +1`. These are the cheapest possible
+    check that a future table edit is still the right algebra rather than merely self-consistent.
+  - **The table emitted in BLADE-INDEX space**, which is `_cga_geo_blades`'s actual calling convention,
+    with **FNV-1a `0xF4A98C5706D5CF5B`** over all 1024 entries as the exact contract the Cyrius table
+    must reproduce.
+  ⛔ **That second claim exists because I got the index space wrong first.** The derivation works in
+  *bitmask* space (bit0 = e1 … bit3 = n0, bit4 = ninf) while the implementation is called with *blade
+  indices*, and the two are different numberings — blade index 4 is bitmask 8. My first spot-check read
+  `(4,4) → +1·scalar` and looked like `n0² = +1`, which would have been a flatly wrong table; it was
+  `e3² = +1`, correct, in the other space. **A table that is right in the wrong space is exactly the
+  plausible-but-wrong artefact this script exists to stop**, so the contract is now emitted in the
+  space the caller uses, with `n0² = 0` and `ninf² = 0` asserted *there*.
+  ⚠ Still fail-closed and deterministic; 6 claims, ~200 ms.
+
 ### Changed
 - **geo_advanced** — `_cga_geo_blades` now returns **two term slots** instead of one, and all five call
   sites accumulate both. **Output is bit-identical**: a folded checksum over 300 random multivector

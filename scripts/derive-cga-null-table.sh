@@ -132,6 +132,67 @@ print(f"    null basis  : {bad_null:6} non-null ({100*bad_null/n:.1f}%)",
       "OK" if bad_null == 0 else "FAIL")
 fail += bad_null != 0
 
+print("CLAIM 5 — the DEFINING null-basis identities")
+def prod(A, B):
+    acc = {}
+    for ba, ca in rebuild(A, TO_ORTH).items():
+        for bb, cb in rebuild(B, TO_ORTH).items():
+            s, rb = geo_orth(ba, bb)
+            acc[rb] = acc.get(rb, F(0)) + ca * cb * s
+    res = {}
+    for bl, c in {k: v for k, v in acc.items() if v != 0}.items():
+        for k, v in rebuild(bl, TO_NULL).items():
+            res[k] = res.get(k, F(0)) + c * v
+    return {k: v for k, v in res.items() if v != 0}
+N0, NINF = 1 << 3, 1 << 4
+sym = {}
+for d in (prod(N0, NINF), prod(NINF, N0)):
+    for k, v in d.items(): sym[k] = sym.get(k, F(0)) + v
+sym = {k: v for k, v in sym.items() if v != 0}
+ids = [
+    ("n0 * n0     == 0",        prod(N0, N0) == {}),
+    ("ninf * ninf == 0",        prod(NINF, NINF) == {}),
+    ("n0.ninf     == -1",       prod(N0, NINF).get(0) == F(-1)),
+    ("symmetric sum == -2",     sym == {0: F(-2)}),
+    ("e1 * e1     == +1",       prod(1, 1) == {0: F(1)}),
+]
+for label, ok in ids:
+    print(f"    {label:24} {'OK' if ok else 'FAIL'}")
+    fail += not ok
+
+# ⚠ INDEX SPACE. Everything above works in BITMASK space (bit0=e1 .. bit3=n0,
+# bit4=ninf). `_cga_geo_blades` is called with BLADE INDICES, and the two are not
+# the same numbering — blade index 4 is bitmask 8. Emitting the contract in the
+# implementation's own index space is deliberate: a table that is right in the
+# wrong space is exactly the plausible-but-wrong artefact this file exists to stop.
+BLADE_BITS = [0, 1, 2, 4, 8, 16, 3, 5, 9, 17, 6, 10, 18, 12, 20, 24,
+              7, 11, 19, 13, 21, 25, 14, 22, 26, 28, 15, 23, 27, 29, 30, 31]
+def pack(A_idx, B_idx):
+    res = prod(BLADE_BITS[A_idx], BLADE_BITS[B_idx])
+    terms = sorted(res.items())
+    def enc(t):
+        if t is None: return 0, 0
+        bits, v = t
+        return (1 if v > 0 else 2), BLADE_BITS.index(bits)
+    s0, b0 = enc(terms[0] if len(terms) > 0 else None)
+    s1, b1 = enc(terms[1] if len(terms) > 1 else None)
+    return s0 | (b0 << 2) | (s1 << 7) | (b1 << 9)
+
+print("CLAIM 6 — the table, in BLADE-INDEX space (the calling convention)")
+h = 1469598103934665603
+for ai in range(32):
+    for bi in range(32):
+        h = ((h ^ pack(ai, bi)) * 1099511628211) & 0xFFFFFFFFFFFFFFFF
+print(f"    packing: bits 0-1 sign0 (0 none / 1 plus / 2 minus), 2-6 blade0,")
+print(f"             bits 7-8 sign1, 9-13 blade1")
+print(f"    FNV-1a over all 1024 blade-index entries: 0x{h:016X}")
+print( "    ⚠ THE CYRIUS TABLE MUST REPRODUCE THIS EXACTLY.")
+# blade index 4 = n0, 5 = ninf under the new reading
+assert pack(4, 4) == 0, "n0*n0 must vanish in blade-index space"
+assert pack(5, 5) == 0, "ninf*ninf must vanish in blade-index space"
+print(f"    spot: n0*n0 = 0x{pack(4,4):04X}, ninf*ninf = 0x{pack(5,5):04X}, "
+      f"n0*ninf = 0x{pack(4,5):04X}, e1*e1 = 0x{pack(1,1):04X}")
+
 print()
 print("DERIVED TABLE: 1024 pairs, "
       f"{sum(1 for v in table.values() if len(v)==0)} vanishing, "
