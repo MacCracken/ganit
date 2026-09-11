@@ -280,6 +280,19 @@ jobs:
             exit 1
           fi
 
+      - name: CGA null-basis derivation
+        # ⭐ 2.21.0's basis change rests on three claims about the null-basis
+        # product table — at most 2 terms per basis-blade product, all coefficients
+        # exactly +/-1, and agreement with the shipped orthonormal table under the
+        # change of basis — plus the reason the change is worth making: a conformal
+        # point is EXACTLY null in the null basis at every magnitude. All four are
+        # DERIVED from first principles here, not asserted.
+        # ⚠ This exists as a gate because 2.20.0's audit found several of that
+        # release's headline figures could not be re-derived from the tree: the
+        # probes were never committed. 192 ms, deterministic, fail-closed
+        # (verified: breaking any claim exits 1).
+        run: ./scripts/derive-cga-null-table.sh
+
       - name: Broken provenance markers
         # ⛔ ADDED 2.19.0. The `measurements` job below runs `--diff` and is PULL
         # REQUESTS ONLY, because a full-tree scan exits 1 on 284 unmarked paragraphs

@@ -2,6 +2,29 @@
 
 ## [Unreleased]
 
+### Added
+- **scripts/derive-cga-null-table.sh** + a CI gate — 2.21.0's basis change rests on claims about the
+  null-basis product table, and this **derives all of them from first principles** rather than asserting
+  them. ⚠ It exists as a script because 2.20.0's audit found several of that release's headline figures
+  could not be re-derived from the tree: the probes were never committed. 192 ms, deterministic,
+  verified fail-closed (breaking any claim exits 1).
+  - **At most 2 terms** per basis-blade product in the null basis — 128 of 1024 pairs vanish, 768 give
+    a single blade, 128 give two. The orthonormal basis gives exactly 1, which is why
+    `_cga_geo_blades` returns a single packed pair today; the rewrite is therefore "return up to two",
+    not a new engine.
+  - **Every table coefficient is exactly ±1.** No halves survive the change of basis, so the
+    null-basis product introduces **no new rounding** — the property that makes this change safe.
+  - **The null table agrees with the shipped orthonormal one** under the change of basis, 0 mismatches
+    over all 1024 pairs. The algebra is unchanged; only its coordinates move.
+  - **A conformal point is exactly null at every magnitude**: 0 of 25,500 full-mantissa triples over
+    2^-40..2^40 non-null, against **24.8%** in the ep/em basis. `P·P = q + 2·(q/2)·(n0·ninf)` cancels
+    the *same computed q* against itself, where the ep/em form reconstructs q by squaring and loses it.
+  ⚠ **My first ad-hoc derivation of the term distribution was wrong** — it printed 256/448/320 against
+  the script's 128/768/128. The script carries a round-trip cross-check (claim 3) that the ad-hoc
+  version had no equivalent of; the max-terms and ±1 conclusions were unaffected, but the distribution
+  was. **A derivation without a cross-check is a guess that compiles.**
+
+
 ## [2.20.0] - 2026-09-10 — the four repairs 2.19.0 measured, and what measuring them again showed
 
 2.19.0's decision fan-out proved four filed items were **repairs, not decisions**. Two were repaired
