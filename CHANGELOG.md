@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+### Changed
+- **autodiff** — `ad_grad`'s cost and the Jacobian trap it creates are now documented where a caller
+  will see them. The sweep is O(tape length) **twice** — it clears every adjoint, then scans from
+  `root` down to index 0, both over the full tape rather than the part `root` reaches. So the obvious
+  multi-residual Jacobian driver (build all m residuals on one shared tape, sweep per residual) is
+  **O(m²) by construction**. The per-residual `ad_tape_reset` form is O(m) and needs **no new API**.
+  Measured at n = 8 on a quiet box: shared **quadruples** per doubling of m (461 → 1240 → 4667 → 18398 µs
+  at m = 256/512/1024/2048), per-tape **doubles** (215 → 391 → 775 → 1474 µs).
+  ⚠ **The ratio is not a constant and must not be quoted as one** — 2× at m = 256, 12× at m = 2048,
+  growing without bound. An earlier note recorded this as "6.8× faster", which is one point on a curve;
+  the finding is the *scaling*, not the point.
+  ⚠ No code change: halving the clear would not help, because the scan is O(root) on its own, so the
+  driver stays quadratic. Making it sub-linear needs a reachability sweep instead of a linear scan —
+  an algorithm change, not a tuning knob. And the full clear is load-bearing as written, since
+  `ad_grad_of(t, i)` above `root` must read 0 and has no way to know where the last sweep began.
+  ⚠ `ad_grad` has **zero in-tree callers** and the fan-out measured **zero `dual_*`/`ad_*` call sites
+  across all 14 consuming repos**, so nothing is hitting this today — it is a trap set for the first
+  caller who pairs reverse mode with `opt_levenberg_marquardt`, which is its documented purpose.
+
 ### Fixed
 - **collision_core** — a local named `pn` in `triangulate_polygon`'s neighbour-refresh block shadowed
   the `pn` bound by the winding loop **at the top of the same function**, where it is an `HVec2`
@@ -91,6 +110,9 @@
   **1024 of 1024 integral binades**, 2^0..2^1023.
 
 ### Added
+- **tests/hisab.bcyr** — `jac_rev_shared_256` and `jac_rev_pertape_256` (**72 → 74 benchmarks**), so
+  the quadratic/linear gap is tracked rather than rediscovered. ⚠ They must be read as a **pair** and
+  never as a constant speedup, for the reason above. First run: 328.6 µs against 180.0 µs.
 - **tests/modules.tcyr** — 3 assertions pinning the self-intersecting divergence (**3980 → 3983**).
   ⚠ The length is asserted **exactly** (`== 6`), not `<= 9`: the old `<= 9` form is satisfied by the
   complete answer too, so it could not tell the two directions apart — which is how a backwards claim

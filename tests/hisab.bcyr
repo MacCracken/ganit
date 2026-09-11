@@ -264,6 +264,11 @@ fn _b_ad_body_fwd(which) {
     return Dual_deriv(acc);
 }
 
+enum JacBench { _B_JAC_N = 8; _B_JAC_M = 256 }
+var _b_jac_ids = alloc(_B_JAC_N * 8);
+var _b_jac_roots = alloc(_B_JAC_M * 8);
+var _b_jac_out = alloc(_B_JAC_N * 8);
+
 fn bench_grad_fwd_16() {
     for (var w = 0; w < _AD_N; w = w + 1) { var g = _b_ad_body_fwd(w); }
     return 0;
@@ -279,6 +284,58 @@ fn bench_grad_rev_16() {
     var rc = ad_grad(_b_tape, acc);
     return 0;
 }
+
+# ⛔ 2.20.0: THE JACOBIAN TRAP, AS A PAIR OF ROWS. Reverse mode's intended pairing
+# is `opt_levenberg_marquardt`'s `jacobian` callback -- m residuals, n params --
+# and the obvious driver (build all m on ONE shared tape, sweep per residual) is
+# **O(m^2)**, because `ad_grad` clears and scans the WHOLE tape every call. The
+# per-residual reset is O(m) and uses only shipped API.
+# ⚠ These two rows exist so the gap is TRACKED rather than rediscovered. They must
+# be read as a PAIR and never as a constant speedup: the ratio is m-dependent --
+# measured 2x at m = 256 and 12x at m = 2048, growing without bound, because one
+# side is quadratic and the other linear.
+# [measured: shared vs per-tape drivers, n=8, m=64..2048, 2026-09-11]
+fn _b_jac_shared() {
+    var t = ad_tape_new(_B_JAC_N + 4 * _B_JAC_M + 8);
+    if (t == 0) { return 0; }
+    var ids = _b_jac_ids;
+    for (var i = 0; i < _B_JAC_N; i = i + 1) {
+        store64(ids + i * 8, ad_var(t, f64_from(i + 1)));
+    }
+    var roots = _b_jac_roots;
+    for (var j = 0; j < _B_JAC_M; j = j + 1) {
+        var acc = load64(ids);
+        for (var k = 1; k < _B_JAC_N; k = k + 1) {
+            acc = ad_add(t, acc, load64(ids + k * 8));
+        }
+        store64(roots + j * 8, ad_mul(t, acc, load64(ids)));
+    }
+    for (var j2 = 0; j2 < _B_JAC_M; j2 = j2 + 1) {
+        ad_grad_into(t, load64(roots + j2 * 8), ids, _B_JAC_N, _b_jac_out);
+    }
+    return 0;
+}
+
+fn _b_jac_pertape() {
+    var t = ad_tape_new(_B_JAC_N + 8);
+    if (t == 0) { return 0; }
+    var ids = _b_jac_ids;
+    for (var j = 0; j < _B_JAC_M; j = j + 1) {
+        ad_tape_reset(t);
+        for (var i = 0; i < _B_JAC_N; i = i + 1) {
+            store64(ids + i * 8, ad_var(t, f64_from(i + 1)));
+        }
+        var acc = load64(ids);
+        for (var k = 1; k < _B_JAC_N; k = k + 1) {
+            acc = ad_add(t, acc, load64(ids + k * 8));
+        }
+        ad_grad_into(t, ad_mul(t, acc, load64(ids)), ids, _B_JAC_N, _b_jac_out);
+    }
+    return 0;
+}
+
+fn bench_jac_rev_shared_256() { return _b_jac_shared(); }
+fn bench_jac_rev_pertape_256() { return _b_jac_pertape(); }
 
 fn bench_ray_obb() {
     var r = geo_ray_obb(_bray_d, _b_obb);
@@ -1160,6 +1217,8 @@ fn main() {
     bench_batch("jet_capsule",     &bench_jet_capsule,   2000, 200);
     bench_batch("grad_fwd_16",     &bench_grad_fwd_16,   200, 200);
     bench_batch("grad_rev_16",     &bench_grad_rev_16,   200, 200);
+    bench_batch("jac_rev_shared_256",  &bench_jac_rev_shared_256,   5, 5);
+    bench_batch("jac_rev_pertape_256", &bench_jac_rev_pertape_256,  5, 5);
     bench_batch("ray_obb",         &bench_ray_obb,       2000, 200);
     bench_batch("ray_aabb_diag",   &bench_ray_aabb_diag, 2000, 200);
     bench_batch("ray_capsule_diag", &bench_ray_capsule_diag, 2000, 200);
