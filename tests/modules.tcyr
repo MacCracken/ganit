@@ -5621,6 +5621,38 @@ assert_eq(vec_len(convex_hull_2d(ch_d, 5)), 4, "convex_hull_2d: duplicate corner
 # polygon: |Σ 2×area| == polygon |2×area| (abs makes it winding-agnostic).
 test_group("collision_core: triangulate_polygon");
 
+# ================================================================
+# 2.20.0 -- THE SELF-INTERSECTING DIVERGENCE, PINNED IN THE DIRECTION IT ACTUALLY
+# GOES
+# ================================================================
+# ⛔ 2.7.1's reflex-only prune changes the return LENGTH on self-intersecting
+# input, and the CHANGELOG recorded the direction BACKWARDS, twice, for thirteen
+# releases: "old-partial -> new-complete, the new code succeeds where the old
+# bailed". Measured by building the 2.7.0 tree and this one side by side on
+# cyrius 6.6.2 and running both on the same reproducer: **old returns 9 indices
+# (COMPLETE), this code returns 6 (PARTIAL)** -- old [0 1 2 4 0 2 4 2 3], new
+# [4 0 1 1 2 3]. The new code BAILS WHERE THE OLD SUCCEEDED.
+# ⚠ The decision is unchanged: the divergence is confined to input ear clipping
+# does not define, and a partial return is inside the documented contract. What
+# was wrong was the sentence, and it lived only in the CHANGELOG where no gate
+# could reach it. This assertion puts the direction where a test can hold it.
+# [measured: the 2.7.0 tree vs HEAD, both built on cyrius 6.6.2, 2026-09-11]
+var _tpx = vec_new();
+vec_push(_tpx, hvec2_new(0, 0));
+vec_push(_tpx, hvec2_new(F64_ONE, F64_TWO));
+vec_push(_tpx, hvec2_new(F64_ONE, F64_ONE));
+vec_push(_tpx, hvec2_new(0, F64_TWO));
+vec_push(_tpx, hvec2_new(F64_TWO, F64_ONE));
+var _tpxt = triangulate_polygon(_tpx, 5);
+assert_neq(_tpxt, 0, "triangulate_polygon: self-intersecting pentagon returns a vec");
+# ⚠ Asserted as an EXACT length, not `<= 9`. `<= 9` is satisfied by the complete
+# answer too, so it could not tell the two directions apart -- which is how the
+# backwards claim survived thirteen releases.
+assert_eq(vec_len(_tpxt), 6,
+  "triangulate_polygon: self-intersecting pentagon is PARTIAL (6), where 2.7.0 gave COMPLETE (9)");
+assert_eq(vec_len(_tpxt) < 3 * (5 - 2), 1,
+  "triangulate_polygon: ...and PARTIAL is inside the documented < 3*(n-2) contract");
+
 # Convex quad (side-2 square) → 2 triangles, 2×area = 8.
 var tp_q = vec_new();
 vec_push(tp_q, hvec2_new(0, 0));

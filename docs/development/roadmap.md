@@ -773,7 +773,19 @@ them is not a defect at all.
 
 ### Documentary
 
-- [ ] **[2.20.0 — facts hold, the CHANGE over-reaches]** **Two items inside the archived `triangulate_polygon` filing** — the 2.7.x CHANGELOG entries
+- [x] ✅ **BOTH CLOSED, and the direction claim is now measured rather than inherited.** ⛔ The
+      CHANGELOG recorded the prune's divergence BACKWARDS, twice, for thirteen releases. Built the
+      **2.7.0 tree and HEAD side by side on cyrius 6.6.2**: `(0,0),(1,2),(1,1),(0,2),(2,1)` gives
+      **old 9 (COMPLETE) -> new 6 (PARTIAL)** — old [0 1 2 4 0 2 4 2 3], new [4 0 1 1 2 3]. The new
+      code BAILS WHERE THE OLD SUCCEEDED. The decision is unchanged; the sentence was wrong, and it
+      lived only in the CHANGELOG **where no gate could reach it** — now stated in the source beside
+      the code and pinned by an EXACT-length assertion (`== 6`, not the old `<= 9`, which the
+      complete answer also satisfies and so could not discriminate).
+      ⭐ The shadow is renamed `prev_slot`/`next_slot`, verified inert by a 65,610-case checksum
+      **whose ability to detect a change was itself verified** (2 of 3 mutants move it; `i - 2` is an
+      equivalence on this family). ⚠ The filing's `nn` shadow does not exist — the winding loop uses
+      `ni`. ⚠ And the citation, which had drifted three times (740/742 -> 762/764 -> **870/872**), is
+      now moot: the names are unique, so there is nothing left to cite. ⛔ ORIGINAL ROW FOLLOWS. **Two items inside the archived `triangulate_polygon` filing** — the 2.7.x CHANGELOG entries
       ⛔ **EVERY FIGURE IN THE FILING REPRODUCED INDEX-FOR-INDEX** under an independent exact-integer
       simplicity test — the n=5/3x3 sweep (15,120 cases, 1,696 diverged, 32 full->partial), the n=6
       sweep (60,480 / 11,864 / 632), and **0 divergences over all 106,888 simple polygons**. A skeptic

@@ -2,6 +2,26 @@
 
 ## [Unreleased]
 
+### Fixed
+- **collision_core** — a local named `pn` in `triangulate_polygon`'s neighbour-refresh block shadowed
+  the `pn` bound by the winding loop **at the top of the same function**, where it is an `HVec2`
+  *pointer* against a ring *index* here. Renamed to `prev_slot`/`next_slot`. ⚠ Inertness is checked,
+  and so is the check: a folded checksum over every index tuple on a 3×3 grid for n=4 and n=5 (65,610
+  calls) is bit-identical across the rename, **and the same checksum moves** when the refresh is
+  disabled or the prev flag is forced — so it can see a change. `prev_slot = i - 2` does *not* move it:
+  an equivalence on this family, not a blind probe. ⚠ The filing also claimed `nn` shadowed something;
+  it does not — the winding loop uses `ni`, so `pn` was the only true shadow.
+- **CHANGELOG (2.7.1 entries)** — the `triangulate_polygon` prune's divergence direction was recorded
+  **backwards, twice, for thirteen releases**: *"old-partial → new-complete — the new code succeeds
+  where the old bailed."* Measured by building the **2.7.0 tree and the current tree side by side on
+  cyrius 6.6.2** and running both on `(0,0),(1,2),(1,1),(0,2),(2,1)`: **old returns 9 indices
+  (COMPLETE), new returns 6 (PARTIAL)** — old `[0 1 2 4 0 2 4 2 3]`, new `[4 0 1 1 2 3]`. The new code
+  *bails where the old succeeded*. ⚠ The decision is unchanged — the divergence is confined to
+  self-intersecting input, which ear clipping does not define, and a partial return is inside the
+  documented `< 3*(n-2)` contract. What was wrong was the sentence, and it lived **only in the
+  CHANGELOG, where no gate could reach it**. The contract and the measured direction are now stated in
+  `collision_core.cyr` beside the code, and pinned by an assertion.
+
 ### Changed
 - **linalg_precision / tests** — the standing claim about subnormal SVD block ratios was **false in
   both halves**, and it had been asserting something reassuring since 2.18.0. It read: *"the remaining
@@ -71,6 +91,10 @@
   **1024 of 1024 integral binades**, 2^0..2^1023.
 
 ### Added
+- **tests/modules.tcyr** — 3 assertions pinning the self-intersecting divergence (**3980 → 3983**).
+  ⚠ The length is asserted **exactly** (`== 6`), not `<= 9`: the old `<= 9` form is satisfied by the
+  complete answer too, so it could not tell the two directions apart — which is how a backwards claim
+  survived thirteen releases.
 - **tests/hisab.tcyr** — 7 assertions pinning the true subnormal-SVD state (**3973 → 3980**): a
   general-2×2 fixture family, the fabricated-zero case, the 9.3×-too-large case, the surviving loud
   arm, and a 156-pair sweep whose sample count is asserted alongside its result. These are a
@@ -3966,6 +3990,13 @@ vertex can lie inside a candidate ear. Unblocked by the 2.7.0-K contract documen
 only on self-intersecting input, which ear clipping does not define, and the divergence direction is
 old-partial → new-complete.
 
+> ⛔ **CORRECTION (2.20.0): the direction above is BACKWARDS.** Measured by building the 2.7.0 tree
+> and the current tree side by side on cyrius 6.6.2 and running both on
+> `(0,0),(1,2),(1,1),(0,2),(2,1)`: **old returns 9 indices — COMPLETE — and new returns 6 — PARTIAL**
+> (old `[0 1 2 4 0 2 4 2 3]`, new `[4 0 1 1 2 3]`). The new code *bails where the old succeeded*, not
+> the reverse. The claim is stated backwards here and again ~50 lines below; the *same release*
+> already had it right elsewhere, so this was a transcription error, not a measurement error.
+
 **`_kd_partition`** gained a balance guard rather than the unconditional quickselect the spec
 proposed. That cost **+114%** on the common path (2.27 → 4.85 ms), so selection is now a *fallback*
 taken only when the cheap midpoint split leaves a child below a quarter of its parent. Depth is
@@ -4024,6 +4055,12 @@ The blocker was that output length changes on *self-intersecting* input. That is
 than tolerated: 2.7.0-K documented the real contract (`== 3*(n-2)` complete, `< 3*(n-2)` partial),
 and ear clipping is only defined for simple polygons anyway. The divergence direction is
 **old-partial → new-complete** — the new code succeeds where the old bailed.
+
+> ⛔ **CORRECTION (2.20.0): backwards.** Re-measured by building both trees on 6.6.2:
+> `(0,0),(1,2),(1,1),(0,2),(2,1)` gives **old 9 (COMPLETE) → new 6 (PARTIAL)**. The new code bails
+> where the old succeeded. ⚠ This does not change the *decision* — the divergence is confined to
+> self-intersecting input, which ear clipping does not define, and a partial return is inside the
+> documented contract (`< 3*(n-2)`). What was wrong is the sentence, twice, for thirteen releases.
 
 One of my own 2.7.0-K assertions failed on this, and it was the *assertion* that was wrong: it
 pinned `< 9` for a self-intersecting pentagon, i.e. it asserted that this particular input bails.

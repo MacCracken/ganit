@@ -10850,6 +10850,26 @@ fn _col_ring_is_convex(vertices, idx, remaining, p, ccw) {
     return 0;
 }
 
+# ⚠ RETURN-LENGTH CONTRACT, and the one place it is stated in the SOURCE.
+# `3*(n-2)` indices means a COMPLETE triangulation; fewer means PARTIAL, and
+# partial is inside the contract rather than a failure. Ear clipping is defined
+# only for SIMPLE polygons; on self-intersecting input the output length is not
+# specified and callers must not assume completeness.
+# ⛔ 2.20.0 — 2.7.1's reflex-only prune DOES change that length on
+# self-intersecting input, and for thirteen releases the CHANGELOG recorded the
+# direction BACKWARDS, twice. It read "old-partial -> new-complete, the new code
+# succeeds where the old bailed". Measured by building the 2.7.0 tree and this
+# one side by side on cyrius 6.6.2 and running both on
+# `(0,0),(1,2),(1,1),(0,2),(2,1)`: **old returns 9 indices (COMPLETE), this code
+# returns 6 (PARTIAL)** — old `[0 1 2 4 0 2 4 2 3]`, new `[4 0 1 1 2 3]`. The new
+# code BAILS WHERE THE OLD SUCCEEDED. The decision is unchanged (the divergence
+# is confined to input ear clipping does not define) but the sentence was wrong,
+# and it was wrong in the CHANGELOG where no gate could reach it. It is stated
+# here now, beside the code it describes.
+# ⚠ The marker below deliberately does not START with "2.7.0": the provenance
+# gate parses a leading token containing a dot as a FILE PATH, and reports a
+# version number there as a file that does not exist.
+# [measured: the 2.7.0 tree vs HEAD, both built on cyrius 6.6.2, 2026-09-11]
 fn triangulate_polygon(vertices, n) {
     var result = vec_new();
     # ⛔ `n` IS A RESTATEMENT OF `vec_len(vertices)` AND WAS NEVER CHECKED, so a
@@ -10976,15 +10996,30 @@ fn triangulate_polygon(vertices, n) {
                     # Removing position i leaves the old prev at i-1 and pulls
                     # the old next down into slot i; only those two vertices
                     # changed neighbours, so only those two flags are stale.
+                    # ⚠ `prev_slot`/`next_slot`, not `pn`/`nn`: the winding loop at the
+                    # top of THIS SAME FUNCTION already binds `pn`, and there it is an
+                    # HVec2 POINTER while here it is a ring INDEX. Nothing broke — that
+                    # loop finishes long before this runs — but two unrelated quantities
+                    # under one name inside one function is how a later edit picks the
+                    # wrong one. ⚠ The filing that recorded this also claimed `nn`
+                    # shadowed something. It does not: the winding loop uses `ni`, so
+                    # `pn` was the only true shadow. Renamed as a pair anyway.
+                    # ⚠ Inertness is CHECKED, and so is the check: a folded checksum over
+                    # every index tuple on a 3x3 grid for n=4 and n=5 (65,610 calls) is
+                    # bit-identical across the rename — and the same checksum MOVES when
+                    # the refresh is disabled or the prev flag is forced, so it can see a
+                    # change. ⚠ `prev_slot = i - 2` does NOT move it: an equivalence on
+                    # this family, not evidence the probe is blind.
+                    # [measured: 65,610-case checksum, inert across rename, 2 of 3 mutants move it]
                     if (remaining > 2) {
-                        var pn = i - 1;
-                        if (pn < 0) { pn = remaining - 1; }
-                        var nn = i;
-                        if (nn >= remaining) { nn = 0; }
-                        store64(blocked + vec_get(idx, pn) * 8,
-                          1 - _col_ring_is_convex(vertices, idx, remaining, pn, ccw));
-                        store64(blocked + vec_get(idx, nn) * 8,
-                          1 - _col_ring_is_convex(vertices, idx, remaining, nn, ccw));
+                        var prev_slot = i - 1;
+                        if (prev_slot < 0) { prev_slot = remaining - 1; }
+                        var next_slot = i;
+                        if (next_slot >= remaining) { next_slot = 0; }
+                        store64(blocked + vec_get(idx, prev_slot) * 8,
+                          1 - _col_ring_is_convex(vertices, idx, remaining, prev_slot, ccw));
+                        store64(blocked + vec_get(idx, next_slot) * 8,
+                          1 - _col_ring_is_convex(vertices, idx, remaining, next_slot, ccw));
                     }
                     break;
                 }
