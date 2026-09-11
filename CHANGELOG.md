@@ -2,6 +2,30 @@
 
 ## [Unreleased]
 
+### Changed
+- **geo_advanced** — `_cga_geo_blades` now returns **two term slots** instead of one, and all five call
+  sites accumulate both. **Output is bit-identical**: a folded checksum over 300 random multivector
+  pairs through every product, contraction, sandwich, dual, reverse and norm, plus 60 magnitudes of
+  every constructor, reads `ff49e7071c7f4fc` before and after.
+  ⚠ **And the checksum was shown to detect a change before being trusted** — moving the metric from
+  `em` to `ep` gives `24f3bb7be87992d4`, corrupting the blade mask gives `b817903c0089f0cf`.
+  ⚠ **The new slot was shown to be live, not dead code that merely compiles**: populating slot 1 with a
+  synthetic second term moves the checksum to `bdf2efa0662f3b30` and removing it restores exactly. A
+  widening whose new path is never taken would have passed every test here.
+  ⚠ **This costs something and the figure is measured, not waved past**: iterating the second slot
+  unconditionally is **+4.5% on a dense product and +7.9% on `point*point`**; guarding it on
+  `sign1 != 0` brings that to **+3.1% and +6.4%** against the one-term original, three runs each with
+  <1% spread. ⚠ The *sparser* operand pays **more**, because loop overhead is a larger share of the work
+  when fewer pairs reach the arithmetic — the opposite of the intuition that sparse inputs are cheap.
+  There is no CGA row in the 74 tracked benchmarks, so this was measured directly rather than read off
+  the trend table.
+  ⚠ `_cga_scalar_of_geo` selects its scalar term by **blade == 0** rather than slot position, so it
+  keeps picking the right one once a product can return two. Its **diagonal-only loop is left alone on
+  purpose**: in an orthonormal basis the scalar part of `a*b` comes only from pairs (i, i), but in the
+  null basis `n0*ninf` has one too, so that loop must widen when the basis flips — and widening it now
+  would add pairs whose scalar part is zero and change nothing but the rounding order of a compensated
+  sum.
+
 ### Added
 - **scripts/derive-cga-null-table.sh** + a CI gate — 2.21.0's basis change rests on claims about the
   null-basis product table, and this **derives all of them from first principles** rather than asserting

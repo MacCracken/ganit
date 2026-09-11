@@ -7621,10 +7621,21 @@ fn _cga_geo_blades(a, b) {
     var result_bits = (bits_a ^ bits_b) & 31;
     var result_blade = _cga_bits_blade(result_bits);
 
-    # Pack: sign in high word, blade in low
-    var packed = alloc(16);
+    # ⭐ 2.21.0 — TWO TERM SLOTS, NOT ONE. In the orthonormal basis a basis-blade
+    # product is always a single blade, so slot 1 is always empty here. The NULL
+    # basis {e1,e2,e3,n0,ninf} is the reason the slot exists: `n0*ninf` is
+    # `n0·ninf + n0∧ninf` = a scalar AND a bivector, so a product can yield two
+    # blades. Derived over all 1024 pairs by `scripts/derive-cga-null-table.sh`:
+    # 128 vanish, 768 give one blade, 128 give two, and **at most two**, with every
+    # coefficient exactly ±1 — so widening to two slots is sufficient and the
+    # product still adds no rounding of its own.
+    # ⚠ `sign == 0` means the slot is EMPTY; every caller must treat it that way.
+    # Layout: [0] sign0, [8] blade0, [16] sign1, [24] blade1.
+    var packed = alloc(32);
     store64(packed, sign);
     store64(packed + 8, result_blade);
+    store64(packed + 16, 0);
+    store64(packed + 24, 0);
     return packed;
 }
 
@@ -7716,13 +7727,29 @@ fn cga_geometric_product(a, b) {
                 var bj = load64(b + gj * 8);
                 if (f64_eq(bj, f64_from(0)) == 0) {
                     var packed = _cga_geo_blades(gi, gj);
-                    var sign = load64(packed);
-                    var blade = load64(packed + 8);
-                    if (sign != 0) {
-                        var contrib = f64_mul(ai, bj);
-                        if (sign < 0) { contrib = f64_neg(contrib); }
-                        var cur = load64(r + blade * 8);
-                        store64(r + blade * 8, f64_add(cur, contrib));
+                    # Both term slots; slot 1 is empty in the orthonormal basis.
+                    # ⚠ `nt` rather than a fixed 2: slot 1 is empty for 896 of the
+                    # 1024 basis-blade pairs, and always empty while the basis is
+                    # orthonormal. Iterating it unconditionally costs **+4.5% dense
+                    # and +7.9% on point*point**; guarding it brings that to **+3.1%
+                    # and +6.4%** against the one-term original. ⚠ The SPARSER
+                    # operand pays MORE, because the loop overhead is a larger share
+                    # of the work when fewer pairs reach the arithmetic — which is
+                    # the opposite of the intuition that sparse inputs are cheap.
+                    # ⚠ The residual is the price of the basis change, not free: it
+                    # buys exact nullity, and it is paid on every product.
+                    # [measured: 2000 dense + 2000 point*point products, best of 5, 3 runs, spread <1%]
+                    var nt = 1;
+                    if (load64(packed + 16) != 0) { nt = 2; }
+                    for (var ti = 0; ti < nt; ti = ti + 1) {
+                        var sign = load64(packed + ti * 16);
+                        var blade = load64(packed + ti * 16 + 8);
+                        if (sign != 0) {
+                            var contrib = f64_mul(ai, bj);
+                            if (sign < 0) { contrib = f64_neg(contrib); }
+                            var cur = load64(r + blade * 8);
+                            store64(r + blade * 8, f64_add(cur, contrib));
+                        }
                     }
                 }
             }
@@ -7742,14 +7769,30 @@ fn cga_outer_product(a, b) {
                 if (f64_eq(bj, f64_from(0)) == 0) {
                     var grade_sum = _cga_blade_grade(gi) + _cga_blade_grade(gj);
                     var packed = _cga_geo_blades(gi, gj);
-                    var sign = load64(packed);
-                    var blade = load64(packed + 8);
-                    if (sign != 0) {
-                        if (_cga_blade_grade(blade) == grade_sum) {
-                            var contrib = f64_mul(ai, bj);
-                            if (sign < 0) { contrib = f64_neg(contrib); }
-                            var cur = load64(r + blade * 8);
-                            store64(r + blade * 8, f64_add(cur, contrib));
+                    # Both term slots; slot 1 is empty in the orthonormal basis.
+                    # ⚠ `nt` rather than a fixed 2: slot 1 is empty for 896 of the
+                    # 1024 basis-blade pairs, and always empty while the basis is
+                    # orthonormal. Iterating it unconditionally costs **+4.5% dense
+                    # and +7.9% on point*point**; guarding it brings that to **+3.1%
+                    # and +6.4%** against the one-term original. ⚠ The SPARSER
+                    # operand pays MORE, because the loop overhead is a larger share
+                    # of the work when fewer pairs reach the arithmetic — which is
+                    # the opposite of the intuition that sparse inputs are cheap.
+                    # ⚠ The residual is the price of the basis change, not free: it
+                    # buys exact nullity, and it is paid on every product.
+                    # [measured: 2000 dense + 2000 point*point products, best of 5, 3 runs, spread <1%]
+                    var nt = 1;
+                    if (load64(packed + 16) != 0) { nt = 2; }
+                    for (var ti = 0; ti < nt; ti = ti + 1) {
+                        var sign = load64(packed + ti * 16);
+                        var blade = load64(packed + ti * 16 + 8);
+                        if (sign != 0) {
+                            if (_cga_blade_grade(blade) == grade_sum) {
+                                var contrib = f64_mul(ai, bj);
+                                if (sign < 0) { contrib = f64_neg(contrib); }
+                                var cur = load64(r + blade * 8);
+                                store64(r + blade * 8, f64_add(cur, contrib));
+                            }
                         }
                     }
                 }
@@ -7773,14 +7816,30 @@ fn cga_left_contraction(a, b) {
                 if (f64_eq(bj, f64_from(0)) == 0) {
                     var target = _cga_blade_grade(gj) - _cga_blade_grade(gi);
                     var packed = _cga_geo_blades(gi, gj);
-                    var sign = load64(packed);
-                    var blade = load64(packed + 8);
-                    if (sign != 0) {
-                        if (_cga_blade_grade(blade) == target) {
-                            var contrib = f64_mul(ai, bj);
-                            if (sign < 0) { contrib = f64_neg(contrib); }
-                            var cur = load64(r + blade * 8);
-                            store64(r + blade * 8, f64_add(cur, contrib));
+                    # Both term slots; slot 1 is empty in the orthonormal basis.
+                    # ⚠ `nt` rather than a fixed 2: slot 1 is empty for 896 of the
+                    # 1024 basis-blade pairs, and always empty while the basis is
+                    # orthonormal. Iterating it unconditionally costs **+4.5% dense
+                    # and +7.9% on point*point**; guarding it brings that to **+3.1%
+                    # and +6.4%** against the one-term original. ⚠ The SPARSER
+                    # operand pays MORE, because the loop overhead is a larger share
+                    # of the work when fewer pairs reach the arithmetic — which is
+                    # the opposite of the intuition that sparse inputs are cheap.
+                    # ⚠ The residual is the price of the basis change, not free: it
+                    # buys exact nullity, and it is paid on every product.
+                    # [measured: 2000 dense + 2000 point*point products, best of 5, 3 runs, spread <1%]
+                    var nt = 1;
+                    if (load64(packed + 16) != 0) { nt = 2; }
+                    for (var ti = 0; ti < nt; ti = ti + 1) {
+                        var sign = load64(packed + ti * 16);
+                        var blade = load64(packed + ti * 16 + 8);
+                        if (sign != 0) {
+                            if (_cga_blade_grade(blade) == target) {
+                                var contrib = f64_mul(ai, bj);
+                                if (sign < 0) { contrib = f64_neg(contrib); }
+                                var cur = load64(r + blade * 8);
+                                store64(r + blade * 8, f64_add(cur, contrib));
+                            }
                         }
                     }
                 }
@@ -7803,14 +7862,30 @@ fn cga_right_contraction(a, b) {
                 if (f64_eq(bj, f64_from(0)) == 0) {
                     var target = _cga_blade_grade(gi) - _cga_blade_grade(gj);
                     var packed = _cga_geo_blades(gi, gj);
-                    var sign = load64(packed);
-                    var blade = load64(packed + 8);
-                    if (sign != 0) {
-                        if (_cga_blade_grade(blade) == target) {
-                            var contrib = f64_mul(ai, bj);
-                            if (sign < 0) { contrib = f64_neg(contrib); }
-                            var cur = load64(r + blade * 8);
-                            store64(r + blade * 8, f64_add(cur, contrib));
+                    # Both term slots; slot 1 is empty in the orthonormal basis.
+                    # ⚠ `nt` rather than a fixed 2: slot 1 is empty for 896 of the
+                    # 1024 basis-blade pairs, and always empty while the basis is
+                    # orthonormal. Iterating it unconditionally costs **+4.5% dense
+                    # and +7.9% on point*point**; guarding it brings that to **+3.1%
+                    # and +6.4%** against the one-term original. ⚠ The SPARSER
+                    # operand pays MORE, because the loop overhead is a larger share
+                    # of the work when fewer pairs reach the arithmetic — which is
+                    # the opposite of the intuition that sparse inputs are cheap.
+                    # ⚠ The residual is the price of the basis change, not free: it
+                    # buys exact nullity, and it is paid on every product.
+                    # [measured: 2000 dense + 2000 point*point products, best of 5, 3 runs, spread <1%]
+                    var nt = 1;
+                    if (load64(packed + 16) != 0) { nt = 2; }
+                    for (var ti = 0; ti < nt; ti = ti + 1) {
+                        var sign = load64(packed + ti * 16);
+                        var blade = load64(packed + ti * 16 + 8);
+                        if (sign != 0) {
+                            if (_cga_blade_grade(blade) == target) {
+                                var contrib = f64_mul(ai, bj);
+                                if (sign < 0) { contrib = f64_neg(contrib); }
+                                var cur = load64(r + blade * 8);
+                                store64(r + blade * 8, f64_add(cur, contrib));
+                            }
                         }
                     }
                 }
@@ -7852,12 +7927,27 @@ fn cga_scalar_part(mv) { return load64(mv); }
 # and keeps the correction in a separate accumulator to the end, which is exactly
 # the case that arises here.
 # [measured: 2041-binade translator and 1101-binade point sweeps, 2026-09-10]
+# ⚠ 2.21.0 — THIS SUMS THE DIAGONAL ONLY, AND THAT IS BASIS-DEPENDENT. In an
+# ORTHONORMAL basis the scalar part of `a*b` comes only from pairs (i, i), which is
+# why this loops over one index. In the NULL basis it does NOT: `n0*ninf` has a
+# scalar part, so the off-diagonal pair (n0, ninf) contributes too and this loop
+# must widen to both indices when the basis flips. The term-slot plumbing below is
+# in place for that; the WIDENING is deliberately not done here, because doing it
+# while the basis is still orthonormal would add pairs whose scalar part is zero
+# and change nothing except the rounding order of a compensated sum.
+# ⚠ The scalar term is selected by BLADE == 0 rather than by slot position, so it
+# keeps picking the right term once a product can return two.
 fn _cga_scalar_of_geo(a, b) {
     var sum = f64_from(0);
     var comp = f64_from(0);
     for (var si = 0; si < 32; si = si + 1) {
         var packed = _cga_geo_blades(si, si);
-        var sign = load64(packed);
+        var sign = 0;
+        for (var ti = 0; ti < 2; ti = ti + 1) {
+            if (load64(packed + ti * 16) != 0) {
+                if (load64(packed + ti * 16 + 8) == 0) { sign = load64(packed + ti * 16); }
+            }
+        }
         if (sign != 0) {
             var contrib = f64_mul(load64(a + si * 8), load64(b + si * 8));
             if (sign < 0) { contrib = f64_neg(contrib); }
