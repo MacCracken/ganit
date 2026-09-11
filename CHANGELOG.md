@@ -2,6 +2,36 @@
 
 ## [Unreleased]
 
+### Changed
+- **error** — the 12 `HSB_ERR_*` codes are an `enum HsbError`, not 12 `var` globals. Names and values
+  are identical, so every reference is unchanged — **567 on non-comment lines** across `src/` (182)
+  and `tests/` (385), 738 counting comments. ⚠ The roadmap row scoping this said 562; that figure is
+  not re-used here, it is re-counted, because a number carried forward rather than measured is how
+  this project has been wrong before. All twelve values were re-read through a probe and compared
+  against the old `(0 - N)` forms — **0 mismatches**.
+- **CLAUDE.md** — the "enums for constants" principle **named the wrong mechanism** and is corrected.
+  It said "zero `gvar_toks` cost vs. `var` globals"; measured with `CYRIUS_STATS=1` over the bundle,
+  `var_table` is **615 on both sides** — cycc's own diagnostic counts "globals+enums+arrays", so an
+  enum member occupies an entry exactly as a global does. The saving is relocations, not table slots:
+  `fixup_table` **3092 → 2933 (−159)**, `code_size` **748,024 → 747,320 B (−704)** across 170
+  reference sites. Right rule, wrong reason.
+
+### Added
+- **tests/hisab.tcyr** — 15 assertions pinning each error code's exact **value** and all **66 pairs**
+  for distinctness, plus that every failure code is negative. Written because a mutation sweep found
+  the suite could not see a wrong one: `HSB_ERR_SINGULAR_MATRIX -2 → -22` **survived all 3940
+  assertions**, and so did `HSB_ERR_ALLOC -11 → -1`, which makes ALLOC collide with
+  `HSB_ERR_INVALID_TRANSFORM` — two distinct failures under one code. Every existing assertion
+  compares a return against a code *by name*, so both sides move together and the value cancels out.
+  6 mutants now installed, 6 killed. Suites **3940 → 3955**.
+- **CI** — a `Duplicate global/enum symbols` gate. The conversion's stated safety benefit was real but
+  **wired to nothing**: a duplicate `var` global is completely silent (last definition wins, the wrong
+  value ships), while a duplicate enum member does warn at file:line — but `cyrius check --with-deps`
+  prints that warning and still **exits 0**, and `cyrius lint` never emits it, so CI's `^  warn ` grep
+  matched zero times. Verified end to end by adding a real second `HSB_ERR_ALLOC = -3`: consumer-build
+  exit 0, lint clean, only the new test block failed. The gate is verified to fire and to recover.
+
+
 ## [2.18.0] - 2026-09-10 — the SVD factors, and the release that began by correcting the last one
 
 2.15.0 filed `‖A − U S Vt‖_F` as **"open-ended: a known defect with no known fix"** and it stood on the

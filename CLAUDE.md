@@ -144,7 +144,14 @@ VERSION              — single source of truth for version
 - **Manual struct layout** when needed — `alloc()` + `load64`/`store64` with named offset constants
 - **Bump allocator** for long-lived data; **freelist** for individually-lifecycled data
 - **str_builder** for formatting — avoid temporary allocations
-- **Enums for constants** — zero `gvar_toks` cost vs. `var` globals
+- **Enums for constants** — an enum member is an immediate folded at compile time; a `var`
+  global is a memory load needing a **relocation per reference**. ⚠ The old wording here said
+  "zero `gvar_toks` cost vs. `var` globals" and **named the wrong mechanism** — 2.19.0 converted
+  the 12 `HSB_ERR_*` codes and measured `var_table` at **615 on both sides** (cycc's own
+  diagnostic counts "globals+enums+arrays", so an enum member occupies an entry exactly as a
+  global does). The real saving is `fixup_table` **3092 → 2933** and `code_size`
+  **748,024 → 747,320 B** over 170 reference sites. Right rule, wrong reason — check it with
+  `CYRIUS_STATS=1 cyrius check --with-deps dist/hisab.cyr`
 - **Source files only need project includes** — stdlib + first-party deps auto-resolve from `cyrius.cyml`
 - **Every buffer is a contract**: `var buf[N]` = N bytes
 - **Programs call `main()` at top level**: `var exit_code = main(); sys_exit_group(exit_code);`

@@ -3814,6 +3814,77 @@ assert_neq(eigen_qr(_NN_A, 2, 200, _NN_vals, _NN_vecs), HSB_ERR_NONE,
 #     `e2/denom` can overflow, and the two-step product stops being bounded. The
 #     guard and the sign are one change, not two.
 
+# ================================================================
+# 2.19.0 -- THE ERROR CODES' IDENTITY AND DISTINCTNESS
+# ================================================================
+# ⛔ WRITTEN BECAUSE TWO MUTANTS WOULD NOT DIE. 2.19.0 converted the twelve
+# `HSB_ERR_*` codes from `var` globals to an enum, which meant re-typing twelve
+# values by hand -- and a mutation sweep over the new block found the suite
+# could not see a wrong one. `HSB_ERR_SINGULAR_MATRIX = -2 -> -22` SURVIVED all
+# 3940 assertions, and so did `HSB_ERR_ALLOC = -11 -> -1`, which makes ALLOC
+# **collide with HSB_ERR_INVALID_TRANSFORM** -- two distinct failures reported
+# under one code, indistinguishable to any caller.
+# ⭐ The reason is structural, not an oversight in any one test: every existing
+# assertion compares a return against a code BY NAME, so both sides of the
+# comparison move together and the value cancels out. A test that pins the value
+# has to name the NUMBER, and distinctness has to be checked pairwise.
+# [measured: 4-mutant sweep on src/error.cyr, 2 killed / 2 survived, 2026-09-10]
+
+assert_eq(HSB_ERR_NONE, 0, "HSB_ERR_NONE is 0");
+assert_eq(HSB_ERR_INVALID_TRANSFORM, 0 - 1, "HSB_ERR_INVALID_TRANSFORM is -1");
+assert_eq(HSB_ERR_SINGULAR_MATRIX, 0 - 2, "HSB_ERR_SINGULAR_MATRIX is -2");
+assert_eq(HSB_ERR_OUT_OF_RANGE, 0 - 3, "HSB_ERR_OUT_OF_RANGE is -3");
+assert_eq(HSB_ERR_DIVISION_BY_ZERO, 0 - 4, "HSB_ERR_DIVISION_BY_ZERO is -4");
+assert_eq(HSB_ERR_DEGENERATE, 0 - 5, "HSB_ERR_DEGENERATE is -5");
+assert_eq(HSB_ERR_INVALID_INTERVAL, 0 - 6, "HSB_ERR_INVALID_INTERVAL is -6");
+assert_eq(HSB_ERR_ZERO_STEPS, 0 - 7, "HSB_ERR_ZERO_STEPS is -7");
+assert_eq(HSB_ERR_NO_CONVERGENCE, 0 - 8, "HSB_ERR_NO_CONVERGENCE is -8");
+assert_eq(HSB_ERR_SINGULAR_PIVOT, 0 - 9, "HSB_ERR_SINGULAR_PIVOT is -9");
+assert_eq(HSB_ERR_INVALID_INPUT, 0 - 10, "HSB_ERR_INVALID_INPUT is -10");
+assert_eq(HSB_ERR_ALLOC, 0 - 11, "HSB_ERR_ALLOC is -11");
+
+# Pairwise distinctness -- 66 pairs. ⚠ The identity block above already implies
+# this, but it is asserted SEPARATELY and by a different mechanism: the identity
+# assertions are twelve independent literals, so a future code added to the enum
+# is covered by this loop the moment it is appended to the array, whether or not
+# anyone remembers to write its literal.
+var _ec_n = 12;
+var _ec = alloc(_ec_n * 8);
+store64(_ec + 0, HSB_ERR_NONE);
+store64(_ec + 8, HSB_ERR_INVALID_TRANSFORM);
+store64(_ec + 16, HSB_ERR_SINGULAR_MATRIX);
+store64(_ec + 24, HSB_ERR_OUT_OF_RANGE);
+store64(_ec + 32, HSB_ERR_DIVISION_BY_ZERO);
+store64(_ec + 40, HSB_ERR_DEGENERATE);
+store64(_ec + 48, HSB_ERR_INVALID_INTERVAL);
+store64(_ec + 56, HSB_ERR_ZERO_STEPS);
+store64(_ec + 64, HSB_ERR_NO_CONVERGENCE);
+store64(_ec + 72, HSB_ERR_SINGULAR_PIVOT);
+store64(_ec + 80, HSB_ERR_INVALID_INPUT);
+store64(_ec + 88, HSB_ERR_ALLOC);
+
+var _ec_dup = 0;
+var _ec_pairs = 0;
+var _ec_nonneg = 0;
+for (var _eci = 0; _eci < _ec_n; _eci = _eci + 1) {
+    var _ecvi = load64(_ec + _eci * 8);
+    # Every failure code is NEGATIVE and success is the only non-negative value:
+    # callers test `rc != HSB_ERR_NONE`, but several test `rc < 0`, so the sign
+    # is load-bearing beyond the name.
+    if (_eci > 0) {
+        if (_ecvi >= 0) { _ec_nonneg = _ec_nonneg + 1; }
+    }
+    for (var _ecj = _eci + 1; _ecj < _ec_n; _ecj = _ecj + 1) {
+        _ec_pairs = _ec_pairs + 1;
+        if (_ecvi == load64(_ec + _ecj * 8)) { _ec_dup = _ec_dup + 1; }
+    }
+}
+# ⚠ The pair COUNT is asserted too. A loop that silently ran zero times would
+# report zero duplicates, which reads exactly like success.
+assert_eq(_ec_pairs, 66, "error-code distinctness: all 66 pairs compared");
+assert_eq(_ec_dup, 0, "error codes are pairwise distinct (no two share a value)");
+assert_eq(_ec_nonneg, 0, "every failure code is negative; only HSB_ERR_NONE is not");
+
 var r = assert_summary();
 # Clamp before exiting: assert_summary() returns the raw failure COUNT, and a wait
 # status is only 8 bits — an unclamped 256 / 512 / 768 failures would exit 0 and

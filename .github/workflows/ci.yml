@@ -217,6 +217,30 @@ jobs:
           done
           [ $fail -eq 0 ] || { echo "must_use: discarded results present"; exit 1; }
 
+      - name: Duplicate global/enum symbols
+        # ⛔ ADDED 2.19.0, AND THE MEASUREMENT IS THE WHOLE REASON IT EXISTS.
+        # Converting the 12 `HSB_ERR_*` codes to an enum was justified on the roadmap
+        # by "it moves them from a form cycc is SILENT about into one it DIAGNOSES by
+        # file:line". Both halves are true and measured:
+        #   duplicate `var` global   -> no diagnostic at all, last definition ships
+        #   duplicate enum member    -> warning:<source>:57:35: duplicate symbol
+        #                               'HSB_ERR_ALLOC' redefined with conflicting value
+        # ⚠ BUT THE DIAGNOSIS ALONE FAILS NOTHING. `cyrius check --with-deps` prints
+        # that warning and still **exits 0**, and `cyrius lint` does not emit it at all,
+        # so the `^  warn ` grep two steps up matches zero times. Verified end to end by
+        # adding a second `HSB_ERR_ALLOC = -3` to src/error.cyr: consumer-build exit 0,
+        # lint clean, and only `tests/hisab.tcyr`'s distinctness block failed. Without
+        # this step the conversion's stated safety benefit would not have been wired to
+        # anything.
+        run: |
+          out=$(cyrius check --with-deps dist/hisab.cyr 2>&1)
+          if echo "$out" | grep -q 'duplicate symbol'; then
+            echo "$out" | grep 'duplicate symbol'
+            echo "::error file=dist/hisab.cyr::a global or enum symbol is defined twice"
+            echo "duplicate symbols present (last definition wins - the wrong value ships)"
+            exit 1
+          fi
+
       - name: Build
         run: |
           mkdir -p build

@@ -5,21 +5,49 @@
 # Functions return 0 on success or a negative error code on failure.
 # Pair with tagged.cyr for Result-like patterns.
 
-var HSB_ERR_NONE             = 0;
-var HSB_ERR_INVALID_TRANSFORM = (0 - 1);
-var HSB_ERR_SINGULAR_MATRIX  = (0 - 2);
-var HSB_ERR_OUT_OF_RANGE     = (0 - 3);
-var HSB_ERR_DIVISION_BY_ZERO = (0 - 4);
-var HSB_ERR_DEGENERATE       = (0 - 5);
-var HSB_ERR_INVALID_INTERVAL = (0 - 6);
-var HSB_ERR_ZERO_STEPS       = (0 - 7);
-var HSB_ERR_NO_CONVERGENCE   = (0 - 8);
-var HSB_ERR_SINGULAR_PIVOT   = (0 - 9);
-var HSB_ERR_INVALID_INPUT    = (0 - 10);
-# Allocation failed, or a request was rejected by a dimension cap before it could
-# overflow. Added 2.6.14: solvers that size a working buffer from caller-supplied
-# dimensions previously stored through alloc's null return instead of reporting.
-var HSB_ERR_ALLOC            = (0 - 11);
+# ⭐ 2.19.0 — AN ENUM, NOT TWELVE `var` GLOBALS. Call sites are unchanged: the
+# names and the values are identical, so nothing outside this block moves (all
+# twelve values re-read through a probe and compared against the old `(0 - N)`
+# forms — 0 mismatches).
+# ⚠ THE PROJECT RULE THAT MOTIVATED THIS NAMES THE WRONG MECHANISM, and
+# measuring the conversion is what showed it. CLAUDE.md says "enums for constants
+# — zero `gvar_toks` cost vs. var globals"; the saving is NOT in the variable
+# table. `CYRIUS_STATS=1` over the whole bundle reads **var_table: 615 on BOTH
+# sides**, and cycc's own diagnostic says that table counts
+# "too many globals+enums+arrays" — an enum member occupies an entry exactly as a
+# global does. What actually moves is RELOCATIONS: a `var` global is a memory
+# load needing a fixup per reference, an enum member is an immediate folded at
+# compile time. Measured: **fixup_table 3092 → 2933 (−159)** and
+# **code_size 748,024 → 747,320 B (−704)** across the 170 non-comment reference
+# sites in the bundle — ~94% of sites losing a fixup, at ~4.4 code bytes each.
+# The rule is right and the reason written beside it was not.
+# [measured: CYRIUS_STATS=1 cyrius check --with-deps dist/hisab.cyr, both trees,
+#  2026-09-10]
+# ⚠ THE VALUES HAD TO BECOME LITERALS. Each was written `(0 - N)` because that is
+# what a `var` initialiser accepts; an enum member takes a NUMBER, not an
+# expression — `E = (0 - 1)` is `expected number, got '('`. Measured on 6.6.2:
+# a literal `-1` in a NAMED enum compiles and compares equal to `(0 - 1)`, while
+# an ANONYMOUS `enum { ... }` is `expected identifier, got '{'`. Both facts are
+# why this could not simply be a search-and-replace.
+# [measured: three-way probe on cycc 6.6.2, 2026-09-10]
+enum HsbError {
+    HSB_ERR_NONE              = 0;
+    HSB_ERR_INVALID_TRANSFORM = -1;
+    HSB_ERR_SINGULAR_MATRIX   = -2;
+    HSB_ERR_OUT_OF_RANGE      = -3;
+    HSB_ERR_DIVISION_BY_ZERO  = -4;
+    HSB_ERR_DEGENERATE        = -5;
+    HSB_ERR_INVALID_INTERVAL  = -6;
+    HSB_ERR_ZERO_STEPS        = -7;
+    HSB_ERR_NO_CONVERGENCE    = -8;
+    HSB_ERR_SINGULAR_PIVOT    = -9;
+    HSB_ERR_INVALID_INPUT     = -10;
+    # Allocation failed, or a request was rejected by a dimension cap before it
+    # could overflow. Added 2.6.14: solvers that size a working buffer from
+    # caller-supplied dimensions previously stored through alloc's null return
+    # instead of reporting.
+    HSB_ERR_ALLOC             = -11;
+}
 
 # Tolerances
 var EPSILON_F32 = 0x33D6BF95;               # 1e-7 as f32 bits (unused -- all math is f64)
