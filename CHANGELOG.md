@@ -2,6 +2,39 @@
 
 ## [Unreleased]
 
+### Fixed
+- **CI** — the `Discarded #must_use results` step was **red from the commit that added it** (2.19.0's
+  `#must_use` bite) and stayed red through the 2.19.0 tag, failing with **no output whatsoever**: no grep
+  hit, no `::error`, no summary line. Two independent bugs, both measured:
+  - `cyrius check <file>` **without** `--with-deps` parses standalone with no manifest deps in scope, so
+    `examples/basic_math.cyr` — which includes `src/` modules reading the stdlib global `F64_ONE` —
+    failed with `undefined variable 'F64_ONE'`. GitHub Actions runs `bash -e`, so the `out=$(...)`
+    **assignment inherited that non-zero status and aborted the step** before a line of its own logic
+    ran. `--with-deps` compiles the example the way a user does and **still detects a planted discard**
+    (`warning:<source>:74:26: #must_use result of 'calc_integral_simpson' is discarded`) — verified, not
+    assumed, because swapping a hard failure for a vacuous pass would have been the worse bug.
+  - The step **name was unquoted**, so YAML read ` #must_use results` as a comment and the step appeared
+    in the UI as plain `Discarded`.
+  ⛔ **The gate was only ever proven on one of its two arms.** 2.19.0 verified it by planting a discard
+  in `src/ode.cyr`, which reaches it through the bundle; the `examples/` arm was never exercised and the
+  YAML was never executed under `bash -e`. **Proving that a gate fires is not the same as running it the
+  way CI runs it.** All four arms are now verified — clean 0, example discard 1, bundle discard 1
+  (`src/num_ext.cyr`, caught at `dist/hisab.cyr:15048`), restored 0 — and all 24 `run:` steps in
+  `ci.yml` plus all 12 in `release.yml` were executed locally under `bash -e`: **21 of 24 and 12 of 12
+  green**, the only failures being two that need the Actions environment (the toolchain installer and
+  `${{ github.base_ref }}`).
+- **CI** — the `Duplicate global/enum symbols` step carried the identical unguarded-assignment shape and
+  would have aborted just as silently had the bundle ever failed to compile. Both steps now capture the
+  exit code and **report a compile failure with its output** instead of vanishing.
+  ⚠ `release.yml` audited for both bugs and is clean; the 2.19.0 tag's release run was unaffected.
+- **CI / release** — the Fuzz step built every harness to `build/$name`, and `tests/hisab.fcyr` yields
+  the name `hisab`, so it **overwrote `build/hisab`** — the CLI binary the ELF and printed-version gates
+  check. Harmless today only because those three steps run before Fuzz; a reorder, or any later step
+  reading `build/hisab`, would have silently inspected the fuzz harness. Now `build/fuzz-$name`, in both
+  workflows. Found while repairing the step above, not by anything failing.
+  ⚠ No library source, `dist/hisab.cyr`, or consumer-visible behaviour changes here.
+
+
 ## [2.19.0] - 2026-09-10 — the 3.0.0 prep, and five gates that could not fail
 
 The roadmap scoped this as non-breaking groundwork for `Result<T,E>`: `#must_use` on the fallible

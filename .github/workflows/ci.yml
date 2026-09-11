@@ -185,7 +185,7 @@ jobs:
         # it alone and pretending every undefined symbol is expected.
         run: cyrius check --with-deps dist/hisab.cyr
 
-      - name: Discarded #must_use results
+      - name: "Discarded #must_use results"
         # ⛔ THE LINT GATE ABOVE CANNOT SEE THIS AND THAT IS MEASURED, NOT ASSUMED.
         # `#must_use` is a COMPILER diagnostic, not a cyrlint one: a file whose
         # result is discarded gives `cyrius lint` "0 warnings" and matches the
@@ -200,14 +200,41 @@ jobs:
         # example is copied more often than it is read. `tests/` is NOT: calling a
         # fallible function and asserting on its out-parameter is a legitimate
         # testing idiom, and 67 sites there do exactly that.
+        #
+        # ⛔ THIS STEP WAS RED FROM THE COMMIT THAT ADDED IT (2.19.0 bite two) UNTIL
+        # 2.19.0 SHIPPED, AND IT FAILED WITH NO OUTPUT AT ALL. Two independent bugs,
+        # both measured:
+        #   (a) `cyrius check <file>` WITHOUT `--with-deps` parses the file standalone
+        #       with no manifest deps in scope, so `examples/basic_math.cyr` — which
+        #       includes src/ modules that read the stdlib global `F64_ONE` — fails
+        #       with `undefined variable 'F64_ONE'`. Actions runs `bash -e`, so the
+        #       `out=$(...)` ASSIGNMENT inherited that non-zero status and aborted the
+        #       step before a single line of its own logic ran: no grep hit, no
+        #       `::error`, no summary. `--with-deps` compiles it the way a user does,
+        #       and still detects a planted discard
+        #       (`warning:<source>:74:26: #must_use result of 'calc_integral_simpson'
+        #       is discarded`) — verified, not assumed.
+        #   (b) The step NAME was unquoted, so YAML read ` #must_use results` as a
+        #       COMMENT and the step appeared in the UI as plain "Discarded".
+        # ⚠ The gate was only ever proven on the BUNDLE arm (a discard planted in
+        # src/ode.cyr); the examples arm was never exercised and the YAML was never
+        # run under `bash -e`. **Verifying that a gate fires is not the same as
+        # running it the way CI runs it.**
+        # A compile failure is now REPORTED with its output and fails the step, rather
+        # than aborting it silently — the failure mode that hid this for four commits.
         run: |
           fail=0
           for target in "dist/hisab.cyr" examples/*.cyr; do
             [ -f "$target" ] || continue
-            if [ "$target" = "dist/hisab.cyr" ]; then
-              out=$(cyrius check --with-deps "$target" 2>&1)
-            else
-              out=$(cyrius check "$target" 2>&1)
+            set +e
+            out=$(cyrius check --with-deps "$target" 2>&1)
+            rc=$?
+            set -e
+            if [ $rc -ne 0 ]; then
+              echo "$out"
+              echo "::error file=$target::cyrius check failed (exit $rc)"
+              fail=1
+              continue
             fi
             if echo "$out" | grep -q 'must_use'; then
               echo "$out" | grep 'must_use'
@@ -232,8 +259,20 @@ jobs:
         # lint clean, and only `tests/hisab.tcyr`'s distinctness block failed. Without
         # this step the conversion's stated safety benefit would not have been wired to
         # anything.
+        # ⚠ The exit code is captured rather than inherited: under `bash -e` an
+        # `out=$(...)` assignment aborts the step on a non-zero status with no output,
+        # which is exactly how the #must_use step above stayed red and silent for four
+        # commits.
         run: |
+          set +e
           out=$(cyrius check --with-deps dist/hisab.cyr 2>&1)
+          rc=$?
+          set -e
+          if [ $rc -ne 0 ]; then
+            echo "$out"
+            echo "::error file=dist/hisab.cyr::cyrius check failed (exit $rc)"
+            exit 1
+          fi
           if echo "$out" | grep -q 'duplicate symbol'; then
             echo "$out" | grep 'duplicate symbol'
             echo "::error file=dist/hisab.cyr::a global or enum symbol is defined twice"
@@ -307,8 +346,14 @@ jobs:
           for f in tests/*.fcyr; do
             [ -f "$f" ] || continue
             name=$(basename "$f" .fcyr)
-            cyrius build "$f" "build/$name"
-            timeout 10 "build/$name" || { echo "FUZZ CRASH: $name"; exit 1; }
+            # ⚠ `build/fuzz-$name`, not `build/$name`: tests/hisab.fcyr yields the
+            # name "hisab", so the old form OVERWROTE build/hisab — the CLI binary the
+            # ELF and printed-version gates check. Harmless only because those steps run
+            # before this one; a reorder, or any later step reading build/hisab, would
+            # silently inspect the fuzz harness instead. Found while repairing the
+            # #must_use step, not by anything failing.
+            cyrius build "$f" "build/fuzz-$name"
+            timeout 10 "build/fuzz-$name" || { echo "FUZZ CRASH: $name"; exit 1; }
             echo "  $name: ok"
           done
 

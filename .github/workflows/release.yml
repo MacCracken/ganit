@@ -99,8 +99,14 @@ jobs:
           for f in tests/*.fcyr; do
             [ -f "$f" ] || continue
             name=$(basename "$f" .fcyr)
-            cyrius build "$f" "build/$name"
-            timeout 10 "build/$name" || { echo "FUZZ CRASH: $name"; exit 1; }
+            # ⚠ `build/fuzz-$name`, not `build/$name`: tests/hisab.fcyr yields the
+            # name "hisab", so the old form OVERWROTE build/hisab — the CLI binary the
+            # ELF and printed-version gates check. Harmless only because those steps run
+            # before this one; a reorder, or any later step reading build/hisab, would
+            # silently inspect the fuzz harness instead. Found while repairing the
+            # #must_use step, not by anything failing.
+            cyrius build "$f" "build/fuzz-$name"
+            timeout 10 "build/fuzz-$name" || { echo "FUZZ CRASH: $name"; exit 1; }
           done
 
       - name: Clean toolchain artifacts
