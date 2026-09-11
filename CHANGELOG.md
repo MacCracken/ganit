@@ -2,6 +2,46 @@
 
 ## [Unreleased]
 
+### Changed
+- **geo_advanced — the CGA basis is now the NULL basis {e1,e2,e3,n0,ninf}.** Blade 4 is `n0` and 5 is
+  `ninf`; they were `ep` and `em`. **A conformal point is now exactly null at every magnitude.**
+  ⭐ **The repair was the basis, not the arithmetic.** 2.20.0 measured this as a wrong answer with *no
+  arithmetic fix available*: in the ep/em basis the coefficients are `(q−1)/2` and `(q+1)/2`, so `q` is
+  stored as the sum *and* difference of two nearly-equal numbers and is destroyed at both ends — at
+  x = 2^-30 the correctly-rounded `ep` **is** exactly −1/2. In the null basis `P = p + (q/2)·ninf + n0`,
+  `q` lives in **one** coefficient, and `P·P = q + 2·(q/2)·(n0·ninf) = q − q` cancels the *same computed
+  q* against itself — 0 by construction, not by tolerance.
+  - Nullity over 6800 random full-mantissa points spanning 2^-40..2^40: **1686 non-null (24.8%) → 0**.
+  - Distance recovery `P₁·P₂ = −d²/2`: **median 46.4× wrong at 2^-30 and 48.7× at 2^+30 → ~1.9e-15,
+    flat across the whole range.** Sixteen orders of magnitude at the tails, and scale-free rather than
+    a U centred on |x| ≈ 1.
+  - `cga_norm(cga_translator(t,0,0))` is now exactly 1 for **all 1001 binades tested**; it failed 526 of
+    them before, and 2.17.0 recorded it as failing from t = 2^28.
+  ⭐ **And it is FASTER, which I did not expect and therefore measured:** `point*point` **5306 → 2394 µs
+  (2.2×)** and `cga_norm_sq(point)` **5105 → 2457 µs (2.1×)**, because a table lookup replaces the
+  inline bit-manipulation product and the zero-skip means only a point's 5 occupied slots reach the
+  inner loop.
+- **geo_advanced** — `_cga_scalar_of_geo` sums **all pairs**, not the diagonal. In an orthonormal basis
+  the scalar part of `a*b` comes only from pairs (i, i); in the null basis `n0*ninf` has one too.
+  ⛔ With the basis flipped and this loop still diagonal-only, points were non-null for **6800 of
+  6800** — the `−q` that cancels `+q` lives exactly in the pair it was skipping.
+- **geo_advanced** — the Neumaier compensation in `_cga_scalar_of_geo` is **removed**, and that is the
+  opposite of a regression. 2.18.0 added it to mitigate *this same symptom* in the ep/em basis
+  (`cga_norm(cga_point(x,0,0))` wrong from x = 2^-27). The null basis fixes the cause, and the
+  compensation then **actively prevents** the fix: it makes the sum strictly more accurate than the `q`
+  stored in `ninf`, so the two stop cancelling. Measured both ways: **with** it, 5194 of 6800 non-null
+  and distance median 1.76e-15; **without**, **0 non-null** and 1.85e-15. Exact nullity costs ~5% on a
+  median already at ulp level. ⚠ I first tried making `cga_point`'s `q` compensated to match instead —
+  it moved 5194 → 4988 and changed no median at all, so it was reverted. **Unmeasured complexity is not
+  a fix.**
+
+### Fixed
+- **tests** — the two 2.20.0 acceptance pins have **inverted, exactly as designed**. They asserted the
+  failures at 2^-30 and 2^+30 as KNOWN WRONG so a repair could not land quietly; the basis change made
+  them correct and the suite failed until they were rewritten. **A pinned defect is a tripwire for its
+  own fix**, which is worth more than a comment saying the fix is pending. Suites **3988 → 3989**.
+
+
 ### Added
 - **geo_advanced** — the **null-basis product table**, built once at first use by **integer arithmetic
   only** (no f64 touches it, so it is exact by construction rather than by tolerance) via the change of

@@ -8133,18 +8133,22 @@ for (var _cn_e = 0 - 11; _cn_e <= 10; _cn_e = _cn_e + 1) {
 assert_eq(_cn_n, 22, "cga distance-recovery sweep: all 22 binades tested");
 assert_eq(_cn_ok, 22, "cga: P1.P2 = -d^2/2 holds to 1e-6 across 2^-11 .. 2^10");
 
-# ⛔ AND THE FAILURE IS PINNED, so a future repair has to announce itself rather
-# than quietly widening the band. At 2^-30 and at 2^+30 the recovered d^2 is
-# wrong by more than 2x. If either assertion fails, the basis changed and the
-# comment on `cga_point` needs rewriting.
+# ⭐ 2.21.0 — THE BASIS CHANGED AND THESE TWO ASSERTIONS INVERTED, EXACTLY AS
+# DESIGNED. 2.20.0 pinned the failures at 2^-30 and 2^+30 as KNOWN WRONG so that a
+# repair could not land quietly; the null basis made them correct and the suite
+# said so by failing until they were rewritten. **A pinned defect is a tripwire for
+# its own fix**, which is worth more than a comment saying the fix is pending.
 var _cn_lo_a = ((1023 - 30) << 52) | _cn_m1;
 var _cn_lo_b = ((1023 - 30) << 52) | _cn_m2;
 var _cn_lo_ip = _cga_scalar_of_geo(cga_point(_cn_lo_a, 0, 0), cga_point(_cn_lo_b, 0, 0));
 var _cn_lo_dd = f64_sub(_cn_lo_a, _cn_lo_b);
 var _cn_lo_t = f64_mul(_cn_lo_dd, _cn_lo_dd);
 var _cn_lo_rel = f64_abs(f64_div(f64_sub(f64_mul(f64_from(0 - 2), _cn_lo_ip), _cn_lo_t), _cn_lo_t));
-assert_eq(f64_gt(_cn_lo_rel, F64_ONE), 1,
-  "cga: at 2^-30 distance recovery is KNOWN WRONG (pinned, not accepted)");
+# ⭐ 2.21.0 — THIS PIN HAS INVERTED, WHICH IS THE POINT. It asserted a KNOWN WRONG
+# answer so that a repair would have to announce itself. The null basis is that
+# repair: recovery at 2^-30 is now ulp-level, not >2x wrong.
+assert_eq(f64_lt(_cn_lo_rel, _CN_TOL_1EM6), 1,
+  "cga: at 2^-30 distance recovery is now CORRECT (the 2.20.0 pin has inverted)");
 
 var _cn_hi_a = ((1023 + 30) << 52) | _cn_m1;
 var _cn_hi_b = ((1023 + 30) << 52) | _cn_m2;
@@ -8152,8 +8156,8 @@ var _cn_hi_ip = _cga_scalar_of_geo(cga_point(_cn_hi_a, 0, 0), cga_point(_cn_hi_b
 var _cn_hi_dd = f64_sub(_cn_hi_a, _cn_hi_b);
 var _cn_hi_t = f64_mul(_cn_hi_dd, _cn_hi_dd);
 var _cn_hi_rel = f64_abs(f64_div(f64_sub(f64_mul(f64_from(0 - 2), _cn_hi_ip), _cn_hi_t), _cn_hi_t));
-assert_eq(f64_gt(_cn_hi_rel, F64_ONE), 1,
-  "cga: at 2^+30 distance recovery is KNOWN WRONG too (BOTH tails, not just small)");
+assert_eq(f64_lt(_cn_hi_rel, _CN_TOL_1EM6), 1,
+  "cga: at 2^+30 distance recovery is now CORRECT too (both tails repaired)");
 
 # ================================================================
 # 2.21.0 -- THE NULL-BASIS PRODUCT TABLE MATCHES ITS DERIVATION

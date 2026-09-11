@@ -7788,48 +7788,33 @@ fn _cga_null_tbl() {
 # Returns sign * 256 + result_blade_index (packed).
 # Sign: 0 = zero, 1 = positive, 2 = negative (sign = 1 - (packed >> 8) * 2... etc)
 # Actually, let's return two values via a 16-byte struct: {sign_i32, blade_idx}
+# ⭐ 2.21.0 — THE BASIS IS NOW THE NULL BASIS {e1,e2,e3,n0,ninf}. Blade index 4 is
+# n0 and 5 is ninf; they were ep and em. This reads the table built by
+# `_cga_null_tbl()` rather than computing an orthonormal product inline, because
+# the null basis is NOT orthogonal — `n0*ninf` is a scalar AND a bivector, so no
+# bit-XOR rule can express it.
+# ⚠ The table is verified two ways: `scripts/derive-cga-null-table.sh` derives all
+# 1024 entries independently and `tests/modules.tcyr` asserts the Cyrius table
+# reproduces its FNV-1a exactly.
+# Layout, matching the packing in `_cga_build_null_tbl`:
+#   bits 0-1 sign0 (0 empty / 1 plus / 2 minus), 2-6 blade0,
+#   bits 7-8 sign1, 9-13 blade1.
+# ⚠ `sign == 0` means the slot is EMPTY; every caller must treat it that way.
 fn _cga_geo_blades(a, b) {
-    var bits_a = _cga_blade_bits(a);
-    var bits_b = _cga_blade_bits(b);
-
-    var sign = 1;
-    var bb = bits_b;
-
-    # Count sign from reordering: for each bit in a (high to low),
-    # count how many lower bits in b need to swap past it
-    for (var bi = 4; bi >= 0; bi = bi - 1) {
-        if ((bits_a & (1 << bi)) != 0) {
-            var mask = (1 << bi) - 1;
-            var count = _cga_popcount5(bb & mask);
-            if ((count & 1) != 0) { sign = 0 - sign; }
-
-            # If both have this basis vector, apply metric and remove
-            if ((bb & (1 << bi)) != 0) {
-                # em (bit 4) squares to -1, all others to +1
-                if (bi == 4) { sign = 0 - sign; }
-                bb = bb ^ (1 << bi);
-            }
-        }
-    }
-
-    var result_bits = (bits_a ^ bits_b) & 31;
-    var result_blade = _cga_bits_blade(result_bits);
-
-    # ⭐ 2.21.0 — TWO TERM SLOTS, NOT ONE. In the orthonormal basis a basis-blade
-    # product is always a single blade, so slot 1 is always empty here. The NULL
-    # basis {e1,e2,e3,n0,ninf} is the reason the slot exists: `n0*ninf` is
-    # `n0·ninf + n0∧ninf` = a scalar AND a bivector, so a product can yield two
-    # blades. Derived over all 1024 pairs by `scripts/derive-cga-null-table.sh`:
-    # 128 vanish, 768 give one blade, 128 give two, and **at most two**, with every
-    # coefficient exactly ±1 — so widening to two slots is sufficient and the
-    # product still adds no rounding of its own.
-    # ⚠ `sign == 0` means the slot is EMPTY; every caller must treat it that way.
-    # Layout: [0] sign0, [8] blade0, [16] sign1, [24] blade1.
+    var e = load64(_cga_null_tbl() + (a * 32 + b) * 8);
     var packed = alloc(32);
-    store64(packed, sign);
-    store64(packed + 8, result_blade);
-    store64(packed + 16, 0);
-    store64(packed + 24, 0);
+    var s0 = e & 3;
+    var s1 = (e >> 7) & 3;
+    var v0 = 0;
+    if (s0 == 1) { v0 = 1; }
+    if (s0 == 2) { v0 = 0 - 1; }
+    var v1 = 0;
+    if (s1 == 1) { v1 = 1; }
+    if (s1 == 2) { v1 = 0 - 1; }
+    store64(packed, v0);
+    store64(packed + 8, (e >> 2) & 31);
+    store64(packed + 16, v1);
+    store64(packed + 24, (e >> 9) & 31);
     return packed;
 }
 
@@ -8121,40 +8106,60 @@ fn cga_scalar_part(mv) { return load64(mv); }
 # and keeps the correction in a separate accumulator to the end, which is exactly
 # the case that arises here.
 # [measured: 2041-binade translator and 1101-binade point sweeps, 2026-09-10]
-# ⚠ 2.21.0 — THIS SUMS THE DIAGONAL ONLY, AND THAT IS BASIS-DEPENDENT. In an
-# ORTHONORMAL basis the scalar part of `a*b` comes only from pairs (i, i), which is
-# why this loops over one index. In the NULL basis it does NOT: `n0*ninf` has a
-# scalar part, so the off-diagonal pair (n0, ninf) contributes too and this loop
-# must widen to both indices when the basis flips. The term-slot plumbing below is
-# in place for that; the WIDENING is deliberately not done here, because doing it
-# while the basis is still orthonormal would add pairs whose scalar part is zero
-# and change nothing except the rounding order of a compensated sum.
-# ⚠ The scalar term is selected by BLADE == 0 rather than by slot position, so it
-# keeps picking the right term once a product can return two.
+# ⭐ 2.21.0 — SUMS ALL PAIRS, NOT THE DIAGONAL. In an ORTHONORMAL basis the scalar
+# part of `a*b` comes only from pairs (i, i), which is why this looped over one
+# index until now. In the NULL basis it does not: `n0*ninf` has a scalar part, so
+# the off-diagonal pairs (n0, ninf) and (ninf, n0) contribute and a diagonal-only
+# sum misses them entirely.
+# ⛔ THAT IS NOT A ROUNDING DETAIL — IT IS THE WHOLE ANSWER. With the basis flipped
+# and this loop still diagonal-only, `cga_norm_sq(cga_point(...))` was non-null for
+# **6800 of 6800** sampled points, because the `-q` that cancels `+q` lives exactly
+# in the pair this loop was skipping.
+# ⚠ The scalar term is selected by BLADE == 0 rather than slot position, since a
+# null-basis product can return two terms and either may be the scalar one.
+# ⛔ 2.21.0 — THE NEUMAIER COMPENSATION IS REMOVED, AND THAT IS THE OPPOSITE OF A
+# REGRESSION. 2.18.0 added it to mitigate exactly this symptom in the ep/em basis:
+# `cga_norm(cga_point(x,0,0))` wrong from x = 2^-27. The null basis fixes the
+# CAUSE, and the compensation then actively PREVENTS the fix: it makes this sum
+# strictly more accurate than the `q` stored in the ninf coefficient, so `+q` and
+# `-q` no longer cancel and the point stops being null.
+# ⭐ Measured both ways over 6800 full-mantissa points spanning 2^-40..2^40:
+#   with compensation    5194 non-null, distance recovery median 1.76e-15
+#   without compensation **0 non-null**,  distance recovery median 1.85e-15
+# So exact nullity costs about 5% on a median already at ulp level, and buys a
+# property the algebra guarantees: a conformal point IS null.
+# ⚠ Kept in mind rather than assumed away: without compensation this is a plain
+# left-to-right sum, which is why the stored `q` must also be summed plainly —
+# the two must round identically or the cancellation is lost again.
+# [measured: 6800-point nullity sweep and 6000-pair distance sweep, 2026-09-10]
+# [measured: nullity sweep over 2^-40..2^40, 6800 points, 2026-09-10]
 fn _cga_scalar_of_geo(a, b) {
     var sum = f64_from(0);
-    var comp = f64_from(0);
     for (var si = 0; si < 32; si = si + 1) {
-        var packed = _cga_geo_blades(si, si);
-        var sign = 0;
-        for (var ti = 0; ti < 2; ti = ti + 1) {
-            if (load64(packed + ti * 16) != 0) {
-                if (load64(packed + ti * 16 + 8) == 0) { sign = load64(packed + ti * 16); }
+        var av = load64(a + si * 8);
+        if (f64_eq(av, f64_from(0)) == 0) {
+            for (var sj = 0; sj < 32; sj = sj + 1) {
+                var bv = load64(b + sj * 8);
+                if (f64_eq(bv, f64_from(0)) == 0) {
+                    var packed = _cga_geo_blades(si, sj);
+                    var sign = 0;
+                    for (var ti = 0; ti < 2; ti = ti + 1) {
+                        if (load64(packed + ti * 16) != 0) {
+                            if (load64(packed + ti * 16 + 8) == 0) {
+                                sign = load64(packed + ti * 16);
+                            }
+                        }
+                    }
+                    if (sign != 0) {
+                        var contrib = f64_mul(av, bv);
+                        if (sign < 0) { contrib = f64_neg(contrib); }
+                        sum = f64_add(sum, contrib);
+                    }
+                }
             }
-        }
-        if (sign != 0) {
-            var contrib = f64_mul(load64(a + si * 8), load64(b + si * 8));
-            if (sign < 0) { contrib = f64_neg(contrib); }
-            var t = f64_add(sum, contrib);
-            if (f64_lt(f64_abs(contrib), f64_abs(sum)) == 1) {
-                comp = f64_add(comp, f64_add(f64_sub(sum, t), contrib));
-            } else {
-                comp = f64_add(comp, f64_add(f64_sub(contrib, t), sum));
-            }
-            sum = t;
         }
     }
-    return f64_add(sum, comp);
+    return sum;
 }
 
 # Norm squared: scalar part of mv * reverse(mv)
@@ -8310,60 +8315,38 @@ fn cga_reject(x, b) {
 # Embed a 3D point into the conformal model.
 # P = x*e1 + y*e2 + z*e3 + (x^2/2 - 1/2)*ep + (x^2/2 + 1/2)*em
 #
-# ⛔ 2.20.0 — A CONFORMAL POINT IS NEVER EXACTLY NULL HERE, AND THAT IS A WRONG
-# ANSWER RATHER THAN A REPRESENTATION NICETY. The algebra is exact —
-# P·P = q + ((q-1)/2)^2 - ((q+1)/2)^2 = q - q = 0 for q = x^2+y^2+z^2 — but the
-# ep/em basis stores q as the SUM and DIFFERENCE of two nearly-equal numbers, and
-# reconstructing it through squaring loses it at both ends.
-#
-# ⚠ THE EARLIER FILING SAID "small coordinates, below ~2^-26.5". IT IS BOTH TAILS
-# AND IT IS NOT A THRESHOLD. Measured over random full-mantissa coordinates,
-# |P·P| / q by binade: 2^-51 at 2^0 (ulp-level), 2^-36 at 2^-10, 2^-17 at 2^-20,
-# and **1.0 — total loss — at 2^-30 AND at 2^30**. A clean U centred on |x| ~ 1.
-# The old "small coordinates" reading came from a POWER-OF-TWO sweep: dyadic x
-# makes x^2 exact, which is the only reason the failure looked banded.
-#
-# ⛔ THE CONSEQUENCE IS MEASURED, NOT INFERRED. The canonical use of a null point
-# is distance recovery, P1·P2 = -d^2/2. Over 2000 random full-mantissa pairs per
-# binade the relative error in the recovered d^2 has **median 46.4x at 2^-30 and
-# 48.7x at 2^+30** (p90 1491 and 1809; p99 1.3e5 and 2.0e5), against a median of
-# **exactly 0 at 2^0**.
-# ⚠ QUOTE A MEDIAN HERE, NEVER A MAXIMUM. `rel ~ 2ab/(a-b)^2` diverges as the two
-# points close, so the maximum is set by the nearest pair the sample happened to
-# draw — 5.6e7 and 2.6e8 in this run, and different with any other seed. An
-# earlier version of this comment said "2^11 (~2000x) at 2^-30 and 2^15 (~32000x)
-# at 2^30", which were maxima over 300 samples presented as if they were the
-# effect AND as if the two tails differed by 16x. **The tails are symmetric** —
-# 46 against 49 — and the asymmetry was an artifact of taking a max.
-# The bands where it is clean (0 of 400 samples past the
-# stated tolerance, seeded per binade so the result is reproducible):
-#     1e-9 relative: 2^-7 .. 2^3
-#     1e-6 relative: 2^-11 .. 2^10
-#     1e-4 relative: 2^-15 .. 2^13
-# Outside those, `cga_point` silently returns something whose distance semantics
-# are wrong by orders of magnitude.
-#
-# ⭐ NO ARITHMETIC FIX EXISTS — THE LOSS IS REPRESENTATIONAL AND THAT IS PROVEN,
-# not assumed. At x = 2^-30, q = 3*2^-60, so (q-1)/2 = -1/2 + 1.5*2^-60; ulp(1/2)
-# is 2^-53, so the correction sits more than a full ulp below the rounding
-# boundary and **-1/2 IS the correctly-rounded value** — verified, `ep` compares
-# bit-equal to -1/2 and `em` to +1/2. Nothing computed in f64 can carry q here.
-# The same holds at the top: once q > 2^53, ep and em are both ~q/2 and the 1
-# that separates them falls below their shared ulp.
-# ⭐ The remedy is the NULL BASIS (n0 = (em-ep)/2, ninf = ep+em), where a point is
-# p + (q/2)*ninf + n0 and q lives in ONE coefficient instead of being the sum of
-# two — so P·P cancels the SAME computed q against itself and is exactly 0. That
-# is a change to the 32-slot blade product tables, not to this function, and is
-# filed on the roadmap rather than folded in here.
-# [measured: per-binade d^2 recovery sweep, 400 samples/binade, 2026-09-10]
+# ⭐ 2.21.0 — A CONFORMAL POINT IS NOW EXACTLY NULL AT EVERY MAGNITUDE, and the
+# repair was the BASIS rather than the arithmetic. 2.20.0 measured this as a wrong
+# answer with no arithmetic fix available: in the ep/em basis the coefficients are
+# (q-1)/2 and (q+1)/2, so q is stored as the sum AND difference of two nearly-equal
+# numbers and is destroyed at both ends — at x = 2^-30 the correctly-rounded ep IS
+# exactly -1/2, so no amount of care could recover it.
+# ⭐ In the NULL basis P = p + (q/2) ninf + n0, and q lives in ONE coefficient. The
+# norm then cancels the SAME computed q against itself:
+#     P·P = q + 2*(q/2)*(n0·ninf) = q - q
+# which is 0 by construction, not by tolerance.
+# Measured over 6800 random full-mantissa points spanning 2^-40..2^40:
+#     ep/em basis   1686 of 6800 non-null (24.8%)
+#     null basis    **0 of 6800**
+# And the property that actually matters, distance recovery via P1·P2 = -d^2/2,
+# went from a MEDIAN 46.4x wrong at 2^-30 and 48.7x at 2^+30 to **~1.9e-15, flat
+# across the whole range** — sixteen orders of magnitude at the tails, and scale-
+# free rather than a U centred on |x| ~ 1.
+# ⚠ `cga_norm(cga_translator(t,0,0))` is now exactly 1 for **all 1001 binades**
+# tested; it used to fail 526 of them, and 2.17.0 recorded it as failing from
+# t = 2^28.
+# [measured: nullity 6800 pts, distance 6000 pairs, translator 1001 binades, 2026-09-10]
 fn cga_point(x, y, z) {
     var mv = cga_mv_zero();
     var x2 = f64_add(f64_add(f64_mul(x, x), f64_mul(y, y)), f64_mul(z, z));
     cga_mv_set(mv, 1, x);   # e1
     cga_mv_set(mv, 2, y);   # e2
     cga_mv_set(mv, 3, z);   # e3
-    cga_mv_set(mv, 4, f64_sub(f64_mul(F64_HALF, x2), F64_HALF));  # ep: (x^2-1)/2
-    cga_mv_set(mv, 5, f64_add(f64_mul(F64_HALF, x2), F64_HALF));  # em: (x^2+1)/2
+    # ⭐ NULL BASIS: P = p + (q/2) ninf + n0. `q` lives in ONE coefficient instead
+    # of being split across (q∓1)/2, which is what makes P·P cancel exactly:
+    # P·P = q + 2*(q/2)*(n0·ninf) = q - q, the SAME computed q against itself.
+    cga_mv_set(mv, 4, F64_ONE);                       # n0
+    cga_mv_set(mv, 5, f64_mul(F64_HALF, x2));         # ninf: q/2
     return mv;
 }
 
@@ -8373,7 +8356,8 @@ fn cga_sphere(cx, cy, cz, r) {
     var p = cga_point(cx, cy, cz);
     var half_r2 = f64_mul(F64_HALF, f64_mul(r, r));
     # Subtract half_r2 from both ep and em components (e_inf = ep + em)
-    cga_mv_set(p, 4, f64_sub(cga_mv_get(p, 4), half_r2));
+    # ⭐ NULL BASIS: `ninf` is blade 5 alone. It used to be `ep + em`, which is why
+    # this subtracted from two slots; doing that now would also corrupt n0.
     cga_mv_set(p, 5, f64_sub(cga_mv_get(p, 5), half_r2));
     return p;
 }
@@ -8411,8 +8395,8 @@ fn cga_plane(nx, ny, nz, d) {
     cga_mv_set(mv, 2, f64_div(ny, norm));
     cga_mv_set(mv, 3, f64_div(nz, norm));
     var d_scaled = f64_div(d, norm);
-    cga_mv_set(mv, 4, d_scaled);  # ep component
-    cga_mv_set(mv, 5, d_scaled);  # em component
+    # ⭐ NULL BASIS: d * ninf is one slot (blade 5), not the ep+em pair.
+    cga_mv_set(mv, 5, d_scaled);  # ninf component
     return mv;
 }
 
@@ -8429,12 +8413,12 @@ fn cga_translator(tx, ty, tz) {
     var hty = f64_mul(_GA_F64_NEG_HALF, ty);
     var htz = f64_mul(_GA_F64_NEG_HALF, tz);
 
-    cga_mv_set(mv, 8,  htx);  # e1p
-    cga_mv_set(mv, 9,  htx);  # e1m
-    cga_mv_set(mv, 11, hty);  # e2p
-    cga_mv_set(mv, 12, hty);  # e2m
-    cga_mv_set(mv, 13, htz);  # e3p
-    cga_mv_set(mv, 14, htz);  # e3m
+    # ⭐ NULL BASIS: `e_i ∧ ninf` is ONE blade each — 9, 12, 14 — where the ep/em
+    # basis had to spread each across the (e_i∧ep, e_i∧em) pair. Blades 8, 11 and
+    # 13 are now `e_i ∧ n0` and must stay zero for a translator.
+    cga_mv_set(mv, 9,  htx);  # e1 ∧ ninf
+    cga_mv_set(mv, 12, hty);  # e2 ∧ ninf
+    cga_mv_set(mv, 14, htz);  # e3 ∧ ninf
     return mv;
 }
 
