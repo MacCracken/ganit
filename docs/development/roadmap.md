@@ -466,7 +466,26 @@ sections. It has been declared out of scope twice, which is a stronger claim tha
       where `x²/2` falls below half an ulp of 0.5. Original text follows.
       ~~**`cga_norm` on versors and points is CATASTROPHIC CANCELLATION, not this class.**~~
 
-- [ ] **[2.20.0 — a REPAIR, not a decision]** **`cga_point` cannot represent a small point as exactly null**, and that is the
+- [x] ✅ **CHARACTERISED, PINNED, AND THE REAL REPAIR FILED — it is a WRONG ANSWER, not a
+      representation nicety, and it is BOTH tails.** Measured: `P1.P2 = -d^2/2` recovers d^2 with a
+      relative error of **~2000x at 2^-30 and ~32000x at 2^+30**, 300/300 samples past 1e-6 at both
+      ends. Clean bands (0/400 past tolerance): 1e-9 -> 2^-7..2^3, 1e-6 -> 2^-11..2^10,
+      1e-4 -> 2^-15..2^13. ⛔ **"Small coordinates" was an artifact of a POWER-OF-TWO sweep** --
+      dyadic x makes x^2 exact, the only reason it looked banded; `|P.P|/q` is a U centred on |x|~1,
+      reaching total loss at BOTH 2^-30 and 2^+30.
+      ⭐ **No arithmetic fix exists and it is proven**: at x = 2^-30, (q-1)/2 sits more than a full
+      ulp below the rounding boundary of 1/2, so **-1/2 IS the correctly-rounded ep** (asserted
+      bit-exactly). The ep/em basis stores q as the sum AND difference of two nearly-equal numbers.
+      ⭐ **THE REAL REPAIR IS A BASIS CHANGE, FILED SEPARATELY**: in the null basis (n0 = (em-ep)/2,
+      ninf = ep+em) a point is p + (q/2)*ninf + n0, q lives in ONE coefficient, and P.P cancels the
+      same computed q against itself -- exactly 0. That touches the 32-slot blade product tables, not
+      `cga_point`, so it is a release of its own rather than a bite.
+      ⚠ 7 assertions pin the band AND the two known failures, so a future repair must announce
+      itself. ⛔ My own first fixture repeated the artifact it documents -- dyadic values, built with
+      the SUBNORMAL shift form at a normal exponent (masked 1044 -> 20, testing a value 288 decades
+      off), yielding a NaN that `f64_gt(NaN, 1)` read as "not wrong". 3 mutants killed, no-op
+      control survived. ⛔ ORIGINAL ROW FOLLOWS.
+- [ ] **[filed for its own release — the CGA null basis]** **`cga_point` cannot represent a small point as exactly null**, and that is the
       ⛔ **RE-MEASURED 2026-09-10 AND THIS ROW'S SCOPE IS WRONG.** "A small point" / "below ~2^-26.5"
       is an artifact of the power-of-two sweep that produced it — dyadic `x` makes `x^2` exact, which is
       the only reason the failure looked banded. With FULL-MANTISSA coordinates `cga_norm_sq` is non-zero

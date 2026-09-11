@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+### Changed
+- **geo_advanced** — `cga_point`'s nullity is now a **measured, tested property with a stated band**
+  rather than an open question. ⛔ **It is a wrong answer, not a representation nicety.** The canonical
+  use of a null conformal point is distance recovery, `P₁·P₂ = −d²/2`; measured over random
+  full-mantissa coordinates the relative error in the recovered `d²` reaches **~2000× at coordinate
+  scale 2^-30 and ~32000× at 2^30**, with 300 of 300 samples past 1e-6 at both ends. Clean bands, each
+  0 of 400 samples past its tolerance: **1e-9 → 2^-7..2^3, 1e-6 → 2^-11..2^10, 1e-4 → 2^-15..2^13**.
+  A band quoted without its tolerance means nothing, so all three are recorded.
+  ⛔ **The filing said "small coordinates, below ~2^-26.5". It is BOTH tails**, and the small-only
+  reading was an artifact of a power-of-two sweep — dyadic `x` makes `x²` exact, which is the only
+  reason the failure looked banded. `|P·P|/q` is a clean U centred on |x| ≈ 1: 2^-51 at 2^0, and
+  **1.0 — total loss — at 2^-30 and at 2^30 alike**.
+  ⭐ **No arithmetic fix exists, and that is proven rather than assumed.** At x = 2^-30, q = 3·2^-60,
+  so (q−1)/2 = −1/2 + 1.5·2^-60 — more than a full ulp below the rounding boundary of 1/2, so **−1/2
+  IS the correctly-rounded value** (asserted bit-exactly). The ep/em basis stores q as the sum and
+  difference of two nearly-equal numbers; the remedy is the null basis (n0/ninf), where q lives in one
+  coefficient and `P·P` cancels the same computed q against itself. That is a change to the 32-slot
+  blade product tables and is filed on the roadmap rather than folded in here.
+
 ### Fixed
 - **symbolic / symbolic_ext** — above 2^63 **both public renderers returned the same wrong constant for
   every input**, and all 3955 assertions passed. `f64_to` SATURATES, so `f64_to(f64_floor(mag))` is
@@ -28,7 +47,19 @@
   **1024 of 1024 integral binades**, 2^0..2^1023.
 
 ### Added
-- **tests/modules.tcyr** — 11 assertions pinning exact integer rendering (**3955 → 3966**): 2^63 itself,
+- **tests/modules.tcyr** — 7 assertions pinning CGA point nullity (**3966 → 3973**): the bit-exact
+  representational limit, a 22-binade distance-recovery sweep with its pair count asserted, and — so a
+  future repair has to announce itself — the **known failures at 2^-30 and 2^+30 pinned as failures**,
+  both tails.
+  ⛔ **The first draft of this block repeated the exact mistake it documents, twice.** It used *dyadic*
+  fixtures (the artifact that produced the original "small coordinates" reading), and built them with
+  the **subnormal** form `1 << (1074 + e)` at e = −30 — a shift of 1044, masked by the hardware to 20 —
+  so it silently tested a value 288 decades from the one intended. That produced a NaN relative error,
+  and `f64_gt(NaN, 1)` is 0, so the "known wrong" pin read as "not wrong" and failed. A second draft
+  then asserted the 1e-6 band against `_SYM_EPS` (2^-50) and failed 22 of 22. **The band is real; the
+  fixture was wrong three different ways first.** 3 mutants on `cga_point` killed, no-op control
+  survived.
+ (**3955 → 3966**): 2^63 itself,
   1e19, 2^100 at 31 digits, the 1e15 contract case, and a 1024-binade agreement sweep between the two
   renderers whose **pair count is asserted too**, because a loop that ran zero times would report zero
   disagreements. ⚠ The negative case is asserted on its exact string, not its magnitude — the defect

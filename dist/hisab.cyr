@@ -7985,6 +7985,44 @@ fn cga_reject(x, b) {
 
 # Embed a 3D point into the conformal model.
 # P = x*e1 + y*e2 + z*e3 + (x^2/2 - 1/2)*ep + (x^2/2 + 1/2)*em
+#
+# ⛔ 2.20.0 — A CONFORMAL POINT IS NEVER EXACTLY NULL HERE, AND THAT IS A WRONG
+# ANSWER RATHER THAN A REPRESENTATION NICETY. The algebra is exact —
+# P·P = q + ((q-1)/2)^2 - ((q+1)/2)^2 = q - q = 0 for q = x^2+y^2+z^2 — but the
+# ep/em basis stores q as the SUM and DIFFERENCE of two nearly-equal numbers, and
+# reconstructing it through squaring loses it at both ends.
+#
+# ⚠ THE EARLIER FILING SAID "small coordinates, below ~2^-26.5". IT IS BOTH TAILS
+# AND IT IS NOT A THRESHOLD. Measured over random full-mantissa coordinates,
+# |P·P| / q by binade: 2^-51 at 2^0 (ulp-level), 2^-36 at 2^-10, 2^-17 at 2^-20,
+# and **1.0 — total loss — at 2^-30 AND at 2^30**. A clean U centred on |x| ~ 1.
+# The old "small coordinates" reading came from a POWER-OF-TWO sweep: dyadic x
+# makes x^2 exact, which is the only reason the failure looked banded.
+#
+# ⛔ THE CONSEQUENCE IS MEASURED, NOT INFERRED. The canonical use of a null point
+# is distance recovery, P1·P2 = -d^2/2. Relative error in the recovered d^2 is
+# **2^11 (~2000x) at 2^-30 and 2^15 (~32000x) at 2^30**, with 300 of 300 samples
+# past 1e-6 at both ends. The bands where it is clean (0 of 400 samples past the
+# stated tolerance, seeded per binade so the result is reproducible):
+#     1e-9 relative: 2^-7 .. 2^3
+#     1e-6 relative: 2^-11 .. 2^10
+#     1e-4 relative: 2^-15 .. 2^13
+# Outside those, `cga_point` silently returns something whose distance semantics
+# are wrong by orders of magnitude.
+#
+# ⭐ NO ARITHMETIC FIX EXISTS — THE LOSS IS REPRESENTATIONAL AND THAT IS PROVEN,
+# not assumed. At x = 2^-30, q = 3*2^-60, so (q-1)/2 = -1/2 + 1.5*2^-60; ulp(1/2)
+# is 2^-53, so the correction sits more than a full ulp below the rounding
+# boundary and **-1/2 IS the correctly-rounded value** — verified, `ep` compares
+# bit-equal to -1/2 and `em` to +1/2. Nothing computed in f64 can carry q here.
+# The same holds at the top: once q > 2^53, ep and em are both ~q/2 and the 1
+# that separates them falls below their shared ulp.
+# ⭐ The remedy is the NULL BASIS (n0 = (em-ep)/2, ninf = ep+em), where a point is
+# p + (q/2)*ninf + n0 and q lives in ONE coefficient instead of being the sum of
+# two — so P·P cancels the SAME computed q against itself and is exactly 0. That
+# is a change to the 32-slot blade product tables, not to this function, and is
+# filed on the roadmap rather than folded in here.
+# [measured: per-binade d^2 recovery sweep, 400 samples/binade, 2026-09-11]
 fn cga_point(x, y, z) {
     var mv = cga_mv_zero();
     var x2 = f64_add(f64_add(f64_mul(x, x), f64_mul(y, y)), f64_mul(z, z));

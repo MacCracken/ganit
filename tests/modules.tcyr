@@ -8036,6 +8036,90 @@ var s9u = sdf_smooth_union(F64_ONE, F64_TWO, F64_HALF);
 assert(f64_gt(s9u, 0) == 1, "sdf_smooth_union of two positive distances is positive");
 assert(f64_lt(s9u, F64_TWO) == 1, "sdf_smooth_union stays at or below max(d1, d2)");
 
+# ================================================================
+# 2.20.0 -- CGA POINT NULLITY: THE USABLE BAND IS A TESTED PROPERTY
+# ================================================================
+# ⛔ A conformal point is NEVER exactly null in the ep/em basis, and outside a
+# narrow band that is a WRONG ANSWER rather than a representation nicety. The
+# canonical use is distance recovery, P1.P2 = -d^2/2; measured over random
+# full-mantissa coordinates, the relative error in the recovered d^2 reaches
+# ~2000x at coordinate scale 2^-30 and ~32000x at 2^30, with 300 of 300 samples
+# past 1e-6 at both ends.
+# ⚠ THE EARLIER FILING CALLED THIS "small coordinates". It is BOTH tails, and the
+# small-only reading was an artifact of a POWER-OF-TWO sweep -- dyadic x makes
+# x^2 exact, which is the only reason the failure looked banded. ⛔ The first
+# draft of THIS BLOCK repeated that exact mistake: it used dyadic fixtures, and
+# it also built them with the SUBNORMAL form `1 << (1074 + e)` at e = -30, which
+# is a shift of 1044 -- masked to 20 by the hardware -- so it silently tested a
+# value 288 decades from the one intended. The fixtures below are full-mantissa
+# and built with `(1023 + e) << 52`, the NORMAL form.
+# ⭐ No arithmetic fix exists: at x = 2^-30 the correctly-rounded (q-1)/2 IS
+# exactly -1/2, asserted below. The remedy is the null basis (n0/ninf), filed on
+# the roadmap. These assertions pin the band so it cannot silently narrow.
+# [measured: per-binade d^2 recovery sweep, 400 samples/binade, 2026-09-11]
+
+# The representational limit as a bit-exact fact rather than a tolerance: at
+# x = 2^-30 the ep/em coefficients round to exactly -1/2 and +1/2, so what should
+# distinguish this point from the origin is simply gone.
+var _cn_x = (1023 - 30) << 52;
+var _cn_q = f64_mul(_cn_x, _cn_x);
+assert_eq(f64_gt(_cn_q, f64_from(0)), 1, "cga nullity fixture: q = x^2 is a real nonzero (not a masked shift)");
+assert_eq(f64_sub(f64_mul(F64_HALF, _cn_q), F64_HALF), f64_neg(F64_HALF),
+  "cga_point: at x=2^-30 the ep coefficient IS exactly -1/2 (no arithmetic fix)");
+assert_eq(f64_add(f64_mul(F64_HALF, _cn_q), F64_HALF), F64_HALF,
+  "cga_point: at x=2^-30 the em coefficient IS exactly +1/2");
+
+# Distance recovery across the clean band, on FULL-MANTISSA coordinates.
+var _CN_TOL_1EM6 = 0x3EB0_C6F7_A0B5_ED8D;   # 1e-6
+var _cn_m1 = 0x0009_3B4C_6D7E_8F01;
+var _cn_m2 = 0x000C_1A2B_3C4D_5E6F;
+var _cn_ok = 0;
+var _cn_n = 0;
+for (var _cn_e = 0 - 11; _cn_e <= 10; _cn_e = _cn_e + 1) {
+    var _cn_a = ((1023 + _cn_e) << 52) | _cn_m1;
+    var _cn_b = ((1023 + _cn_e) << 52) | _cn_m2;
+    var _cn_ip = _cga_scalar_of_geo(cga_point(_cn_a, 0, 0), cga_point(_cn_b, 0, 0));
+    var _cn_d2c = f64_mul(f64_from(0 - 2), _cn_ip);
+    var _cn_dd = f64_sub(_cn_a, _cn_b);
+    var _cn_d2t = f64_mul(_cn_dd, _cn_dd);
+    var _cn_rel = f64_abs(f64_div(f64_sub(_cn_d2c, _cn_d2t), _cn_d2t));
+    _cn_n = _cn_n + 1;
+    # ⚠ NaN-safe: `f64_lt(NaN, tol)` is 0, so a NaN counts as a FAILURE here
+    # rather than passing silently. That hole is what broke the first draft.
+    # ⚠ The tolerance is 1e-6 because that is the tolerance the band was MEASURED
+    # at. An earlier draft asserted this band against `_SYM_EPS` (2^-50) and
+    # failed 22 of 22 -- the band is real, but it is a 1e-6 band, not a 2^-50 one.
+    # Tightening to 1e-9 narrows it to 2^-7 .. 2^3; loosening to 1e-4 widens it
+    # to 2^-15 .. 2^13. Quoting a band without its tolerance means nothing.
+    if (f64_lt(_cn_rel, _CN_TOL_1EM6) == 1) { _cn_ok = _cn_ok + 1; }
+}
+# ⚠ The COUNT is asserted too: a loop that ran zero times would report zero
+# failures, which reads exactly like success.
+assert_eq(_cn_n, 22, "cga distance-recovery sweep: all 22 binades tested");
+assert_eq(_cn_ok, 22, "cga: P1.P2 = -d^2/2 holds to 1e-6 across 2^-11 .. 2^10");
+
+# ⛔ AND THE FAILURE IS PINNED, so a future repair has to announce itself rather
+# than quietly widening the band. At 2^-30 and at 2^+30 the recovered d^2 is
+# wrong by more than 2x. If either assertion fails, the basis changed and the
+# comment on `cga_point` needs rewriting.
+var _cn_lo_a = ((1023 - 30) << 52) | _cn_m1;
+var _cn_lo_b = ((1023 - 30) << 52) | _cn_m2;
+var _cn_lo_ip = _cga_scalar_of_geo(cga_point(_cn_lo_a, 0, 0), cga_point(_cn_lo_b, 0, 0));
+var _cn_lo_dd = f64_sub(_cn_lo_a, _cn_lo_b);
+var _cn_lo_t = f64_mul(_cn_lo_dd, _cn_lo_dd);
+var _cn_lo_rel = f64_abs(f64_div(f64_sub(f64_mul(f64_from(0 - 2), _cn_lo_ip), _cn_lo_t), _cn_lo_t));
+assert_eq(f64_gt(_cn_lo_rel, F64_ONE), 1,
+  "cga: at 2^-30 distance recovery is KNOWN WRONG (pinned, not accepted)");
+
+var _cn_hi_a = ((1023 + 30) << 52) | _cn_m1;
+var _cn_hi_b = ((1023 + 30) << 52) | _cn_m2;
+var _cn_hi_ip = _cga_scalar_of_geo(cga_point(_cn_hi_a, 0, 0), cga_point(_cn_hi_b, 0, 0));
+var _cn_hi_dd = f64_sub(_cn_hi_a, _cn_hi_b);
+var _cn_hi_t = f64_mul(_cn_hi_dd, _cn_hi_dd);
+var _cn_hi_rel = f64_abs(f64_div(f64_sub(f64_mul(f64_from(0 - 2), _cn_hi_ip), _cn_hi_t), _cn_hi_t));
+assert_eq(f64_gt(_cn_hi_rel, F64_ONE), 1,
+  "cga: at 2^+30 distance recovery is KNOWN WRONG too (BOTH tails, not just small)");
+
 # --- CGA: the algebra identities.
 var g9a = cga_point(F64_ONE, 0, 0);
 var g9b = cga_mv_clone(g9a);
