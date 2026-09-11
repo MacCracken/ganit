@@ -18,22 +18,29 @@ if ! grep -q '^version = "${file:VERSION}"' "$REPO_ROOT/cyrius.cyml"; then
   echo "::warning:: cyrius.cyml does not use \${file:VERSION} — manifest version may drift"
 fi
 
-# src/main.cyr hardcodes the string the CLI prints. ${file:VERSION} cannot reach
-# it, so it was a manual
-# edit this script did not make and no gate checked — the 2.9.1 → 2.9.2 bump
-# ⚠ 2026-09-09: the old wording here claimed "Cyrius has no build-time string
-# interpolation". That has been FALSE since 6.5.21 — CYRIUS_PKG_VERSION exists,
-# and the included-file case was fixed in 6.5.34 (re-verified on 6.6.2). Adopting
-# it is a live roadmap item; what stays true is only that ${file:VERSION} itself
-# cannot reach a .cyr string literal.
-# left the CLI reporting 2.9.1. Rewritten here; CI's version-consistency step
-# asserts it independently, so a hand-edit that misses it still fails the build.
-if grep -qE '^\s*println\("hisab [0-9]+\.[0-9]+\.[0-9]+"\);' "$REPO_ROOT/src/main.cyr"; then
-  sed -i -E "s/^(\s*)println\(\"hisab [0-9]+\.[0-9]+\.[0-9]+\"\);/\1println(\"hisab ${NEW_VERSION}\");/" \
-    "$REPO_ROOT/src/main.cyr"
-  echo "src/main.cyr: CLI version string -> $NEW_VERSION"
+# ⭐ 2.19.0 — THERE IS NOTHING TO REWRITE HERE ANY MORE, AND THAT IS THE POINT.
+# src/main.cyr USED TO hardcode the string the CLI prints — the one version site
+# ${file:VERSION} could not reach, so it was a manual edit this script did not
+# make and no gate checked, and the 2.9.1 -> 2.9.2 bump left the CLI reporting
+# 2.9.1. This script then grew a sed for it and CI grew a grep.
+# Since 2.19.0 it prints CYRIUS_PKG_VERSION, which `cyrius build` declares from
+# [package].version -- that is, from ${file:VERSION} -- so the second copy does
+# not exist and drift is impossible rather than merely automated.
+# ⚠ THE OLD WORDING REMOVED FROM HERE CLAIMED "Cyrius has no build-time string
+# interpolation". True when written (2026-08-09); FALSE FOUR DAYS LATER, when
+# cyrius 6.5.21 (2026-08-13) shipped CYRIUS_PKG_VERSION, and it stood for a
+# further four weeks. What stays true is only the narrower claim it was confused
+# with: ${file:VERSION} is a MANIFEST-side expansion and cannot itself reach a
+# .cyr string literal.
+# This block now VERIFIES rather than rewrites; CI's "Verify printed version"
+# step is the real gate, and it runs the built binary.
+if grep -v '^[[:space:]]*#' "$REPO_ROOT/src/main.cyr" | grep -q 'CYRIUS_PKG_VERSION'; then
+  echo "src/main.cyr: prints CYRIUS_PKG_VERSION (no rewrite needed)"
 else
-  echo "::warning:: src/main.cyr has no recognisable 'println(\"hisab X.Y.Z\");' — update it by hand"
+  echo "::warning:: src/main.cyr does not print CYRIUS_PKG_VERSION — the CLI version may drift"
+fi
+if grep -v '^[[:space:]]*#' "$REPO_ROOT/src/main.cyr" | grep -qE '"hisab [0-9]+\.[0-9]+\.[0-9]+"'; then
+  echo "::warning:: src/main.cyr has a hardcoded version literal again — it will go stale"
 fi
 
 echo "VERSION: $NEW_VERSION"

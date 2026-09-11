@@ -11,8 +11,28 @@
 include "lib/syscalls.cyr"
 include "lib/io.cyr"
 
+# ⭐ 2.19.0 — THE VERSION IS NO LONGER A SECOND COPY. This line read
+# `println("hisab 2.18.0")`: a hand-edited literal, and the one version site
+# `${file:VERSION}` cannot reach from the manifest. It is the site the
+# 2.9.1 -> 2.9.2 bump silently missed, leaving the CLI reporting 2.9.1, which is
+# why `scripts/version-bump.sh` grew a `sed` for it and CI grew a grep.
+# `CYRIUS_PKG_VERSION` (cyrius 6.5.21) is declared by `cyrius build` from
+# `[package].version`, i.e. from `${file:VERSION}` — so the copy is gone rather
+# than automated, and drift here is now impossible by construction.
+# ⚠ RE-PROBED ON 6.6.2 RATHER THAN TAKEN FROM THE CHANGELOG, because a constant
+# derived from a dependency is a measurement and goes stale silently. It resolves
+# from the ENTRY file and from an INCLUDED file (the included case was the one
+# upstream fixed in 6.5.34), and a negative control confirms the VALUE TRACKS:
+# with VERSION set to `9.9.9-probe+z` the built binary printed exactly that.
+# ⛔ MUST NEVER APPEAR IN A `[lib]` MODULE. The symbol resolves from the
+# manifest of whatever package is BUILDING, so a consumer compiling
+# `dist/hisab.cyr` would get THEIR version, not hisab's. Safe here because
+# `src/main.cyr` is `[build] src` and is not in `[lib]` — verified, the string
+# occurs 0 times in `dist/hisab.cyr`.
+# [measured: entry+included probes and a VERSION negative control on cyrius 6.6.2, 2026-09-10]
 fn main() {
-    println("hisab 2.18.0");
+    print("hisab ", 6);
+    println(CYRIUS_PKG_VERSION);
     return 0;
 }
 

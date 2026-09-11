@@ -15,6 +15,28 @@
   enum member occupies an entry exactly as a global does. The saving is relocations, not table slots:
   `fixup_table` **3092 → 2933 (−159)**, `code_size` **748,024 → 747,320 B (−704)** across 170
   reference sites. Right rule, wrong reason.
+- **src/main.cyr** — the CLI prints `CYRIUS_PKG_VERSION` instead of a hardcoded `"hisab 2.18.0"`.
+  `cyrius build` declares that symbol from `[package].version`, i.e. from `${file:VERSION}`, so the
+  version site `${file:VERSION}` could not previously reach no longer holds a second copy — the one
+  the 2.9.1 → 2.9.2 bump silently missed, leaving the CLI reporting 2.9.1. Output is **byte-identical**
+  (`hisab 2.18.0\n`, 13 bytes) and the binary is **257,176 B both ways**.
+  ⚠ Re-probed on 6.6.2 rather than taken from the roadmap's "re-verified" note: it resolves from the
+  entry file **and** from an included file, and a negative control confirms the value *tracks* — with
+  `VERSION` set to `9.9.9-probe+z` the built binary printed exactly that.
+  ⛔ **Constraint**: the symbol resolves from the **building** package's manifest, so it must never
+  enter a `[lib]` module — a consumer compiling `dist/hisab.cyr` would get *their* version. Safe here
+  (`src/main.cyr` is `[build] src`, not `[lib]`; 0 occurrences in the bundle) and now gated.
+- **scripts/version-bump.sh** — the `sed` that rewrote main.cyr's literal is removed; there is no second
+  copy to keep in step. It now verifies instead, and would otherwise have warned misleadingly on every
+  future bump. Its stale "Cyrius has no build-time string interpolation" note is replaced with what is
+  still true: `${file:VERSION}` is a *manifest-side* expansion and cannot reach a `.cyr` string literal.
+- **docs/development/threat-model.md**, **docs/doc-health.md** — the two *live* assertions that "Cyrius
+  has no build-time interpolation". ⚠ The roadmap said `version-bump.sh:21` and `ci.yml:285` "both still
+  assert" it; measured, `ci.yml` contains the sentence **zero** times and `version-bump.sh` only inside a
+  note saying it is false. Both had already been excised — sloppily, splicing the correction into the
+  middle of a sentence — while the real claims sat in two files the roadmap never named. The claim was
+  true for **four days**: written 2026-08-09, falsified by cyrius 6.5.21 on 2026-08-13, and it stood a
+  further four weeks.
 
 ### Fixed
 - **provenance markers** — 3 broken `[measured: ...]` markers, now **0**. One was introduced by this
@@ -42,6 +64,18 @@
   `HSB_ERR_INVALID_TRANSFORM` — two distinct failures under one code. Every existing assertion
   compares a return against a code *by name*, so both sides move together and the value cancels out.
   6 mutants now installed, 6 killed. Suites **3940 → 3955**.
+- **CI** — a `Verify printed version` step: it runs `./build/hisab` and compares the output to
+  `VERSION`. **The first gate in either workflow that executes the binary** — every version check
+  before it compared one piece of committed text against another. Measured with `VERSION` bumped to
+  2.19.0: the old hardcoded file rebuilds and still prints `hisab 2.18.0` (the 2.9.1 → 2.9.2 defect,
+  reproduced), the adopted form prints `hisab 2.19.0`.
+  ⛔ **Both replacement source-guards were wrong on their first draft, in opposite directions, and only
+  running every arm found it.** The "no hardcoded literal" guard **failed on its own tree**, because the
+  comment explaining the change quotes the retired `println("hisab 2.18.0")`. The "symbol still used"
+  guard was **vacuous** the other way — it matched that same comment's mentions of `CYRIUS_PKG_VERSION`,
+  so deleting the call and printing a bare `hisab` still exited 0. Both now strip comment lines; all
+  four arms verified (clean 0, literal-back 1, symbol-deleted 1, restored 0). **A gate that cannot tell
+  code from a comment quoting code fails on every honest explanation of itself.**
 - **CI** — a `Broken provenance markers` gate, running on **push**, not only on pull requests.
   ⛔ **This is the half that matters, and the reason is that the existing job has never run.** The
   `measurements` job is wired `if: github.event_name == 'pull_request'`; the repository has **0 pull
@@ -59,7 +93,6 @@
   prints that warning and still **exits 0**, and `cyrius lint` never emits it, so CI's `^  warn ` grep
   matched zero times. Verified end to end by adding a real second `HSB_ERR_ALLOC = -3`: consumer-build
   exit 0, lint clean, only the new test block failed. The gate is verified to fire and to recover.
-
 
 ## [2.18.0] - 2026-09-10 — the SVD factors, and the release that began by correcting the last one
 

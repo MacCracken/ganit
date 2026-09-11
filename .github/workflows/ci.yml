@@ -276,6 +276,23 @@ jobs:
       - name: Verify ELF
         run: xxd -l 4 build/hisab | grep -q "7f45 4c46"
 
+      - name: Verify printed version
+        # ⭐ ADDED 2.19.0, AND IT IS THE FIRST GATE IN EITHER WORKFLOW THAT RUNS
+        # THE BINARY. Every version check before this compared one piece of
+        # committed TEXT against another; this compares what the shipped artifact
+        # actually says against VERSION. Measured with VERSION bumped to 2.19.0:
+        # the old hardcoded main.cyr rebuilds and still prints "hisab 2.18.0" and
+        # this step fails; the CYRIUS_PKG_VERSION form prints "hisab 2.19.0" and
+        # passes. That is the 2.9.1 -> 2.9.2 defect, reproduced and then gated.
+        run: |
+          VERSION=$(cat VERSION | tr -d '[:space:]')
+          OUT=$(./build/hisab)
+          if [ "$OUT" != "hisab $VERSION" ]; then
+            echo "::error file=src/main.cyr::build/hisab prints '$OUT', VERSION is '$VERSION'"
+            exit 1
+          fi
+          echo "CLI prints: $OUT"
+
       - name: Test
         run: |
           for f in tests/*.tcyr; do
@@ -363,15 +380,34 @@ jobs:
           # `fetch-depth: 0` comment in the measurements job warns about.
           grep -qF -- "## [$VERSION]" CHANGELOG.md \
             || { echo "FAIL: CHANGELOG.md has no '## [$VERSION]' section header"; exit 1; }
-          # src/main.cyr hardcodes the string the CLI prints. It is the one
-          # version site ${file:VERSION} cannot reach, so it is a manual edit on
-          # every bump and was
-          # gated by nothing. Same class as the constant gate: a claim stated in
-          # committed text that no gate compared to its source of truth. Added
-          # 2.9.2, after the 2.9.1 → 2.9.2 bump left it reading "hisab 2.9.1".
-          grep -qF "\"hisab $VERSION\"" src/main.cyr \
-            || { echo "FAIL: src/main.cyr does not print \"hisab $VERSION\""; \
-                 grep -n 'println("hisab' src/main.cyr; exit 1; }
+          # src/main.cyr USED TO hardcode the string the CLI prints — the one
+          # version site ${file:VERSION} could not reach, a manual edit on every
+          # bump, gated by nothing until 2.9.2 added the grep this replaces (the
+          # 2.9.1 -> 2.9.2 bump had left it reading "hisab 2.9.1").
+          # ⭐ 2.19.0: it prints CYRIUS_PKG_VERSION, which `cyrius build` declares
+          # from [package].version = ${file:VERSION}. There is no second copy to
+          # compare, so these two guards defend the MECHANISM instead: the symbol
+          # is still used, and no hardcoded version literal has crept back.
+          # ⚠ The real check is the build job's "Verify printed version", which
+          # RUNS the binary. These are cheap source-level tripwires, not the gate.
+          # ⚠ CODE ONLY, for both guards. The first draft of THIS one grepped the
+          # whole file and was VACUOUS: the comment above the adoption names
+          # `CYRIUS_PKG_VERSION` five times, so deleting the actual call and
+          # printing a bare "hisab" still matched and the step exited 0. Caught by
+          # running all three arms instead of only the one expected to pass.
+          grep -v '^[[:space:]]*#' src/main.cyr | grep -qF 'CYRIUS_PKG_VERSION' \
+            || { echo "FAIL: src/main.cyr no longer references CYRIUS_PKG_VERSION"; exit 1; }
+          # ⚠ COMMENT LINES ARE STRIPPED FIRST, and that is not tidiness — the
+          # first version of this guard FAILED ON ITS OWN TREE, because the
+          # comment above the adoption quotes the retired `println("hisab 2.18.0")`
+          # so a reader knows what changed. A gate that cannot tell code from a
+          # comment quoting code would fire on every honest explanation of itself.
+          if grep -v '^[[:space:]]*#' src/main.cyr \
+               | grep -qE '"hisab [0-9]+\.[0-9]+\.[0-9]+"'; then
+            echo "FAIL: src/main.cyr has a hardcoded version literal again"
+            grep -nE '"hisab [0-9]+\.[0-9]+\.[0-9]+"' src/main.cyr
+            exit 1
+          fi
           # And the bundle header, which `cyrius distlib` stamps from VERSION —
           # a stale header means the bundle was not regenerated after the bump.
           grep -qF "# Version: $VERSION" dist/hisab.cyr \
