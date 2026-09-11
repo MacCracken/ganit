@@ -21,8 +21,7 @@
 # **code_size 748,024 → 747,320 B (−704)** across the 170 non-comment reference
 # sites in the bundle — ~94% of sites losing a fixup, at ~4.4 code bytes each.
 # The rule is right and the reason written beside it was not.
-# [measured: CYRIUS_STATS=1 cyrius check --with-deps dist/hisab.cyr, both trees,
-#  2026-09-10]
+# [measured: CYRIUS_STATS=1 cyrius check --with-deps dist/hisab.cyr on both trees, 2026-09-10]
 # ⚠ THE VALUES HAD TO BECOME LITERALS. Each was written `(0 - N)` because that is
 # what a `var` initialiser accepts; an enum member takes a NUMBER, not an
 # expression — `E = (0 - 1)` is `expected number, got '('`. Measured on 6.6.2:

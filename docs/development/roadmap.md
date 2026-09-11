@@ -643,7 +643,8 @@ them is not a defect at all.
 
 ### Decisions owed
 
-- [ ] **[2.19.0]** **`scripts/check-measurements.sh`: keep it or delete it.** The gate runs PR-only on the claims
+- [x] ✅ **KEPT, REPAIRED, AND WIRED TO PUSH — and the deciding fact is that the job has never run.**
+      **[2.19.0]** **`scripts/check-measurements.sh`: keep it or delete it.** The gate runs PR-only on the claims
       a branch *adds*, detector recall 21/22 with 0/15 decoys, but paragraph-level false positives
       sit at ~21% and **522** unmarked pre-existing claims mean it cannot be widened past the diff
       without a marking campaign first. It has now earned its keep several times over — it caught
@@ -664,6 +665,27 @@ them is not a defect at all.
       the implied fix would have left both markers broken. A wrong diagnosis on a two-line repair is
       worse than none. The real
       decision is smaller and different: **should it run on push, not only on PRs?**
+      ⭐ **ANSWERED: yes, for BROKEN markers; no, for the unmarked debt.** Verified against the GitHub
+      API rather than inferred: **0 pull requests in the repository's entire history**, 303 workflow
+      runs, the last 100 all `event: push`. So the `measurements` job has executed **zero** times and
+      every finding `--diff` can produce has been unreachable. A new `Broken provenance markers` step
+      runs on push, greps the full scan (whose exit code cannot gate — it is 1 on 284 unmarked
+      paragraphs of debt), and is **verified to fire on both shapes and to recover**.
+      ⛔ **THE COUNT WAS 2 AND IS 3, BECAUSE THIS RELEASE ADDED ONE.** The enum bite wrote a
+      `[measured: ...]` wrapped across two comment lines — malformed to the single-line regex. All
+      three are fixed; the two path markers needed the `docs/development/` prefix this row had already
+      worked out. Tree-wide broken markers: **0**.
+      ⛔ **AND `--diff` COULD NOT SEE ITS OWN DOMINANT CASE.** A path-resolution failure was filed
+      against the PARAGRAPH'S first line while the malformed arm filed the marker's own line, and
+      `--diff` keeps only findings on lines the branch ADDED — so a bad marker appended to an EXISTING
+      block was intersected away. Measured, one marker, two placements: appended at `src/vec3.cyr:126`
+      `--diff HEAD` exits **0** and prints *"Every measurement claim added on this branch names its
+      source"*; as its own new paragraph it exits **1**. ⚠ Worse than silent — the fabricated marker
+      SATISFIED the real claim beside it, so tree-wide unmarked fell by one and the gate got GREENER
+      for the bad edit. Fixed to record the marker's line.
+      ⚠ **Still open and deliberately not gated**: `--ratchet` is red (**521 unmarked against a 417
+      baseline, 15 files risen**) — pre-existing debt across 2.14.0-2.18.0, unchanged by this repair
+      and needing a marking campaign, not a gate.
 - [ ] **[2.19.0]** **Whether `dual_*` should gain a vector layer.** 2.10.0 answered "no dual vectors" for the
       *geometry*, on measured grounds (allocation per op, one seed per pass), and 2.11.0's
       reverse-mode tape removed the pressure entirely for the many-input case — one sweep instead of

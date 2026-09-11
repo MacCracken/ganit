@@ -1717,7 +1717,7 @@ fn _homog_sweep() {
 # exactly like a catastrophic gradient error. A first draft of this check
 # reported a relative error of 267,260 on `geo_ray_triangle` for precisely that
 # reason, and the routine was correct.
-# [measured: issues/archived/2026-08-10-ray-sphere-capsule-assume-unit-direction.md]
+# [measured: docs/development/issues/archived/2026-08-10-ray-sphere-capsule-assume-unit-direction.md]
 var _JT_BAD = 0;
 var _JT_RUN = 0;
 var _JT_H = 0x3EB0C6F7A0B5ED8D;   # 1e-6

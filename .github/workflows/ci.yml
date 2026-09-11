@@ -241,6 +241,32 @@ jobs:
             exit 1
           fi
 
+      - name: Broken provenance markers
+        # ⛔ ADDED 2.19.0. The `measurements` job below runs `--diff` and is PULL
+        # REQUESTS ONLY, because a full-tree scan exits 1 on 284 unmarked paragraphs
+        # of pre-existing debt. BROKEN markers are a different quantity: a marker
+        # naming a file that does not exist, or one typo'd out of shape, is wrong
+        # regardless of any debt — and the tree-wide count is **0** right now, so
+        # gating it is free and fail-closed.
+        # ⚠ THIS EXISTS BECAUSE --diff COULD NOT SEE ITS OWN DOMINANT CASE. A
+        # path-resolution failure was filed against the PARAGRAPH'S first line, so a
+        # bad marker appended to an EXISTING comment block was intersected away as
+        # "not added". Measured, one marker, two placements: appended to the block at
+        # src/vec3.cyr:126 `--diff HEAD` exited 0 and printed "Every measurement claim
+        # added on this branch names its source"; the same marker as its own new
+        # paragraph exited 1. The script now records the marker's own line and both
+        # placements fail — but --diff still only ever sees a branch's own lines, and
+        # this step sees the whole tree.
+        # ⚠ Greps rather than trusting the exit code: the full scan exits 1 on the
+        # unmarked-claim debt, so its status cannot distinguish the two failures.
+        run: |
+          out=$(./scripts/check-measurements.sh 2>&1 || true)
+          if echo "$out" | grep -q 'BROKEN PROVENANCE MARKER'; then
+            echo "$out" | grep -A3 'BROKEN PROVENANCE MARKER'
+            echo "::error::a [measured: ...] marker names a missing file or is malformed"
+            exit 1
+          fi
+
       - name: Build
         run: |
           mkdir -p build

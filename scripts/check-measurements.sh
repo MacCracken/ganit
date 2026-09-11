@@ -559,7 +559,8 @@ def paragraphs(path):
                 cur = Para(path); out.append(cur)
             cur.lines.append((no, c))
             m = MARKER.search(c)
-            if m: cur.markers.append(m.group(1).strip())
+            # (line, source) -- the LINE is load-bearing, see report_bad_markers.
+            if m: cur.markers.append((no, m.group(1).strip()))
             prev_no = no
     return out
 
@@ -626,10 +627,26 @@ for path in SCAN:
         if p.markers:
             satisfied += len(hits)
             marked_paras += 1
-            for src in p.markers:
+            for mno, src in p.markers:
                 ok, note = check_marker(src)
                 if not ok:
-                    bad_marker.append((p.path, p.lines[0][0], src, note))
+                    # ⛔ 2.19.0 -- THIS RECORDED `p.lines[0][0]`, THE PARAGRAPH'S FIRST
+                    # LINE, AND THAT MADE --diff MODE BLIND TO ITS OWN DOMINANT CASE.
+                    # --diff keeps a finding only when its (path, line) is in the set of
+                    # lines the branch ADDED. A marker naming a file that does not exist,
+                    # appended to an EXISTING comment block, was therefore filed against a
+                    # PRE-EXISTING line and intersected away -- while the malformed-marker
+                    # arm forty lines below already recorded the marker's own line and was
+                    # caught. Measured on this tree with one bad marker, two placements:
+                    # appended to the paragraph at src/vec3.cyr:126, `--diff HEAD` exits 0
+                    # and prints "Every measurement claim added on this branch names its
+                    # source" (the full-tree scan exits 1 and counts it); the identical
+                    # marker as its own new paragraph exits 1. ⚠ It was worse than silent:
+                    # the fabricated marker SATISFIED the real claim beside it, so tree-wide
+                    # unmarked fell by one and the gate got GREENER for the bad edit.
+                    # CI runs --diff only, so this was the shape a PR could always land.
+                    # [measured: scripts/check-measurements.sh two-placement probe, 2026-09-10]
+                    bad_marker.append((p.path, mno, src, note))
         else:
             unmarked_paras += 1
             pid = (path, p.lines[0][0])

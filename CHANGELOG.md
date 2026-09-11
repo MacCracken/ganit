@@ -16,6 +16,24 @@
   `fixup_table` **3092 → 2933 (−159)**, `code_size` **748,024 → 747,320 B (−704)** across 170
   reference sites. Right rule, wrong reason.
 
+### Fixed
+- **provenance markers** — 3 broken `[measured: ...]` markers, now **0**. One was introduced by this
+  release's own enum bite: a marker wrapped across two comment lines, which the single-line `MARKER`
+  regex reports as malformed. The other two (`src/collision_core.cyr`, `tests/modules.tcyr`) named
+  `issues/...` paths while the script resolves **from the repo root**, so both needed the
+  `docs/development/` prefix — a diagnosis the roadmap had already corrected once, after an earlier
+  draft proposed a fix that would have left both markers broken.
+- **scripts/check-measurements.sh** — `--diff` mode was **blind to its own dominant case**. A
+  path-resolution failure was recorded against `p.lines[0][0]`, the PARAGRAPH's first line, while the
+  malformed-marker arm recorded the marker's own line; `--diff` keeps a finding only when its
+  `(path, line)` is in the set of lines the branch added, so a bad marker appended to an **existing**
+  comment block was intersected away. Measured with one marker in two placements: appended to the
+  block at `src/vec3.cyr:126`, `--diff HEAD` exited **0** and printed *"Every measurement claim added
+  on this branch names its source"*; the identical marker as its own new paragraph exited **1**.
+  ⚠ It was worse than silent — the fabricated marker **satisfied the real claim beside it**, so
+  tree-wide unmarked fell by one and the gate got *greener* for the bad edit. Now records the marker's
+  line; both placements fail, and a clean tree still exits 0.
+
 ### Added
 - **tests/hisab.tcyr** — 15 assertions pinning each error code's exact **value** and all **66 pairs**
   for distinctness, plus that every failure code is negative. Written because a mutation sweep found
@@ -24,6 +42,17 @@
   `HSB_ERR_INVALID_TRANSFORM` — two distinct failures under one code. Every existing assertion
   compares a return against a code *by name*, so both sides move together and the value cancels out.
   6 mutants now installed, 6 killed. Suites **3940 → 3955**.
+- **CI** — a `Broken provenance markers` gate, running on **push**, not only on pull requests.
+  ⛔ **This is the half that matters, and the reason is that the existing job has never run.** The
+  `measurements` job is wired `if: github.event_name == 'pull_request'`; the repository has **0 pull
+  requests in its entire history** and **303 workflow runs, the last 100 all `event: push`** (checked
+  against the GitHub API, not inferred), so `--diff` — including the blindness fixed above — has
+  executed exactly **zero** times. The marker this release shipped broken was caught by running the
+  script by hand. Broken markers are gated tree-wide because they are wrong regardless of the 284
+  unmarked paragraphs of pre-existing debt that keep the full scan from gating on its exit code; the
+  step greps, since that exit code cannot distinguish the two failures. Verified to fire on **both**
+  shapes — a missing-file path on an existing paragraph, and a two-line malformed marker — and to
+  recover.
 - **CI** — a `Duplicate global/enum symbols` gate. The conversion's stated safety benefit was real but
   **wired to nothing**: a duplicate `var` global is completely silent (last definition wins, the wrong
   value ships), while a duplicate enum member does warn at file:line — but `cyrius check --with-deps`
