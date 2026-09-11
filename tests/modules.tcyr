@@ -5636,7 +5636,7 @@ test_group("collision_core: triangulate_polygon");
 # does not define, and a partial return is inside the documented contract. What
 # was wrong was the sentence, and it lived only in the CHANGELOG where no gate
 # could reach it. This assertion puts the direction where a test can hold it.
-# [measured: the 2.7.0 tree vs HEAD, both built on cyrius 6.6.2, 2026-09-11]
+# [measured: the 2.7.0 tree vs HEAD, both built on cyrius 6.6.2, 2026-09-10]
 var _tpx = vec_new();
 vec_push(_tpx, hvec2_new(0, 0));
 vec_push(_tpx, hvec2_new(F64_ONE, F64_TWO));
@@ -7011,7 +7011,7 @@ var fc_d = f64_div(f64_from(999999995), f64_from(1000000000));   # 0.999999995
 # `expr_to_str` rendered `1000000000000000`. The cap was a guard against `f64_to`
 # saturating, set ~3 binades below where saturation starts, so it matched neither
 # the contract nor the hazard. The two renderers now agree at every magnitude.
-# [measured: 10961 renderings vs an exact oracle, 0 mismatches, 2026-09-11]
+# [measured: 10961 renderings vs an exact oracle, 0 mismatches, 2026-09-10]
 
 var _xi_b = alloc(INT_EXACT_BUF);
 
@@ -8073,10 +8073,13 @@ assert(f64_lt(s9u, F64_TWO) == 1, "sdf_smooth_union stays at or below max(d1, d2
 # ================================================================
 # ⛔ A conformal point is NEVER exactly null in the ep/em basis, and outside a
 # narrow band that is a WRONG ANSWER rather than a representation nicety. The
-# canonical use is distance recovery, P1.P2 = -d^2/2; measured over random
-# full-mantissa coordinates, the relative error in the recovered d^2 reaches
-# ~2000x at coordinate scale 2^-30 and ~32000x at 2^30, with 300 of 300 samples
-# past 1e-6 at both ends.
+# canonical use is distance recovery, P1.P2 = -d^2/2; over 2000 random
+# full-mantissa pairs per binade the relative error in the recovered d^2 has
+# MEDIAN 46.4x at 2^-30 and 48.7x at 2^+30, against exactly 0 at 2^0.
+# ⚠ A MEDIAN, never a maximum: rel ~ 2ab/(a-b)^2 diverges as the pair closes, so
+# the max is whatever the nearest pair drawn happened to be (5.6e7 / 2.6e8 here).
+# An earlier draft quoted maxima as ~2000x and ~32000x and read an asymmetry into
+# them; the tails are symmetric.
 # ⚠ THE EARLIER FILING CALLED THIS "small coordinates". It is BOTH tails, and the
 # small-only reading was an artifact of a POWER-OF-TWO sweep -- dyadic x makes
 # x^2 exact, which is the only reason the failure looked banded. ⛔ The first
@@ -8088,7 +8091,7 @@ assert(f64_lt(s9u, F64_TWO) == 1, "sdf_smooth_union stays at or below max(d1, d2
 # ⭐ No arithmetic fix exists: at x = 2^-30 the correctly-rounded (q-1)/2 IS
 # exactly -1/2, asserted below. The remedy is the null basis (n0/ninf), filed on
 # the roadmap. These assertions pin the band so it cannot silently narrow.
-# [measured: per-binade d^2 recovery sweep, 400 samples/binade, 2026-09-11]
+# [measured: per-binade d^2 recovery sweep, 400 samples/binade, 2026-09-10]
 
 # The representational limit as a bit-exact fact rather than a tolerance: at
 # x = 2^-30 the ep/em coefficients round to exactly -1/2 and +1/2, so what should

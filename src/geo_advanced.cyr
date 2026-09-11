@@ -2602,7 +2602,8 @@ fn cga_dual(x) {
 
 # Blade inverse: B⁻¹ = reverse(B) / (B · reverse(B))_scalar. Returns the zero
 # multivector for a null blade (norm² ≈ 0) rather than dividing by zero — e.g.
-# conformal points are null, so projecting onto them is undefined.
+# conformal points are null IN EXACT ARITHMETIC, so projecting onto them is
+# undefined. ⚠ In f64 they are null only near |x| ~ 1 — see `cga_point`.
 fn cga_blade_inverse(b) {
     var nsq = cga_norm_sq(b);
     # ⛔ ONE LINE DOING TWO DIFFERENT JOBS. `nsq` is a norm SQUARED (degree two in
@@ -2610,8 +2611,16 @@ fn cga_blade_inverse(b) {
     # asked both "can I divide by this" and "is this blade null" — which need
     # different tests.
     # ⭐ (1) THE DIVISION fails only at zero, and this case is common rather than
-    # theoretical: nsq is bit-exactly 0 for every conformal point, and for an
-    # origin sphere of radius below ~1.05e-8 or above ~1e8.
+    # theoretical: nsq is 0 for an exactly-null blade, and for an origin sphere of
+    # radius below ~1.05e-8 or above ~1e8.
+    # ⛔ 2.20.0 — THIS READ "nsq is bit-exactly 0 for EVERY conformal point", WHICH
+    # IS FALSE, and it sat 70 lines above `cga_point`, whose own comment now says
+    # the opposite. Measured over 2000 random full-mantissa pairs per binade, a
+    # conformal point is bit-exactly null only at |x| ~ 1; the median relative
+    # error in what should be zero is 46x at 2^-30 and 49x at 2^+30. The guard
+    # below is unaffected — it tests the value it is about to divide by, which is
+    # the right thing whether or not the blade is exactly null — but the sentence
+    # asserted a property the same release measured to be untrue.
     # [measured: docs/audit/2026-09-09-epsilon-open.json]
     if (f64_lt(f64_abs(nsq), F64_TINY) == 1) { return cga_mv_zero(); }
     # ⭐ (2) NULLNESS is relative to the blade's own magnitude, and the bound is
@@ -2660,9 +2669,18 @@ fn cga_reject(x, b) {
 # makes x^2 exact, which is the only reason the failure looked banded.
 #
 # ⛔ THE CONSEQUENCE IS MEASURED, NOT INFERRED. The canonical use of a null point
-# is distance recovery, P1·P2 = -d^2/2. Relative error in the recovered d^2 is
-# **2^11 (~2000x) at 2^-30 and 2^15 (~32000x) at 2^30**, with 300 of 300 samples
-# past 1e-6 at both ends. The bands where it is clean (0 of 400 samples past the
+# is distance recovery, P1·P2 = -d^2/2. Over 2000 random full-mantissa pairs per
+# binade the relative error in the recovered d^2 has **median 46.4x at 2^-30 and
+# 48.7x at 2^+30** (p90 1491 and 1809; p99 1.3e5 and 2.0e5), against a median of
+# **exactly 0 at 2^0**.
+# ⚠ QUOTE A MEDIAN HERE, NEVER A MAXIMUM. `rel ~ 2ab/(a-b)^2` diverges as the two
+# points close, so the maximum is set by the nearest pair the sample happened to
+# draw — 5.6e7 and 2.6e8 in this run, and different with any other seed. An
+# earlier version of this comment said "2^11 (~2000x) at 2^-30 and 2^15 (~32000x)
+# at 2^30", which were maxima over 300 samples presented as if they were the
+# effect AND as if the two tails differed by 16x. **The tails are symmetric** —
+# 46 against 49 — and the asymmetry was an artifact of taking a max.
+# The bands where it is clean (0 of 400 samples past the
 # stated tolerance, seeded per binade so the result is reproducible):
 #     1e-9 relative: 2^-7 .. 2^3
 #     1e-6 relative: 2^-11 .. 2^10
@@ -2682,7 +2700,7 @@ fn cga_reject(x, b) {
 # two — so P·P cancels the SAME computed q against itself and is exactly 0. That
 # is a change to the 32-slot blade product tables, not to this function, and is
 # filed on the roadmap rather than folded in here.
-# [measured: per-binade d^2 recovery sweep, 400 samples/binade, 2026-09-11]
+# [measured: per-binade d^2 recovery sweep, 400 samples/binade, 2026-09-10]
 fn cga_point(x, y, z) {
     var mv = cga_mv_zero();
     var x2 = f64_add(f64_add(f64_mul(x, x), f64_mul(y, y)), f64_mul(z, z));

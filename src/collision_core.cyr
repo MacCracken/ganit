@@ -759,7 +759,7 @@ fn _col_ring_is_convex(vertices, idx, remaining, p, ccw) {
 # ⚠ The marker below deliberately does not START with "2.7.0": the provenance
 # gate parses a leading token containing a dot as a FILE PATH, and reports a
 # version number there as a file that does not exist.
-# [measured: the 2.7.0 tree vs HEAD, both built on cyrius 6.6.2, 2026-09-11]
+# [measured: the 2.7.0 tree vs HEAD, both built on cyrius 6.6.2, 2026-09-10]
 fn triangulate_polygon(vertices, n) {
     var result = vec_new();
     # ⛔ `n` IS A RESTATEMENT OF `vec_len(vertices)` AND WAS NEVER CHECKED, so a

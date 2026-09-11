@@ -14,8 +14,20 @@
 # scripts/check-constants.sh now fails on any duplicate top-level global.
 var F64_NINE   = 0x4022_0000_0000_0000;  # 9.0
 
-# 1e-30 as f64 (for zero-secant detection in monotone cubic)
-var F64_1E_NEG30 = 0x39B4_484B_FEE9_F7CF;
+# ⛔ 2.20.0 — MIS-TRANSCRIBED, AND INVISIBLE TO THE GATE THAT EXISTS TO CATCH THAT.
+# The bits read `0x39B4_484B_FEE9_F7CF`, which decodes to 9.99999999979426e-31,
+# not the 1e-30 the comment claims — a relative error of 2.06e-11. It shipped from
+# 2.7.x onward. ⚠ The numeric consequence is nil (it is a zero-secant threshold at
+# :753, and 2e-11 relative on a 1e-30 floor changes no branch), but the defect
+# class is exactly the seven mis-transcribed constant tables that caused the gate
+# to be written in 2.6.12.
+# ⚠ It was invisible because `check-constants.sh`'s DECL regex requires the
+# documenting comment to TRAIL the declaration, and this one sat on the line
+# above — so it was neither verified nor reported as skipped. The gate now falls
+# back to a preceding comment line; this declaration keeps its comment trailing
+# as well, so it is covered twice over.
+
+var F64_1E_NEG30 = 0x39B4_484B_FEEB_C2A0;   # 1e-30
 
 # ================================================================
 # HELPERS: flat f64 array manipulation

@@ -524,22 +524,30 @@ fn ad_abs(t, a) {
 # shared tape, then call `ad_grad_into` once per residual — is **O(m^2) by
 # construction**, because call j scans a tape that already holds all m residuals.
 # ⭐ Resetting the tape per residual is O(m) and needs NO new API: `ad_tape_reset`,
-# re-push the n inputs, build residual j, sweep. Measured at n = 8, box quiet:
-#     m      shared      per-tape
-#     256     461 us       215 us
-#     512    1240 us       391 us
-#    1024    4667 us       775 us
-#    2048   18398 us      1474 us
-# Shared QUADRUPLES per doubling of m (3.76x, 3.94x); per-tape DOUBLES (1.98x,
-# 1.90x). ⚠ **The ratio is therefore not a constant and must not be quoted as
-# one** — it is 2x at m = 256 and 12x at m = 2048, and grows without bound. An
+# re-push the n inputs, build residual j, sweep. Measured at n = 8, load ~1.0:
+#     m      shared      per-tape     ratio
+#     256    1214 us       227 us       5x
+#     512    4860 us       387 us      12x
+#    1024   17779 us       748 us      23x
+#    2048   67232 us      1425 us      47x
+# Shared QUADRUPLES per doubling of m (4.00x, 3.66x, 3.78x); per-tape DOUBLES
+# (1.70x, 1.93x, 1.90x). ⚠ **The ratio is therefore not a constant and must not be
+# quoted as one** — 5x at m = 256, 47x at m = 2048, growing without bound. An
 # earlier note recorded this as "6.8x faster", which is one point on a curve.
+# ⛔ AND THE FIRST VERSION OF THIS TABLE WAS MEASURED ON A TRUNCATED TAPE. It read
+# 461/1240/4667/18398 us for the shared driver — about 2.6x low — because the
+# probe sized its tape `n + 4*m + 8` while the loop pushes `n + m*n` nodes, so
+# `_ad_push` returned AD_FULL for half the residuals and the driver silently
+# measured half the work. The benchmark rows shipped with the same bug and the
+# same release documented it. **A driver that reports success while overflowing
+# its own tape is a benchmark on its own truncated case.** The probe now asserts
+# the push did not return AD_FULL.
+# [measured: shared vs per-tape drivers, n=8, m=64..2048, correctly-sized tapes]
 # ⚠ Halving the clear would not fix it: the SCAN is O(root) on its own, so the
 # driver stays quadratic. Making this sub-linear needs a reachability sweep rather
 # than a linear scan, which is an algorithm change, not a tuning knob.
 # ⚠ The full clear is load-bearing as written: `ad_grad_of(t, i)` for i above
 # `root` must read 0, and it has no way to know where the last sweep started.
-# [measured: shared vs per-tape Jacobian drivers, n=8, m=64..2048, 2026-09-11]
 fn ad_grad(t, root) {
     if (ad_ok(t, root) == 0) { return HSB_ERR_INVALID_INPUT; }
     var n = AdTape_n(t);

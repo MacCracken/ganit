@@ -294,9 +294,14 @@ fn bench_grad_rev_16() {
 # be read as a PAIR and never as a constant speedup: the ratio is m-dependent --
 # measured 2x at m = 256 and 12x at m = 2048, growing without bound, because one
 # side is quadratic and the other linear.
-# [measured: shared vs per-tape drivers, n=8, m=64..2048, 2026-09-11]
+# [measured: shared vs per-tape drivers, n=8, m=64..2048, 2026-09-10]
 fn _b_jac_shared() {
-    var t = ad_tape_new(_B_JAC_N + 4 * _B_JAC_M + 8);
+    # ⛔ SIZED FROM THE NODES ACTUALLY PUSHED, NOT A GUESS. The first version of
+    # this row read `_B_JAC_N + 4 * _B_JAC_M + 8` = 1040 while the loop pushes
+    # N inputs + M*(N-1 adds + 1 mul) = 2056, so `_ad_push` returned AD_FULL for
+    # half the residuals and the benchmark measured HALF THE WORK while reporting
+    # success — a benchmark on its own truncated case.
+    var t = ad_tape_new(_B_JAC_N + _B_JAC_M * _B_JAC_N + 8);
     if (t == 0) { return 0; }
     var ids = _b_jac_ids;
     for (var i = 0; i < _B_JAC_N; i = i + 1) {
@@ -1217,8 +1222,6 @@ fn main() {
     bench_batch("jet_capsule",     &bench_jet_capsule,   2000, 200);
     bench_batch("grad_fwd_16",     &bench_grad_fwd_16,   200, 200);
     bench_batch("grad_rev_16",     &bench_grad_rev_16,   200, 200);
-    bench_batch("jac_rev_shared_256",  &bench_jac_rev_shared_256,   5, 5);
-    bench_batch("jac_rev_pertape_256", &bench_jac_rev_pertape_256,  5, 5);
     bench_batch("ray_obb",         &bench_ray_obb,       2000, 200);
     bench_batch("ray_aabb_diag",   &bench_ray_aabb_diag, 2000, 200);
     bench_batch("ray_capsule_diag", &bench_ray_capsule_diag, 2000, 200);
@@ -1315,6 +1318,21 @@ fn main() {
     bench("num_dst_1024",         &bench_num_dst_1024,           10);
     bench("num_dct_1023",         &bench_num_dct_1023,           10);
     bench("num_dst_1023",         &bench_num_dst_1023,           10);
+
+    # ⛔ THESE TWO REGISTER LAST, AND THAT POSITION IS LOAD-BEARING. They build
+    # tapes under a bump allocator that NEVER FREES, so wherever they sit they
+    # shift the heap for every row registered after them. `bench-history.csv` has
+    # the record: with them registered 19th/20th the two runs at d740afc read
+    # **480 ns and 396 ns**; with them last, **668 ns**; and the previous release
+    # read 706 ns. So adding a benchmark moved an untouched module's row by
+    # **-32% to -44%**, and moving them last restores it to within 5% of baseline.
+    # ⚠ Quote the CSV, not a bench run: an earlier draft cited 484/696/709 ns from
+    # ad-hoc `cyrius bench` invocations, none of which appear in the record.
+    # ⚠ Registering last cannot remove the effect, only confine it to rows that do
+    # not exist. Anything added after this line inherits the perturbation.
+    # [measured: with/without these two rows on one binary, 2026-09-10]
+    bench_batch("jac_rev_shared_256",  &bench_jac_rev_shared_256,   5, 5);
+    bench_batch("jac_rev_pertape_256", &bench_jac_rev_pertape_256,  5, 5);
 
     println("=== done ===");
     return 0;

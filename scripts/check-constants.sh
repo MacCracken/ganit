@@ -52,6 +52,18 @@ verbose = sys.argv[1] == "1"
 # not match them -- so the gate skipped a quarter of the constants while
 # printing a confident "verified" count. Found by the 2.7.0 re-audit.
 DECL = re.compile(r'^\s*var\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(0[xX][0-9A-Fa-f_]{1,25})\s*;\s*#\s*(.*?)\s*$')
+# ⛔ 2.20.0 -- THE REGEX ABOVE REQUIRES THE COMMENT TO TRAIL, AND ONE DECLARATION
+# DOCUMENTED ITSELF ON THE LINE ABOVE INSTEAD. `src/calc_ext.cyr`'s F64_1E_NEG30
+# matched neither the verified nor the skipped path: it was INVISIBLE, so the gate
+# reported a confident "158/158" over a population of 159. And it was
+# mis-transcribed -- 9.99999999979426e-31 against a documented 1e-30. That is the
+# same shape as the 2026-08-04 finding recorded above (a regex that silently
+# skipped a quarter of the constants while printing a confident count), which is
+# why the fallback below exists rather than a one-line fix to that declaration.
+# ⚠ The fallback is deliberately narrow: it applies ONLY when the declaration has
+# no trailing comment AND the immediately preceding line is a comment.
+DECL_NC = re.compile(r'^\s*var\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(0[xX][0-9A-Fa-f_]{1,25})\s*;\s*$')
+COMMENT_ONLY = re.compile(r'^\s*#\s*(.*?)\s*$')
 # Constants whose comment is prose, not a value.
 SKIP_RE = re.compile(r'\b(nan|inf|sentinel|mask|bits? pattern|magic|seed|hash)\b', re.I)
 
@@ -126,10 +138,22 @@ def decimal_tolerance(tok, truncated):
 results, errors, skipped = [], [], []
 
 for path in sorted(glob.glob('src/*.cyr')):
+    prev_comment = None
     for lineno, line in enumerate(open(path, encoding='utf-8', errors='replace'), 1):
         m = DECL.match(line)
-        if not m: continue
-        name, hexlit, comment = m.group(1), m.group(2), m.group(3)
+        if not m:
+            # Fallback: a declaration documented on the line ABOVE. See DECL_NC.
+            mn = DECL_NC.match(line)
+            if mn and prev_comment:
+                name, hexlit, comment = mn.group(1), mn.group(2), prev_comment
+                m = None
+            else:
+                c = COMMENT_ONLY.match(line)
+                prev_comment = c.group(1) if c else None
+                continue
+        else:
+            name, hexlit, comment = m.group(1), m.group(2), m.group(3)
+        prev_comment = None
         if len(hexlit.replace('_', '')) - 2 < 12:   # short masks/flags, not f64 payloads
             continue
         actual = as_double(hexlit)

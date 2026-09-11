@@ -72,7 +72,7 @@ var _SYM_2_POW_63 = 0x43E0_0000_0000_0000;   # 9223372036854775808
 # Checked against an independent exact oracle: the 961 binades 2^63..2^1023 plus
 # 10,000 signed random mantissas, compared digit-for-digit with Python's
 # arbitrary-precision `int(float)`. 10,961 renderings, 0 mismatches.
-# [measured: exact-oracle sweep, 10961 renderings, 0 mismatches, 2026-09-11]
+# [measured: exact-oracle sweep, 10961 renderings, 0 mismatches, 2026-09-10]
 fn _sym_int_exact_buf(val, buf) {
     # Defensive: inf/nan never reach here (their integrality test fails first),
     # but a renderer that can emit 309 digits should not be asked to guess.

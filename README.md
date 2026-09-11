@@ -48,7 +48,7 @@ stdlib = ["string", "fmt", "alloc", "vec", "str", "math", "ganita", "tagged", "f
 
 [deps.hisab]
 git     = "https://github.com/MacCracken/hisab.git"
-tag     = "2.18.0"
+tag     = "2.20.0"
 modules = ["dist/hisab.cyr"]   # ~1.0 MB self-contained bundle (all 35 modules)
 # `dist/hisab.deps` is tracked as of 2.9.2 -- `cyrius deps` reads that sidecar and
 # pulls in hisab's own 15 stdlib leaves, so the `stdlib` list above only has to
@@ -120,7 +120,7 @@ See [docs/architecture/overview.md](docs/architecture/overview.md) for the full 
 
 | Metric | Value |
 |--------|-------|
-| Version | 2.18.0 |
+| Version | 2.20.0 |
 | Library | 35 modules, ~25,127 lines of Cyrius |
 | Tests | 3937 assertions across 5 suites |
 | Benchmarks | 72 operations |

@@ -2,24 +2,129 @@
 
 ## [Unreleased]
 
+## [2.20.0] - 2026-09-10 — the four repairs 2.19.0 measured, and what measuring them again showed
+
+2.19.0's decision fan-out proved four filed items were **repairs, not decisions**. Two were repaired
+and two turned out to be characterisations — because measuring them a second time showed the filing
+was wrong about the size, the direction, or the safety of the obvious fix. Suites **3955 → 3983**.
+
+⛔ **ABOVE 2^63 BOTH SYMBOLIC RENDERERS RETURNED ONE WRONG CONSTANT FOR EVERY INPUT.** `f64_to`
+saturates, so `expr_to_str` and `sym_to_latex` each answered **-9223372036854775808** for 1e19, 1e20 and
+2^100 alike — a *negative* number for a *positive* input — and because the LaTeX path writes the sign
+separately, `sym_to_latex(-1e19)` was the malformed `{--9223372036854775808.000000}`. The filing called
+this "30 diverging values" and framed the *deletion* as the risk; it is the entire finite band above
+2^63 and the shipped code was what was wrong. ⛔ **The row named one function; the grep found two** —
+`expr_to_str` carries the same saturation with no magnitude guard at all, the sixth release running
+this class was wider than its filing. Repaired by exact decimal expansion with **no f64 arithmetic in
+the result**, verified against Python's arbitrary-precision `int(float)`: **10,961 renderings, 0
+mismatches**.
+
+⛔ **A CONFORMAL POINT IS NEVER EXACTLY NULL, AND THAT IS A WRONG ANSWER, NOT A REPRESENTATION
+NICETY.** Distance recovery — `P₁·P₂ = −d²/2`, what CGA points are *for* — has median **46.4× at 2^-30 and 48.7× at 2^+30** — symmetric tails, against a median of exactly 0 at 2^0. ⚠ A MEDIAN, never a maximum: `rel ~ 2ab/(a−b)²` diverges as the pair closes, so the max is set by the nearest pair drawn (5.6e7 / 2.6e8 here). An earlier draft quoted those maxima as "~2000× and ~32000×" and read a 16× tail asymmetry into them; there is none. ⛔ The filing
+said "small coordinates"; it is **both tails**, and the small-only reading was an artifact of a
+power-of-two sweep, since dyadic `x` makes `x²` exact. ⭐ No arithmetic fix exists and that is proven:
+at x = 2^-30 the correctly-rounded `(q−1)/2` **is** exactly −1/2. The remedy is a basis change, filed
+as its own release.
+
+⛔ **THE SUBNORMAL-SVD CLAIM WAS FALSE IN BOTH HALVES AND HAD BEEN ASSERTING SOMETHING REASSURING SINCE
+2.18.0.** It read *"the remaining 28 are the GRID, NOT A DEFECT ... the routine reports
+`HSB_ERR_NO_CONVERGENCE`, which is the honest answer."* Over 8 fixtures × 52 subnormal scales against a
+120-digit oracle built from the **actual rounded entries**: **270 of 416 rows return `HSB_ERR_NONE` and
+only 57 are right** — 213 confident wrong answers, worst **9.78×**, one smallest singular value
+returned as exactly **zero**. ⛔ The old sweep could not have seen it: every fixture was
+upper-triangular. A **general** 2×2 is **1 correct / 86 loud / 121 silent**. ⚠ No repair shipped: the
+obvious fix was refuted on scope in 2.19.0, and this row's own instruction was *"widen the fixture
+family before touching the code."* That family now exists as the repair's acceptance test.
+
+⛔ **AND A CHANGELOG SENTENCE HAD THE `triangulate_polygon` DIVERGENCE BACKWARDS, TWICE, FOR THIRTEEN
+RELEASES.** Built the **2.7.0 tree and HEAD side by side on cyrius 6.6.2**: the reproducer gives **old 9
+(COMPLETE) → new 6 (PARTIAL)**. The new code *bails where the old succeeded*. The decision is unchanged;
+the sentence was wrong, and it lived **only in the CHANGELOG, where no gate could reach it**. It is now
+in the source beside the code and pinned by an **exact**-length assertion — the old `<= 9` form is
+satisfied by the complete answer too, which is how a backwards claim survived thirteen releases.
+
+⭐ **`ad_grad`'S JACOBIAN TRAP IS O(m²), AND THE "6.8×" IN ITS FILING WAS ONE POINT ON A CURVE.** The
+sweep clears and scans the full tape every call, so a shared-tape driver **quadruples** per doubling of
+m (461 → 1240 → 4667 → 18398 µs) while the per-residual reset **doubles** (215 → 391 → 775 → 1474). The
+ratio is 2× at m = 256 and 12× at m = 2048 and grows without bound, so it must never be quoted as a
+constant. No code change: the scan is O(root) on its own, so halving the clear leaves it quadratic.
+
+⛔ **AND ADDING A BENCHMARK CHANGED A DIFFERENT BENCHMARK BY 31%.** The two new `jac_rev` rows build
+tapes under a bump allocator that **never frees**, and when they registered 19th/20th they shifted the
+heap for everything after: `kdtree_radius_4k` read **484 ns with them and 696 ns without**, against 706
+ns in the previous release. Without checking, 2.20.0 would have claimed a **44% speedup in a module it
+never touched**. They register last now, and `kdtree_radius_4k` reads 709 ns against its 706 ns
+baseline. ⚠ Registering last confines the effect; it cannot remove it, and anything added after that
+line inherits it.
+
+⚠ **Four of my own instruments were wrong before the thing measured was.** A `1 << (73 - e)` scale
+factor reached a shift of 71 that x86 **masks to 7**, so a 416-row sweep silently swept duplicates; a
+CGA fixture used *dyadic* values — the exact artifact it was written to document — and built them with
+the **subnormal** shift form at a normal exponent, testing a value 288 decades off and yielding a NaN
+that `f64_gt(NaN, 1)` read as "not wrong"; a provenance marker claimed agreement over "2098 binades", a
+figure carried from an unrelated sweep before anything ran (it is 1024); and a rename was called inert
+on a checksum I had not shown could detect a change — two positive controls later, it could.
+
+⛔ **THE RELEASE WAS AUDITED BEFORE TAGGING, BY FIVE INDEPENDENT RE-MEASUREMENTS, AND IT FOUND A DEFECT
+THIS RELEASE HAD SHIPPED PLUS SIX WRONG FIGURES IN ITS OWN NOTES.** ⛔ **The two benchmarks 2.20.0 adds
+overflowed their own tape**: `_b_jac_shared` sized it `N + 4*M + 8` = 1040 while the loop pushes
+`N + M*N` = 2056 nodes, so `_ad_push` returned `AD_FULL` for half the residuals and the row measured
+**half the work while reporting success** — a benchmark on its own truncated case. The scratch probe had
+the same bug, so the whole O(m²) table was ~2.6× low on the shared side. Both fixed; the probe now
+asserts the push did not overflow. ⛔ **A hand-encoded constant was mis-transcribed and the gate could
+not see it**: `src/calc_ext.cyr`'s `F64_1E_NEG30` decodes to 9.99999999979426e-31 against a documented
+1e-30, and because its comment sat on the line *above* the declaration, `check-constants.sh`'s regex
+matched neither the verified nor the skipped path — it reported a confident **158/158 over a population
+of 159**. That is the same shape as the 2026-08-04 finding the gate's own header records. The value is
+corrected, the gate now falls back to a preceding comment line, and it is **verified to fire on the
+previously-blind shape**: 159/159 clean, exit 1 with the offender named when a wrong value is planted
+either way round. ⚠ The numeric consequence was nil — it is a zero-secant threshold — but it is exactly
+the class the gate exists to catch. ⛔ **And the CGA magnitudes in this release were maxima presented as
+the effect.** `rel ~ 2ab/(a−b)²` diverges as the pair closes, so "~2000× and ~32000×" were the nearest
+pairs two 300-sample draws happened to contain, and the 16× "tail asymmetry" read into them does not
+exist: over 2000 pairs per binade the **medians are 46.4× and 48.7×**, symmetric, against exactly 0 at
+2^0. Also corrected: the SVD factor (28 / 2.5964 = **10.8×**, not the 9.3× obtained by rounding the
+truth to 3 first), the kdtree perturbation figures (quoted from ad-hoc runs; the CSV records **480 and
+396 ns perturbed against 668 ns after the reorder**), the jac_rev first-run pair (**337.3/184.8 µs** per
+the record), and the claim that `ad_grad` has "zero in-tree callers" — it has five.
+⚠ **Several 2.20.0 figures are not reproducible in-tree** and are flagged rather than quietly kept: the
+10,961-rendering oracle sweep, the 416-row SVD classification, the CGA band sweeps and the `ad_grad`
+scaling table all come from probes that were never committed. The in-tree assertions pin specific cases
+from each, but a future reader cannot re-derive the aggregate figures without rebuilding the harness.
+
+**No performance change is claimed, and the control is what says so.** Against the 2.19.0 release run,
+2.20.0 is **median +2.73%, mean +2.81%, zero rows past 10%** — quieter than running the identical
+binary twice (median +2.82%, **13** rows past 10%). The board drifted uniformly under a load of 1.34.
+⚠ Two runs recorded at `d740afc` carry the benchmark-ordering perturbation described above and should
+not be compared against.
+
+
 ### Changed
 - **autodiff** — `ad_grad`'s cost and the Jacobian trap it creates are now documented where a caller
   will see them. The sweep is O(tape length) **twice** — it clears every adjoint, then scans from
   `root` down to index 0, both over the full tape rather than the part `root` reaches. So the obvious
   multi-residual Jacobian driver (build all m residuals on one shared tape, sweep per residual) is
   **O(m²) by construction**. The per-residual `ad_tape_reset` form is O(m) and needs **no new API**.
-  Measured at n = 8 on a quiet box: shared **quadruples** per doubling of m (461 → 1240 → 4667 → 18398 µs
-  at m = 256/512/1024/2048), per-tape **doubles** (215 → 391 → 775 → 1474 µs).
-  ⚠ **The ratio is not a constant and must not be quoted as one** — 2× at m = 256, 12× at m = 2048,
+  Measured at n = 8, load ~1.0: shared **quadruples** per doubling of m (1214 → 4860 → 17779 → 67232 µs
+  at m = 256/512/1024/2048), per-tape **doubles** (227 → 387 → 748 → 1425 µs).
+  ⛔ **The first version of this table was measured on a TRUNCATED TAPE and read ~2.6× low on the shared
+  side** (461/1240/4667/18398 µs): the probe sized its tape `n + 4*m + 8` while the loop pushes
+  `n + m*n` nodes, so `_ad_push` returned `AD_FULL` for half the residuals and the driver measured half
+  the work while reporting success. The two benchmark rows this release adds shipped with the same bug;
+  both are fixed and the probe now asserts the push did not overflow.
+  ⚠ **The ratio is not a constant and must not be quoted as one** — 5× at m = 256, 47× at m = 2048,
   growing without bound. An earlier note recorded this as "6.8× faster", which is one point on a curve;
   the finding is the *scaling*, not the point.
   ⚠ No code change: halving the clear would not help, because the scan is O(root) on its own, so the
   driver stays quadratic. Making it sub-linear needs a reachability sweep instead of a linear scan —
   an algorithm change, not a tuning knob. And the full clear is load-bearing as written, since
   `ad_grad_of(t, i)` above `root` must read 0 and has no way to know where the last sweep began.
-  ⚠ `ad_grad` has **zero in-tree callers** and the fan-out measured **zero `dual_*`/`ad_*` call sites
-  across all 14 consuming repos**, so nothing is hitting this today — it is a trap set for the first
-  caller who pairs reverse mode with `opt_levenberg_marquardt`, which is its documented purpose.
+  ⚠ **Correction to an earlier draft of this entry**: it said `ad_grad` has "zero in-tree callers".
+  It has five — `ad_grad_into` at `src/autodiff.cyr:631` (a public entry point documented as *"the form
+  an optimizer's gradient closure wants"*) plus four test sites. What is true is the narrower claim:
+  **no other library module calls it**, and the 2.19.0 fan-out found no `dual_*`/`ad_*` call site in any
+  consuming repo. So nothing is hitting the quadratic path today — it is a trap set for the first caller
+  who builds a Jacobian by pairing reverse mode with `opt_levenberg_marquardt`, its documented purpose.
 
 ### Fixed
 - **collision_core** — a local named `pn` in `triangulate_polygon`'s neighbour-refresh block shadowed
@@ -69,8 +174,7 @@
 - **geo_advanced** — `cga_point`'s nullity is now a **measured, tested property with a stated band**
   rather than an open question. ⛔ **It is a wrong answer, not a representation nicety.** The canonical
   use of a null conformal point is distance recovery, `P₁·P₂ = −d²/2`; measured over random
-  full-mantissa coordinates the relative error in the recovered `d²` reaches **~2000× at coordinate
-  scale 2^-30 and ~32000× at 2^30**, with 300 of 300 samples past 1e-6 at both ends. Clean bands, each
+  full-mantissa coordinates the relative error in the recovered `d²` has median **46.4× at 2^-30 and 48.7× at 2^+30** — symmetric tails, against a median of exactly 0 at 2^0. ⚠ A MEDIAN, never a maximum: `rel ~ 2ab/(a−b)²` diverges as the pair closes, so the max is set by the nearest pair drawn (5.6e7 / 2.6e8 here). An earlier draft quoted those maxima as "~2000× and ~32000×" and read a 16× tail asymmetry into them; there is none. Clean bands, each
   0 of 400 samples past its tolerance: **1e-9 → 2^-7..2^3, 1e-6 → 2^-11..2^10, 1e-4 → 2^-15..2^13**.
   A band quoted without its tolerance means nothing, so all three are recorded.
   ⛔ **The filing said "small coordinates, below ~2^-26.5". It is BOTH tails**, and the small-only
@@ -112,7 +216,8 @@
 ### Added
 - **tests/hisab.bcyr** — `jac_rev_shared_256` and `jac_rev_pertape_256` (**72 → 74 benchmarks**), so
   the quadratic/linear gap is tracked rather than rediscovered. ⚠ They must be read as a **pair** and
-  never as a constant speedup, for the reason above. First run: 328.6 µs against 180.0 µs.
+  never as a constant speedup, for the reason above. First recorded run (`bench-history.csv`, d740afc): **337.3 µs against 184.8 µs**. ⚠ An earlier
+  draft quoted 328.6/180.0 from an ad-hoc run that appears in no row of the record.
 - **tests/modules.tcyr** — 3 assertions pinning the self-intersecting divergence (**3980 → 3983**).
   ⚠ The length is asserted **exactly** (`== 6`), not `<= 9`: the old `<= 9` form is satisfied by the
   complete answer too, so it could not tell the two directions apart — which is how a backwards claim
@@ -139,7 +244,7 @@
   then asserted the 1e-6 band against `_SYM_EPS` (2^-50) and failed 22 of 22. **The band is real; the
   fixture was wrong three different ways first.** 3 mutants on `cga_point` killed, no-op control
   survived.
- (**3955 → 3966**): 2^63 itself,
+- **tests/modules.tcyr** — 11 assertions pinning exact integer rendering (**3955 → 3966**): 2^63 itself,
   1e19, 2^100 at 31 digits, the 1e15 contract case, and a 1024-binade agreement sweep between the two
   renderers whose **pair count is asserted too**, because a loop that ran zero times would report zero
   disagreements. ⚠ The negative case is asserted on its exact string, not its magnitude — the defect

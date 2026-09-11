@@ -225,7 +225,7 @@ fn _latex_fmt_const(sb, val) {
         # ⚠ The first draft of this marker said "2098 binades" -- a figure carried
         # over from an unrelated sweep before anything was run. Measured: the two
         # renderers agree on 1024 of 1024 integral binades, 2^0 .. 2^1023.
-        # [measured: sym_to_latex vs expr_to_str, 1024/1024 binades agree, 2026-09-11]
+        # [measured: sym_to_latex vs expr_to_str, 1024/1024 binades agree, 2026-09-10]
         var abs_val = f64_abs(val);
         if (f64_lt(abs_val, _SYM_2_POW_63) == 1) {
             str_builder_add_int(sb, f64_to(val));

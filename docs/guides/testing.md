@@ -4,13 +4,13 @@
 
 ```bash
 # All test suites
-cyrius test tests/hisab.tcyr        # 416 smoke/integration tests
-cyrius test tests/foundation.tcyr   # 351 exhaustive foundation type tests
-cyrius test tests/modules.tcyr      # 1775 per-module tests
+cyrius test tests/hisab.tcyr        # 496 smoke/integration tests
+cyrius test tests/foundation.tcyr   # 413 exhaustive foundation type tests
+cyrius test tests/modules.tcyr      # 2065 per-module tests
 cyrius test tests/edge_cases.tcyr   # 233 edge case + boundary tests
 cyrius test tests/abuse.tcyr        # 776 hostile-input tests
 
-# Benchmarks (72 operations)
+# Benchmarks (74 operations)
 cyrius bench tests/hisab.bcyr
 
 # Fuzz self-test — `cyrius fuzz` walks tests/ as of cyrius 6.5.6; before that it
@@ -30,9 +30,9 @@ cyrius build tests/hisab.fcyr build/hisab_fuzz && build/hisab_fuzz
 | `hisab.tcyr` | 416 | Cross-module integration — ODE, optimization, sparse, PGS/LCP, ray-sphere, Newton, Euler identity, CGA (contraction/dual/projection), mat_new_guarded, diffgeo (sectional/Weyl/transport/Jacobi/forms), decomposition (SVD, QR, eigen), Krylov (GMRES) |
 | `edge_cases.tcyr` | 233 | Degenerate inputs (zero-length normalize, singular inverse, parallel ray, division by zero, undefined variables) plus pinned invariants (bit-math/overflow/determinism, allocation-overflow guards — including the **upstream stdlib `mat_new`** CWE-190 contract, added 2.6.11) |
 | `abuse.tcyr` | 776 | Hostile input, added 2.9.0 — negative indices and counts, zero/one/overflow-prone dimensions, non-conformable operands, the designed-0 return of every capped constructor, degenerate geometry (zero extents/radii, coincident points, NaN/±Inf coordinates), bounded-work guarantees, and **canary checks** (a guard block allocated immediately after each out-buffer, asserted untouched — the only way a write-past-the-end shows up as a failure rather than as luck). Surfaced 11 real defects on public entry points, held in a known-defect register rather than deleted |
-| **Total** | **3574** | |
+| **Total** | **3983** | |
 
-## Benchmarks (72 operations)
+## Benchmarks (74 operations)
 
 | Category | Benchmarks |
 |----------|-----------|
