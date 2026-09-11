@@ -2,8 +2,31 @@
 
 *(Original title, retained because it is what the body argues and what 2.9.3 refuted: "EPA's certified exit is never taken — `strict` tests the SEED tetrahedron, but the lower-bound argument is about the FINAL polytope".)*
 
-**Status:** 🟡 **OPEN — but RE-DIAGNOSED 2026-08-09 (2.9.3), and BOTH proposed repairs are now
-measured and rejected.** Read the *Re-diagnosis* section before the body: this file's central claim
+**Status:** 🟢 **CLOSED 2026-09-10 (2.19.0). The trade was DECLINED on measurement in 2.18.0, and
+2.19.0 then repaired the thing this file was circling — which was never the certificate.**
+
+⛔ **THE SEED TRADE IS 36,000x LESS ACCURATE, WHICH INVERTS THIS FILE'S OWN PREMISE.** Against the
+exact closed form `ra + rb - |c1 - c2|`, `gjk_epa_3d` is 1.41e-16 mean / 5.57e-16 worst; the
+"upgrade" this file proposes is 1.70e-14 / 2.03e-11. The mechanism was already written in the
+source: `_epa_polish`'s own comment says the depth is a `min` over probed directions and every probe
+is an upper bound, so the polish **can only lower an upper bound** — and certifying is an EARLY-OUT
+that skips it. Two of this file's four claims are false as written.
+
+⭐ **AND RE-MEASURING THE TRADE FOUND SOMETHING LARGER THAN THE TRADE.** `mpr_penetration` and
+`gjk_epa_3d` disagreed by up to **1.65e-05** on ordinary overlapping spheres (mean 1.37e-08 against
+1.41e-16), both public, one-line truth — and `_ag_mprpen` compared only their RETURN CODES, so
+nothing in the suite compared their depths. **The cause was the POLISH BUDGET, not the certificate
+and not either mechanism this file argues.** 38 of `_EPA_POLISH_ITER`'s 64 rounds are mandatory
+halvings from 0.25 rad to `EPSILON_F64`, leaving 26 for moves, and the portal seed starts further
+out so it was the one running out. 2.19.0 set it to 128: the two entry points now agree to the last
+bits, **1.65e-05 -> 6.3e-16**, with no measurable cost (256 changes nothing further).
+
+⚠ **Kept as a record of the method, not the conclusion.** Every substantive claim in the body below
+has now been refuted by measurement — first the "certified exit is never taken" claim in 2.9.3, then
+both proposed repairs in 2.18.0. **A filing is a hypothesis, and this one was wrong three times.**
+
+*(Previous status: 🟡 OPEN — RE-DIAGNOSED 2026-08-09 (2.9.3), BOTH proposed repairs
+measured and rejected.)* Read the *Re-diagnosis* section before the body: this file's central claim
 is wrong, and its Proposed fix produces incorrect depths.
 **Placement:** still wants its own cycle, but the cycle is now about the *sphere family*, not the
 certificate — see Re-diagnosis §3.

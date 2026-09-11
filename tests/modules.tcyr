@@ -9625,7 +9625,7 @@ while (epc_i < 12) {
 #     support evaluation per seed and measures **+19.4% on gjk_epa_sphere_box**
 #     (150.4 us vs 125.6 us, three runs each, non-overlapping) -- for a change
 #     that alters no returned answer, since the polish already recovers it.
-# [measured: docs/development/issues/2026-08-06-epa-certificate-tests-the-seed-not-the-polytope.md]
+# [measured: docs/development/issues/archived/2026-08-06-epa-certificate-tests-the-seed-not-the-polytope.md]
 #
 # The count therefore stays at 12, and this assertion still pins it.
 assert_eq(_GA_EPA_POLISH_COUNT - epc_base, epc_calls,
@@ -9640,7 +9640,7 @@ test_group("2.18.0 EPA: the seed trade, declined on measurement");
 # judgement call whose price was unknown (its "+19.4%" was void — the baseline had
 # moved 125.6 us -> 78.5 us). Re-measured on the 2.17.0 tree, the price is not the
 # cost, it is the ACCURACY:
-# [measured: docs/development/issues/2026-08-06-epa-certificate-tests-the-seed-not-the-polytope.md]
+# [measured: docs/development/issues/archived/2026-08-06-epa-certificate-tests-the-seed-not-the-polytope.md]
 #
 #   random overlapping spheres, judged against the EXACT closed form
 #   depth = ra + rb - |c1 - c2| — no reference implementation, no harness:

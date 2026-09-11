@@ -325,7 +325,15 @@ sections. It has been declared out of scope twice, which is a stronger claim tha
 
 ### The norm tier [2.17.0]
 
-- [ ] **[2.17.0]** **Scaled norms on the exp side.** ⛔ Found in 2.16.0 **by a mutant that would not
+- [x] ✅ **DONE IN 2.17.0 — and this checkbox was simply never ticked.** Re-verified 2026-09-10
+      on the shipped tree: `su2_exp` and `so3_from_axis_angle` both route through `_lie_norm3`,
+      which divides by the largest component before squaring. **The round-trip floor measured
+      2^-537 -> 2^-1022 — the entire normal range.** ⚠ The probe was checked against the defect
+      before being believed: built with 2.16.0's `lie.cyr` (which has no `_lie_norm3`) and
+      everything else current, it reports exactly **2^-537**, the figure this row states — so it
+      discriminates rather than always printing the same number.
+      [measured: su2_log(su2_exp((0,0,2^-e))) bit-exact sweep, e = 1..1073, both trees, 2026-09-10]
+      **[2.17.0]** **Scaled norms on the exp side.** ⛔ Found in 2.16.0 **by a mutant that would not
       die** — a fixture built to reach `se3_log`'s coefficient never did, and chasing why turned up
       the norm. `su2_exp` and `so3_from_axis_angle` compute `sqrt(x² + y² + z²)` directly, so a
       component below ~2^-511 makes the SQUARE underflow to zero and the whole rotation collapses.
@@ -357,7 +365,16 @@ sections. It has been declared out of scope twice, which is a stronger claim tha
       `hquat_length_sq` directly, and a 2.17.0 comment claiming it "routes through" the repaired
       norm was false. **A comment asserting a call graph is a claim like any other.**
 
-- [ ] **[2.17.0]** **`cga_norm` (`geo_advanced.cyr:2438`) — confirmed defect, fix DEFERRED with
+- [x] ✅ **DONE IN 2.18.0 — the deferral's two conditions were both met, and this checkbox was
+      never ticked.** This row required "a scale construction that works for subnormals and a
+      `f64_div` rescale"; the shipped `cga_norm` has both — `_ga_pow2_floor` falls through to a
+      mantissa-bit walk when the exponent field is 0, and the rescale divides rather than
+      multiplying by a reciprocal, so the `0 * Inf` that produced the predicted NaN cannot arise.
+      **Measured on 51 subnormal max coefficients (2^-1023 .. 2^-1073): 0 NaN, 0 fabricated zeros,
+      51 finite positive results.** The row predicted NaN for exactly this input.
+      ⚠ The line number in the heading below is stale — `cga_norm` is at `geo_advanced.cyr:2557`.
+      [measured: subnormal-coefficient sweep through cga_norm, 2026-09-10]
+      **[2.17.0]** **`cga_norm` (`geo_advanced.cyr:2438`) — confirmed defect, fix DEFERRED with
       reasons.** `sqrt(|cga_norm_sq(mv)|)` over a 32-slot multivector, so there is no pair of legs
       to scale. All three verifiers independently measured the obvious power-of-two rescale
       returning **NaN** for a subnormal max coefficient (`mx & 0x7FF0…` is 0 for a subnormal, the
@@ -622,7 +639,7 @@ them is not a defect at all.
       the certificate wording: spheres do not certify *even with a strict seed*, and they pay the
       upgrade's cost without gaining anything. **Root cause not established.** This is what the
       filing is actually about now.
-      → [`issues/2026-08-06-epa-certificate-tests-the-seed-not-the-polytope.md`](issues/2026-08-06-epa-certificate-tests-the-seed-not-the-polytope.md)
+      → [`issues/archived/2026-08-06-epa-certificate-tests-the-seed-not-the-polytope.md`](issues/archived/2026-08-06-epa-certificate-tests-the-seed-not-the-polytope.md)
 
 - [x] ✅ **DONE — and the cause was the POLISH BUDGET, not either of the two things this row guessed.**
       `_epa_polish` starts at 0.25 rad and breaks when its step falls under `EPSILON_F64`, which takes

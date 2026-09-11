@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+### Changed
+- **roadmap / issues** — swept for orphaned work before 3.0.0. **Two items still tagged `[2.17.0]`
+  were already fixed and their checkboxes never ticked**, both re-verified on the shipped tree rather
+  than closed on inspection:
+  - *Scaled norms on the exp side* — `su2_exp` and `so3_from_axis_angle` route through `_lie_norm3`
+    since 2.17.0. The round-trip floor measures **2^-537 → 2^-1022**, the whole normal range.
+    ⚠ The probe was checked against the defect first: rebuilt with 2.16.0's `lie.cyr` and everything
+    else current it reports exactly **2^-537**, the figure the row states — so it discriminates
+    rather than always printing the same number.
+  - *`cga_norm` deferred with reasons* — 2.18.0 met both stated conditions (a scale construction that
+    works for subnormals, and an `f64_div` rescale rather than a reciprocal multiply). Measured over
+    51 subnormal max coefficients (2^-1023..2^-1073): **0 NaN, 0 fabricated zeros, 51 finite
+    positive**, where the row predicted NaN. ⚠ Its cited line was stale (`:2438` → `:2557`).
+- **issues/** — the last open filing, `2026-08-06-epa-certificate-tests-the-seed-not-the-polytope.md`,
+  is closed and archived; **28 of 28 archived, none open.** It had recorded neither 2.18.0's decline
+  of the seed trade (the "upgrade" measures **36,000× less accurate**) nor 2.19.0's repair of the
+  thing it was actually circling — the polish budget, `mpr_penetration` **1.65e-05 → 6.3e-16**.
+  Every substantive claim in that filing has now been refuted by measurement, three times over.
+
 ### Fixed
 - **CI** — the `Discarded #must_use results` step was **red from the commit that added it** (2.19.0's
   `#must_use` bite) and stayed red through the 2.19.0 tag, failing with **no output whatsoever**: no grep
